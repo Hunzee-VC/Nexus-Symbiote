@@ -1,0 +1,109 @@
+flowchart TD
+  classDef low fill:#eef8f0,stroke:#2e7d32,color:#123d1c
+  classDef medium fill:#fff8e1,stroke:#f9a825,color:#4a3500
+  classDef high fill:#ffebee,stroke:#c62828,color:#4a0707
+  classDef critical fill:#3b0d0d,stroke:#b71c1c,color:#ffffff
+  capability_mcp_tool_invocation_5183a5b3["Capability: mcp_tool_invocation"]
+  class capability_mcp_tool_invocation_5183a5b3 medium
+  framework_langchain_dfbd9f75["Framework: langchain"]
+  class framework_langchain_dfbd9f75 low
+  framework_openai_agents_df2df4f8["Framework: openai_agents"]
+  class framework_openai_agents_df2df4f8 low
+  framework_vercel_ai_sdk_61ea2e49["Framework: vercel_ai_sdk"]
+  class framework_vercel_ai_sdk_61ea2e49 low
+  mcp_risk_database_access_e544ba45["MCP Risk: database_access"]
+  class mcp_risk_database_access_e544ba45 medium
+  mcp_risk_secrets_env_access_e7dd7f45["MCP Risk: secrets_env_access"]
+  class mcp_risk_secrets_env_access_e7dd7f45 high
+  mcp_risk_unknown_custom_server_486b5fef["MCP Risk: unknown_custom_server"]
+  class mcp_risk_unknown_custom_server_486b5fef low
+  mcp_server_notion_8fec531d["MCP Server: notion"]
+  class mcp_server_notion_8fec531d high
+  mcp_server_supabase_de819118["MCP Server: supabase"]
+  class mcp_server_supabase_de819118 high
+  mcp_server_vendored_x_29cd4807["MCP Server: vendored-x"]
+  class mcp_server_vendored_x_29cd4807 low
+  model_claude_opus_4_1_8a3d545e["Model: claude-opus-4.1"]
+  class model_claude_opus_4_1_8a3d545e low
+  model_gemini_2_5_pro_947b3d3d["Model: gemini-2.5-pro"]
+  class model_gemini_2_5_pro_947b3d3d low
+  model_gpt_4_1_7a754770["Model: gpt-4.1"]
+  class model_gpt_4_1_7a754770 low
+  model_gpt_4_1_mini_73f9738c["Model: gpt-4.1-mini"]
+  class model_gpt_4_1_mini_73f9738c low
+  model_gpt_4o_mini_255e72b4["Model: gpt-4o-mini"]
+  class model_gpt_4o_mini_255e72b4 low
+  model_mistral_large_latest_86cac5a3["Model: mistral-large-latest"]
+  class model_mistral_large_latest_86cac5a3 low
+  model_o3_mini_3f70dfb3["Model: o3-mini"]
+  class model_o3_mini_3f70dfb3 low
+  model_qwen2_c0ff16ea["Model: qwen2"]
+  class model_qwen2_c0ff16ea low
+  policy_high_config_claude_desktop_config_json_high_risk_mcp_server_detected_without_policy_restrictions_notion_2bb86729["Policy: high-risk MCP server detected without policy restrictions: notion<br/>config/claude_desktop_config.json"]
+  class policy_high_config_claude_desktop_config_json_high_risk_mcp_server_detected_without_policy_restrictions_notion_2bb86729 high
+  policy_high_config_claude_desktop_config_json_high_risk_mcp_server_detected_without_policy_restrictions_supabase_0838a2da["Policy: high-risk MCP server detected without policy restrictions: supabase<br/>config/claude_desktop_config.json"]
+  class policy_high_config_claude_desktop_config_json_high_risk_mcp_server_detected_without_policy_restrictions_supabase_0838a2da high
+  policy_low_prompts_system_prompt_md_prompt_file_detected_without_security_policy_110b97f4["Policy: prompt file detected without security policy<br/>prompts/system.prompt.md"]
+  class policy_low_prompts_system_prompt_md_prompt_file_detected_without_security_policy_110b97f4 low
+  policy_medium_config_claude_desktop_config_json_mcp_config_detected_without_policy_documentation_4ebee28d["Policy: MCP config detected without policy documentation<br/>config/claude_desktop_config.json"]
+  class policy_medium_config_claude_desktop_config_json_mcp_config_detected_without_policy_documentation_4ebee28d medium
+  policy_medium_vendor_pkg_cursor_mcp_json_mcp_config_detected_without_policy_documentation_14381b7e["Policy: MCP config detected without policy documentation<br/>vendor/pkg/.cursor/mcp.json"]
+  class policy_medium_vendor_pkg_cursor_mcp_json_mcp_config_detected_without_policy_documentation_14381b7e medium
+  provider_anthropic_0b89784c["Provider: anthropic"]
+  class provider_anthropic_0b89784c low
+  provider_gemini_a4b025ff["Provider: gemini"]
+  class provider_gemini_a4b025ff low
+  provider_openai_a029ae0c["Provider: openai"]
+  class provider_openai_a029ae0c low
+  reachable_langchain_mcp_tool_invocation_config_claude_desktop_config_json_7552c0fb["Reachable: langchain -&gt; mcp_tool_invocation<br/>config/claude_desktop_config.json"]
+  class reachable_langchain_mcp_tool_invocation_config_claude_desktop_config_json_7552c0fb high
+  reachable_langchain_mcp_tool_invocation_vendor_pkg_cursor_mcp_json_8212b96a["Reachable: langchain -&gt; mcp_tool_invocation<br/>vendor/pkg/.cursor/mcp.json"]
+  class reachable_langchain_mcp_tool_invocation_vendor_pkg_cursor_mcp_json_8212b96a low
+  reachable_openai_agents_mcp_tool_invocation_config_claude_desktop_config_json_285923ed["Reachable: openai_agents -&gt; mcp_tool_invocation<br/>config/claude_desktop_config.json"]
+  class reachable_openai_agents_mcp_tool_invocation_config_claude_desktop_config_json_285923ed high
+  reachable_openai_agents_mcp_tool_invocation_vendor_pkg_cursor_mcp_json_ee7c626f["Reachable: openai_agents -&gt; mcp_tool_invocation<br/>vendor/pkg/.cursor/mcp.json"]
+  class reachable_openai_agents_mcp_tool_invocation_vendor_pkg_cursor_mcp_json_ee7c626f low
+  reachable_vercel_ai_sdk_mcp_tool_invocation_config_claude_desktop_config_json_901103c0["Reachable: vercel_ai_sdk -&gt; mcp_tool_invocation<br/>config/claude_desktop_config.json"]
+  class reachable_vercel_ai_sdk_mcp_tool_invocation_config_claude_desktop_config_json_901103c0 high
+  reachable_vercel_ai_sdk_mcp_tool_invocation_vendor_pkg_cursor_mcp_json_bd866094["Reachable: vercel_ai_sdk -&gt; mcp_tool_invocation<br/>vendor/pkg/.cursor/mcp.json"]
+  class reachable_vercel_ai_sdk_mcp_tool_invocation_vendor_pkg_cursor_mcp_json_bd866094 low
+  framework_langchain_dfbd9f75 -- enables --> capability_mcp_tool_invocation_5183a5b3
+  framework_langchain_dfbd9f75 -- reaches --> reachable_langchain_mcp_tool_invocation_config_claude_desktop_config_json_7552c0fb
+  framework_langchain_dfbd9f75 -- reaches --> reachable_langchain_mcp_tool_invocation_vendor_pkg_cursor_mcp_json_8212b96a
+  framework_openai_agents_df2df4f8 -- enables --> capability_mcp_tool_invocation_5183a5b3
+  framework_openai_agents_df2df4f8 -- reaches --> reachable_openai_agents_mcp_tool_invocation_config_claude_desktop_config_json_285923ed
+  framework_openai_agents_df2df4f8 -- reaches --> reachable_openai_agents_mcp_tool_invocation_vendor_pkg_cursor_mcp_json_ee7c626f
+  framework_vercel_ai_sdk_61ea2e49 -- enables --> capability_mcp_tool_invocation_5183a5b3
+  framework_vercel_ai_sdk_61ea2e49 -- reaches --> reachable_vercel_ai_sdk_mcp_tool_invocation_config_claude_desktop_config_json_901103c0
+  framework_vercel_ai_sdk_61ea2e49 -- reaches --> reachable_vercel_ai_sdk_mcp_tool_invocation_vendor_pkg_cursor_mcp_json_bd866094
+  mcp_server_notion_8fec531d -- exposes --> capability_mcp_tool_invocation_5183a5b3
+  mcp_server_notion_8fec531d -- risk --> mcp_risk_secrets_env_access_e7dd7f45
+  mcp_server_notion_8fec531d -- reachable --> reachable_langchain_mcp_tool_invocation_config_claude_desktop_config_json_7552c0fb
+  mcp_server_notion_8fec531d -- reachable --> reachable_openai_agents_mcp_tool_invocation_config_claude_desktop_config_json_285923ed
+  mcp_server_notion_8fec531d -- reachable --> reachable_vercel_ai_sdk_mcp_tool_invocation_config_claude_desktop_config_json_901103c0
+  mcp_server_supabase_de819118 -- exposes --> capability_mcp_tool_invocation_5183a5b3
+  mcp_server_supabase_de819118 -- risk --> mcp_risk_database_access_e544ba45
+  mcp_server_supabase_de819118 -- risk --> mcp_risk_secrets_env_access_e7dd7f45
+  mcp_server_supabase_de819118 -- reachable --> reachable_langchain_mcp_tool_invocation_config_claude_desktop_config_json_7552c0fb
+  mcp_server_supabase_de819118 -- reachable --> reachable_openai_agents_mcp_tool_invocation_config_claude_desktop_config_json_285923ed
+  mcp_server_supabase_de819118 -- reachable --> reachable_vercel_ai_sdk_mcp_tool_invocation_config_claude_desktop_config_json_901103c0
+  mcp_server_vendored_x_29cd4807 -- exposes --> capability_mcp_tool_invocation_5183a5b3
+  mcp_server_vendored_x_29cd4807 -- risk --> mcp_risk_unknown_custom_server_486b5fef
+  mcp_server_vendored_x_29cd4807 -- reachable --> reachable_langchain_mcp_tool_invocation_vendor_pkg_cursor_mcp_json_8212b96a
+  mcp_server_vendored_x_29cd4807 -- reachable --> reachable_openai_agents_mcp_tool_invocation_vendor_pkg_cursor_mcp_json_ee7c626f
+  mcp_server_vendored_x_29cd4807 -- reachable --> reachable_vercel_ai_sdk_mcp_tool_invocation_vendor_pkg_cursor_mcp_json_bd866094
+  model_claude_opus_4_1_8a3d545e -- uses --> provider_gemini_a4b025ff
+  model_claude_opus_4_1_8a3d545e -- uses --> provider_openai_a029ae0c
+  model_gemini_2_5_pro_947b3d3d -- uses --> provider_gemini_a4b025ff
+  model_gemini_2_5_pro_947b3d3d -- uses --> provider_openai_a029ae0c
+  model_gpt_4_1_mini_73f9738c -- uses --> provider_gemini_a4b025ff
+  model_gpt_4_1_mini_73f9738c -- uses --> provider_openai_a029ae0c
+  model_gpt_4o_mini_255e72b4 -- uses --> provider_openai_a029ae0c
+  model_o3_mini_3f70dfb3 -- uses --> provider_gemini_a4b025ff
+  model_o3_mini_3f70dfb3 -- uses --> provider_openai_a029ae0c
+  reachable_langchain_mcp_tool_invocation_config_claude_desktop_config_json_7552c0fb -- reaches --> capability_mcp_tool_invocation_5183a5b3
+  reachable_langchain_mcp_tool_invocation_vendor_pkg_cursor_mcp_json_8212b96a -- reaches --> capability_mcp_tool_invocation_5183a5b3
+  reachable_openai_agents_mcp_tool_invocation_config_claude_desktop_config_json_285923ed -- reaches --> capability_mcp_tool_invocation_5183a5b3
+  reachable_openai_agents_mcp_tool_invocation_vendor_pkg_cursor_mcp_json_ee7c626f -- reaches --> capability_mcp_tool_invocation_5183a5b3
+  reachable_vercel_ai_sdk_mcp_tool_invocation_config_claude_desktop_config_json_901103c0 -- reaches --> capability_mcp_tool_invocation_5183a5b3
+  reachable_vercel_ai_sdk_mcp_tool_invocation_vendor_pkg_cursor_mcp_json_bd866094 -- reaches --> capability_mcp_tool_invocation_5183a5b3

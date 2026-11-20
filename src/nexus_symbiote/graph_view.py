@@ -20,7 +20,8 @@ from __future__ import annotations
 import base64
 import heapq
 import html
-from collections import Counter
+import re
+from collections import Counter, deque
 from collections.abc import Sequence
 from dataclasses import dataclass
 from operator import attrgetter
@@ -236,6 +237,17 @@ def _clip(text: str, limit: int) -> str:
     return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
+_RECORDED = re.compile(r" \(recorded \d+ times\)$")
+
+
+def _clip_gap(gap: str) -> str:
+    """Clip a gap to DETAIL_CHARS, keeping the record count a grouped failure ends with."""
+    suffix = _RECORDED.search(gap)
+    if suffix is None or len(gap) <= DETAIL_CHARS:
+        return _clip(gap, DETAIL_CHARS)
+    return _clip(gap[: suffix.start()], DETAIL_CHARS - len(suffix[0])) + suffix[0]
+
+
 def build_view(bom: AIBOM, *, max_nodes: int, focus: str | None = None) -> GraphView:
     """The view of ``bom``, or of the potential blast radius of ``focus`` in it.
 
@@ -400,7 +412,8 @@ def _exposure(
     A first pass over each kept source ranks every (source, sink) pair it reaches by sink
     weight, then distance, without building its route, and keeps the best MAX_PATHS; a
     second pass rebuilds only those paths.
-    The work is linear in kept sources times nodes and edges, plus MAX_PATHS paths.
+    Choosing which sources to keep is one search back from the sinks, linear in nodes and
+    edges; the rest is linear in kept sources times nodes and edges, plus MAX_PATHS paths.
     """
     successors: list[set[int]] = [set() for _ in nodes]
     first_edge: dict[tuple[int, int], Edge] = {}
@@ -411,6 +424,35 @@ def _exposure(
     rank = {node.index: rank for rank, node in enumerate(sorted(nodes, key=attrgetter("ref")))}
     weight = [node.weight for node in nodes]
     sources = [node.index for node in nodes if node.type in _SOURCE_TYPES]
+    # Search the sources whose best path ranks highest, and the kept paths are the best of
+    # every source's. A path ranks by its sink's weight, then its length, then the source,
+    # so a source's best path ends at the heaviest sink it reaches, at the shortest
+    # distance. If a source is cut, 200 sources each have a path that ranks above any of
+    # its own. A breadth-first search back from the sinks, heaviest first, finds the
+    # weight and distance of every node and visits each node once: whatever reaches a
+    # heavier sink was visited before, and no shortest path to a sink of this weight
+    # passes through it. A source that reaches no sink has no path and is cut first.
+    predecessors: list[list[int]] = [[] for _ in nodes]
+    for origin, successors_of in enumerate(adjacency):
+        for successor in successors_of:
+            predecessors[successor].append(origin)
+    sinks_by_weight: dict[int, list[int]] = {}
+    for index, value in enumerate(weight):
+        if value:
+            sinks_by_weight.setdefault(value, []).append(index)
+    heaviest = [0] * len(nodes)
+    distance = [len(nodes)] * len(nodes)
+    for level in sorted(sinks_by_weight, reverse=True):
+        queue = deque(index for index in sinks_by_weight[level] if not heaviest[index])
+        for index in queue:
+            heaviest[index], distance[index] = level, 0
+        while queue:
+            current = queue.popleft()
+            for previous in predecessors[current]:
+                if not heaviest[previous]:
+                    heaviest[previous], distance[previous] = level, distance[current] + 1
+                    queue.append(previous)
+    sources.sort(key=lambda source: (-heaviest[source], distance[source], rank[source]))
     kept = sources[:MAX_SOURCES]
     best: list[tuple[int, int, int, int, int, int]] = []
     total = 0
@@ -454,7 +496,7 @@ def _coverage(claim: CompletenessClaim | None) -> Coverage:
         collection=assessment.status.value,
         scan_failures=len(claim.scan_failures) if claim is not None else 0,
         surfaces_excluded=len(claim.surfaces_excluded) if claim is not None else 0,
-        gaps=tuple(_clip(gap, DETAIL_CHARS) for gap in gaps[:MAX_GAPS]),
+        gaps=tuple(_clip_gap(gap) for gap in gaps[:MAX_GAPS]),
         gaps_omitted=max(0, len(gaps) - MAX_GAPS),
     )
 

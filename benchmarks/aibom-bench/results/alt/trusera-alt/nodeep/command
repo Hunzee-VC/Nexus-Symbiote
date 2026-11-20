@@ -1,0 +1,1 @@
+/aibom-run/venvs/ai-bom/bin/ai-bom scan /aibom-run/work/trusera-alt/corpus --quiet --no-telemetry --max-file-size 64 -f json -o /aibom-run/results3/trusera-alt/nodeep/report.json 

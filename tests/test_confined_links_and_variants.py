@@ -273,12 +273,13 @@ def test_path_with_a_nul_character_is_a_refused_read_not_an_error(tmp_path):
 
 
 def test_symlink_to_a_target_beyond_the_depth_limit_is_refused(tmp_path):
-    deep = Path(*["d"] * 40)
+    # The default depth is 64, so the target sits beyond it and within a raised limit.
+    deep = Path(*["d"] * 70)
     (tmp_path / deep).mkdir(parents=True)
     (tmp_path / deep / "f.md").write_text("x")
     (tmp_path / "link.md").symlink_to(deep / "f.md")
     (tmp_path / "linkdir").symlink_to(deep, target_is_directory=True)
-    with ConfinedCollection(tmp_path, [], max_depth=64) as files:
+    with ConfinedCollection(tmp_path, [], max_depth=128) as files:
         walked = [path.as_posix() for path in files.iter_files()]
     assert "link.md" in walked
     failures: list[str] = []
@@ -287,7 +288,7 @@ def test_symlink_to_a_target_beyond_the_depth_limit_is_refused(tmp_path):
         assert files.read_bytes("linkdir/f.md") is None
         list(files.iter_files("."))
     too_deep = (
-        "symlink target is too deep; depth limit of 32 exceeded; raise it with --limit depth=N"
+        "symlink target is too deep; depth limit of 64 exceeded; raise it with --limit depth=N"
     )
     assert f"link.md: {too_deep}" in failures
     assert f"linkdir/f.md: {too_deep}" in failures

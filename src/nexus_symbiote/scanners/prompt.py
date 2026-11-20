@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import bisect
 import codecs
 import hashlib
 import re
+import sys
 import unicodedata
 from collections import deque
 from collections.abc import Collection
 from pathlib import Path, PurePosixPath
+from typing import Any
 
 from nexus_symbiote import limits
 from nexus_symbiote.core.enums import RiskSeverity, TrustTier
@@ -24,10 +27,12 @@ from nexus_symbiote.scanners.credential_files import MARKDOWN_SUFFIXES as _MARKU
 from nexus_symbiote.scanners.credential_files import credential_gap as _credential_gap
 from nexus_symbiote.scanners.credential_files import credential_shaped as _credential_shaped
 from nexus_symbiote.scanners.mcp import SOURCE_BINDING_KEY_ENV
+from nexus_symbiote.scanners.mcp_sources import SOURCE_SEARCH_SKIPPED
 from nexus_symbiote.scanners.source_binding import BindingError, value_binding
 from nexus_symbiote.utils.confined import CollectionError, ConfinedCollection, fold_name
 from nexus_symbiote.utils.markdown import hidden_text, text_outside_code
 from nexus_symbiote.utils.terminal import neutralize
+from nexus_symbiote.utils.toml import loads as toml_loads
 
 INVISIBLE_CHARS: dict[str, str] = {
     "\u200b": "ZERO WIDTH SPACE",
@@ -191,7 +196,9 @@ def _line_separator_risks(counts: dict[str, int], source_name: str) -> list[Risk
     ]
 
 
-def detect_invisible_characters(content: str, source_name: str) -> list[RiskAssessment]:
+def detect_invisible_characters(
+    content: str, source_name: str, *, decoded: str | None = None
+) -> list[RiskAssessment]:
     """Detect invisible Unicode characters that could be used for prompt trojans.
 
     Every format character (category Cf), variation selector, blank-rendering filler
@@ -201,11 +208,60 @@ def detect_invisible_characters(content: str, source_name: str) -> list[RiskAsse
     medium; the others are high. A zero-width joiner inside an emoji sequence, a
     presentation selector after a pictograph, a byte-order mark that starts the text
     and the England, Scotland and Wales flag sequences are ordinary text.
+
+    ``decoded`` holds what a prompt template's escapes decode to (see ``_escaped_text``),
+    where an escape spells a character its raw text does not hold; each character counts
+    as often as the text that holds it more often, so one written raw counts once.
     """
     counts, tags = _hidden_counts(content, at_start=True)
+    separators = _line_separator_counts(content)
+    if decoded is not None:
+        escaped, escaped_tags = _hidden_counts(decoded, at_start=False)
+        for char, count in escaped.items():
+            counts[char] = max(counts.get(char, 0), count)
+        tags = max(tags, escaped_tags)
+        for char, count in _line_separator_counts(decoded).items():
+            separators[char] = max(separators.get(char, 0), count)
     return [
         *_hidden_character_risks(counts, tags, source_name),
-        *_line_separator_risks(_line_separator_counts(content), source_name),
+        *_line_separator_risks(separators, source_name),
+    ]
+
+
+def definition_text_risks(definition: object, source_name: str) -> list[RiskAssessment]:
+    """Rate the hidden characters in a tool definition as in an instruction file.
+
+    A host puts a tool's description and schema text in front of the model as it does an
+    instruction file, so the same characters hide the same text. Every string and key
+    of the definition is read except the tool's own name, which is reported as an
+    identifier. A byte-order mark is never ordinary here: no string of a definition
+    starts a file.
+    """
+    counts: dict[str, int] = {}
+    separators: dict[str, int] = {}
+    tags = 0
+    pending = (
+        [value for key, value in definition.items() if key != "name"]
+        if isinstance(definition, dict)
+        else [definition]
+    )
+    while pending:
+        value = pending.pop()
+        if isinstance(value, dict):
+            pending.extend(value)
+            pending.extend(value.values())
+        elif isinstance(value, list):
+            pending.extend(value)
+        elif isinstance(value, str) and not value.isascii():
+            found, found_tags = _hidden_counts(value, at_start=False)
+            tags += found_tags
+            for char, count in found.items():
+                counts[char] = counts.get(char, 0) + count
+            for char, count in _line_separator_counts(value).items():
+                separators[char] = separators.get(char, 0) + count
+    return [
+        *_hidden_character_risks(counts, tags, source_name),
+        *_line_separator_risks(separators, source_name),
     ]
 
 
@@ -644,6 +700,24 @@ _INSTRUCTION_DIRECTORY_PARTS = tuple(
     PurePosixPath(directory).parts for directory in INSTRUCTION_DIRECTORIES
 )
 
+# Prompt files a project names as such, at any depth: every text file under a directory
+# named `prompts`, and a file whose name ends in one of these suffixes.
+PROMPT_DIRECTORY_NAME = "prompts"
+PROMPT_FILE_SUFFIXES = (".prompt.md", ".prompt.yaml", ".prompt.yml")
+# A prompts directory also holds code, images and editor files, which no host loads as a
+# prompt; only these suffixes, or a name with no suffix that is not a dotfile, are read.
+PROMPT_TEXT_SUFFIXES = frozenset(
+    {
+        *(".md", ".mdc", ".mdx", ".markdown", ".txt", ".yaml", ".yml", ".json", ".toml"),
+        *(".j2", ".jinja", ".jinja2", ".tmpl", ".tpl", ".hbs", ".mustache", ".prompt"),
+    }
+)
+PROMPT_TEMPLATE_TYPE = "template"
+# Test, build output, documentation, example, dependency and vendored trees hold prompts
+# that illustrate or ship with something else; the mcp collector's source search skips
+# the same names.
+PROMPT_SEARCH_SKIPPED = frozenset({*SOURCE_SEARCH_SKIPPED, "node_modules", "vendor"})
+
 SKILL_DIRECTORIES = [
     ".claude/skills",
     ".claude/commands",
@@ -682,6 +756,207 @@ def _markdown(path: str) -> bool:
     return PurePosixPath(path).suffix.lower() in _MARKUP_SUFFIXES
 
 
+def _prompt_named(name: str) -> bool:
+    return name.lower().endswith(PROMPT_FILE_SUFFIXES)
+
+
+def _prompt_text(name: str) -> bool:
+    suffix = PurePosixPath(name).suffix.lower()
+    return suffix in PROMPT_TEXT_SUFFIXES or (not suffix and not name.startswith("."))
+
+
+def _outside_other_walks(parts: tuple[str, ...]) -> bool:
+    return not any(
+        parts[: len(directory)] == directory
+        for directory in (*_INSTRUCTION_DIRECTORY_PARTS, *_SKILL_PARTS)
+    )
+
+
+def _linked_prompt_gaps(
+    links: list[Path], tree: list[Path], claimed: Collection[str], files: ConfinedCollection
+) -> list[str]:
+    """A gap for each directory symlink under which a file is a prompt template that no
+    walk or import inventories under any name.
+
+    The root walk reads the directory a symlink leads to once, under that directory's
+    own name, where such a file is not a prompt template: ``agent/prompts/a.md`` under
+    ``agent -> examples/agent`` is read as ``examples/agent/prompts/a.md``, which is
+    skipped. A file that is a prompt template, or another kind, under its own name is
+    inventoried there.
+    """
+    gaps: list[str] = []
+    unclaimed = sorted(path.parts for path in tree if path.as_posix() not in claimed)
+    for link in links:
+        target = files.link_target(link) if files.is_directory(link) else None
+        if target is None:
+            continue
+        base = PurePosixPath(target).parts
+        for parts in unclaimed[bisect.bisect_left(unclaimed, base) :]:
+            if parts[: len(base)] != base:
+                break
+            alias = PurePosixPath(*link.parts, *parts[len(base) :])
+            if _prompt_candidate(alias):
+                gaps.append(
+                    f"{link.as_posix()}: directory symlink to {target}; prompt templates under "
+                    f"it, such as {alias.as_posix()}, are not inventoried, because the walk "
+                    f"reads their files only under {target}, where they are not prompt templates"
+                )
+                break
+    return gaps
+
+
+# A JSON, YAML or TOML prompt file passes a host the strings it decodes to, where an
+# escape such as \udb40\udc49 or "\U000E0049" spells a hidden character in ASCII.
+_ESCAPED_FORMATS = {".json": "JSON", ".yaml": "YAML", ".yml": "YAML", ".toml": "TOML"}
+# The token budget the other collectors give a YAML file they parse.
+_MAX_YAML_EVENTS = 20_000
+# The YAML and TOML parsers are pure Python; a longer file is decoded by pattern.
+_MAX_PARSED_CHARACTERS = 65_536
+# PyYAML's cost grows with flow nesting depth, past 20 s for 20,000 brackets; YAML nested
+# deeper is decoded by pattern.
+_MAX_YAML_FLOW_DEPTH = 64
+_FLOW_BRACKETS = re.compile(r"[\[\]{}]")
+_ESCAPE = re.compile(
+    r"\\(?:x([0-9A-Fa-f]{2})|u([0-9A-Fa-f]{4})|U([0-9A-Fa-f]{8})|([LPN_e])|.)", re.S
+)
+_NAMED_ESCAPES = {"L": "\u2028", "P": "\u2029", "N": "\x85", "_": "\xa0", "e": "\x1b"}
+_FRONT_MATTER = re.compile(r"---[ \t]*\r?\n(.*?)^(?:---|\.\.\.)[ \t]*\r?$", re.S | re.M)
+_SURROGATE = re.compile("[\ud800-\udfff]")
+
+
+def _escaped_text(relative: str, text: str) -> str | None:
+    """What a JSON, YAML or TOML prompt file, or the YAML front matter of a Markdown
+    one, decodes to, or ``None`` when it holds no backslash.
+
+    YAML of at most ``_MAX_YAML_EVENTS`` events and ``_MAX_YAML_FLOW_DEPTH`` nested flow
+    collections and TOML within the dotted-key bound, each up to ``_MAX_PARSED_CHARACTERS``,
+    give the strings they parse to, one per line. JSON, which a host may read leniently,
+    with comments, duplicate keys or lone surrogates, and YAML or TOML that does not
+    parse or is past those bounds, give the text with
+    each escape that an odd run of backslashes starts decoded: ``\\xXX``, ``\\uXXXX``,
+    ``\\UXXXXXXXX``, YAML's ``\\L``, ``\\P``, ``\\N`` and ``\\_``, and ``\\e``. That
+    also decodes YAML and TOML escapes in a literal string or a comment, which only
+    adds findings. A surrogate pair is joined, as a UTF-16 reader joins it.
+    """
+    body = text.removeprefix("\ufeff")
+    if "\\" not in body:
+        return None
+    kind = _ESCAPED_FORMATS.get(PurePosixPath(relative).suffix.lower())
+    if kind is None:
+        front = _FRONT_MATTER.match(body) if _markup(relative) else None
+        if front is None or "\\" not in front.group(1):
+            return None
+        kind, body = "YAML", front.group(1)
+    if (
+        kind != "JSON"
+        and len(body) <= _MAX_PARSED_CHARACTERS
+        and (kind == "TOML" or _flow_depth(body) <= _MAX_YAML_FLOW_DEPTH)
+    ):
+        import yaml
+
+        try:
+            strings = _string_values(toml_loads(body)) if kind == "TOML" else _yaml_scalars(body)
+        except (ValueError, RecursionError, yaml.YAMLError):
+            pass
+        else:
+            return _joined_surrogates("\n".join(strings))
+    return _joined_surrogates(_ESCAPE.sub(_unescape, body))
+
+
+def _flow_depth(text: str) -> int:
+    """The deepest bracket nesting in ``text``, counting brackets in strings and comments
+    too: a cheap first check, which ``_yaml_scalars`` repeats on the collections it parses."""
+    depth = deepest = 0
+    for match in _FLOW_BRACKETS.finditer(text):
+        if match.group() in "[{":
+            depth += 1
+            deepest = max(deepest, depth)
+        else:
+            depth = max(depth - 1, 0)
+    return deepest
+
+
+def _unescape(match: re.Match[str]) -> str:
+    digits = match.group(1) or match.group(2) or match.group(3)
+    if digits is not None:
+        code = int(digits, 16)
+        return chr(code) if code <= sys.maxunicode else match.group()
+    named = match.group(4)
+    return match.group() if named is None else _NAMED_ESCAPES[named]
+
+
+def _joined_surrogates(text: str) -> str:
+    if _SURROGATE.search(text) is None:
+        return text
+    return text.encode("utf-16-le", "surrogatepass").decode("utf-16-le", "replace")
+
+
+def _string_values(value: Any) -> list[str]:
+    strings: list[str] = []
+    pending = [value]
+    while pending:
+        item = pending.pop()
+        if isinstance(item, str):
+            strings.append(item)
+        elif isinstance(item, dict):
+            for key, child in item.items():
+                pending.extend((key, child))
+        elif isinstance(item, list):
+            pending.extend(item)
+    return strings
+
+
+def _yaml_scalars(text: str) -> list[str]:
+    import yaml
+
+    strings: list[str] = []
+    flows: list[bool] = []
+    depth = 0
+    for count, event in enumerate(yaml.parse(text), start=1):
+        if count > _MAX_YAML_EVENTS:
+            raise ValueError("too many YAML events")
+        if isinstance(event, yaml.ScalarEvent):
+            strings.append(event.value)
+        elif isinstance(event, yaml.CollectionStartEvent):
+            flows.append(bool(event.flow_style))
+            depth += flows[-1]
+            # ``_flow_depth`` also counts brackets in quoted strings, where a closing one
+            # hides an opening one from it.
+            if depth > _MAX_YAML_FLOW_DEPTH:
+                raise ValueError("YAML nested too deep")
+        elif isinstance(event, yaml.CollectionEndEvent) and flows:
+            depth -= flows.pop()
+    return strings
+
+
+def _prompt_surface(parts: tuple[str, ...]) -> bool:
+    """Whether the walk records the file at ``parts`` as a prompt template: a text file
+    under a ``prompts`` directory or a file named ``*.prompt.md``, ``*.prompt.yaml`` or
+    ``*.prompt.yml``, outside the trees ``PROMPT_SEARCH_SKIPPED`` names and outside the
+    rule, prompt, subagent, skill and command directories, whose own walks inventory their
+    files. A walk of one of those directories through a symlink reaches files outside
+    them too; ``scan`` leaves those to that walk.
+    """
+    directories = parts[:-1]
+    if PROMPT_SEARCH_SKIPPED.intersection(directories) or not _outside_other_walks(parts):
+        return False
+    if _prompt_named(parts[-1]):
+        return True
+    return PROMPT_DIRECTORY_NAME in directories and _prompt_text(parts[-1])
+
+
+def _prompt_candidate(path: PurePosixPath | Path) -> bool:
+    """Whether ``path`` is a prompt template under its own name: another spelling of a
+    nested instruction name, such as ``prompts/claude.md``, stays the failure it is
+    anywhere else, because a case-insensitive host opens it as that name."""
+    return (
+        path.name not in NESTED_INSTRUCTION_NAMES
+        and (len(path.parts) < 2 or fold_name(path.name) not in _FOLDED_NESTED_NAMES)
+        and path.as_posix() not in INSTRUCTION_FILES
+        and _prompt_surface(path.parts)
+    )
+
+
 def _read_unless_credential(
     path: str,
     files: ConfinedCollection,
@@ -715,9 +990,34 @@ def _read_unless_credential(
     return None
 
 
+# Paths the one finding for unbound prompt templates names before it counts the rest.
+_MAX_NAMED_UNBOUND = 12
+
+
+def _unbound_templates_risk(components: list[PromptComponent]) -> RiskAssessment:
+    names = [f"'{neutralize(component.source_path or '')}'" for component in components]
+    shown = ", ".join(names[:_MAX_NAMED_UNBOUND])
+    more = len(names) - _MAX_NAMED_UNBOUND
+    count = f"{len(names)} prompt template{'s have' if len(names) != 1 else ' has'}"
+    return RiskAssessment(
+        severity=RiskSeverity.LOW,
+        category="completeness",
+        detail=(
+            f"{count} {UNBOUND_VALUES_DETAIL}: the content of each, which is not an "
+            f"instruction file and carries no unkeyed digest: {shown}"
+            + (f" and {more} more" if more > 0 else "")
+            + "."
+        ),
+        recommendation=(
+            f"Set {SOURCE_BINDING_KEY_ENV} during collection to detect changes to these files."
+        ),
+    )
+
+
 def _found_by_name(path: str, prompt_type: str | None, directory: object = None) -> bool:
-    """Whether a walk recorded ``path`` because a host loads a file of that name, or a rule,
-    prompt or subagent file of that directory whose name has no suffix at all, such as
+    """Whether a walk recorded ``path`` because a host loads a file of that name, a
+    prompt template is named ``*.prompt.md``, ``*.prompt.yaml`` or ``*.prompt.yml``, or
+    a rule, prompt or subagent file of that directory has no suffix at all, such as
     ``.clinerules/style``, which the collector reads as Markdown.
 
     ``directory`` names the rule, prompt or subagent directory whose walk reached
@@ -728,6 +1028,8 @@ def _found_by_name(path: str, prompt_type: str | None, directory: object = None)
         return False
     parts = PurePosixPath(path).parts
     if path in INSTRUCTION_FILES or (len(parts) > 1 and parts[-1] in NESTED_INSTRUCTION_NAMES):
+        return True
+    if prompt_type == PROMPT_TEMPLATE_TYPE and _prompt_named(parts[-1]):
         return True
     if directory in INSTRUCTION_DIRECTORIES and "." not in parts[-1]:
         return True
@@ -950,13 +1252,21 @@ class PromptScanner(Scanner):
             # over the directory that holds the file. A host that loads a nested CLAUDE.md
             # or GEMINI.md, as it does in a session started in that directory, expands its
             # imports too. Dependency trees and other default-excluded names stay skipped.
-            for path in sorted(files.iter_files()):
+            # Prompt files are recorded once the directory walks below and the imports
+            # have claimed theirs.
+            prompt_candidates: list[str] = []
+            links: list[Path] = []
+            tree = sorted(files.iter_files(directory_links=links))
+            for path in tree:
                 relative = path.as_posix()
                 nested_type = NESTED_INSTRUCTION_NAMES.get(path.name)
+                canonical = None
                 if nested_type is None and len(path.parts) > 1:
                     canonical = _FOLDED_NESTED_NAMES.get(fold_name(path.name))
                     if canonical is not None:
                         variants.append((path, path.with_name(canonical)))
+                if _prompt_candidate(path):
+                    prompt_candidates.append(relative)
                 if (
                     nested_type is None
                     or len(path.parts) < 2
@@ -975,12 +1285,16 @@ class PromptScanner(Scanner):
                         importers.append(relative)
 
             reported: set[Path] = set()
+            # Files a rule, prompt, subagent, skill or command directory walk reaches, also
+            # through a directory symlink, keep the kind that walk gives them.
+            walked: set[str] = set()
             for directory, prompt_type in INSTRUCTION_DIRECTORIES.items():
                 if directory in INSTRUCTION_FILES and not files.is_directory(directory):
                     continue
                 skipped: list[Path] = []
                 for path in files.iter_files(directory, skipped=skipped):
                     relative = path.as_posix()
+                    walked.add(relative)
                     if relative in recorded:
                         continue
                     content = _read_unless_credential(relative, files, result)
@@ -1001,9 +1315,24 @@ class PromptScanner(Scanner):
                         texts[relative] = content.decode("utf-8")
                 _report_skipped(skipped, reported, result)
 
+            skill_listing = self._list_skills(files)
+            walked.update(path.as_posix() for _, paths, _ in skill_listing for path in paths)
             importers += self._variant_importers(variants, texts, set(importers), files)
-            self._follow_imports(importers, texts, recorded, files, result)
-            self._scan_skills(files, result, reported)
+            imported: set[str] = set()
+            self._follow_imports(importers, texts, recorded, files, result, imported)
+            self._scan_skills(skill_listing, files, result, reported)
+            # An import keeps the identity it had before prompt templates were collected,
+            # also when it names the file through a directory symlink. Templates are read
+            # last, so they spend no part of the total-bytes budget that skills had.
+            claimed = {*recorded, *walked, *imported}
+            self._record_prompt_templates(
+                [path for path in prompt_candidates if path not in claimed],
+                recorded,
+                files,
+                result,
+            )
+            claimed.update(recorded, prompt_candidates)
+            result.surfaces_excluded.extend(_linked_prompt_gaps(links, tree, claimed, files))
             # A spelling that a walk inventories is recorded and checked under its own
             # name; any other is a file the collector does not read.
             inventoried = {component.source_path for component in result.components}
@@ -1056,11 +1385,14 @@ class PromptScanner(Scanner):
         files: ConfinedCollection,
         result: ScanResult,
         directory: str | None = None,
+        *,
+        escapes: bool = False,
     ) -> PromptComponent | None:
         """Record the instruction file read from ``rel_path``, or None.
 
         ``directory`` names the rule, prompt or subagent directory whose walk reached the
-        file through a directory symlink; the record keeps it.
+        file through a directory symlink; the record keeps it. With ``escapes``, what a
+        prompt template's escapes decode to is checked for hidden characters too.
 
         Every walk reads through ``_read_unless_credential``; the check is repeated on
         the symlink the read followed, so no walk, and no import of a file a walk
@@ -1078,7 +1410,12 @@ class PromptScanner(Scanner):
             return None
         result.surfaces_scanned.append(rel_path)
         component = self._scan_instruction_file(
-            Path(rel_path), rel_path, prompt_type, content, text
+            Path(rel_path),
+            rel_path,
+            prompt_type,
+            content,
+            text,
+            decoded=_escaped_text(rel_path, text) if escapes else None,
         )
         if target is not None:
             component.properties["symlink_target"] = target
@@ -1096,6 +1433,7 @@ class PromptScanner(Scanner):
         recorded: dict[str, PromptComponent],
         files: ConfinedCollection,
         result: ScanResult,
+        imported: set[str],
     ) -> None:
         """Inventory in-root files that memory files import with @path, to five hops.
 
@@ -1162,6 +1500,7 @@ class PromptScanner(Scanner):
                     break
                 looked_up.add(target)
                 if _credential_shaped(target):
+                    imported.add(target)
                     result.surfaces_excluded.append(
                         f"{target}: imported by {importer} but its name says it holds "
                         "credentials; not read or inventoried"
@@ -1169,6 +1508,9 @@ class PromptScanner(Scanner):
                     continue
                 content = self._read_import(importer, target, files, result)
                 if content is None:
+                    imported.add(target)
+                    if (real := files.link_target(target)) is not None:
+                        imported.add(real)
                     continue
                 if depth + 1 > _MAX_IMPORT_DEPTH:
                     result.surfaces_excluded.append(
@@ -1176,7 +1518,18 @@ class PromptScanner(Scanner):
                         "file and not inventoried"
                     )
                     continue
-                component = self._record(target, "imported-instruction", content, files, result)
+                # ``imported`` holds the file under each name, recorded or a failure, so the
+                # prompt walk neither inventories nor reports it again.
+                names = {target, files.link_target(target) or target}
+                imported |= names
+                component = self._record(
+                    target,
+                    "imported-instruction",
+                    content,
+                    files,
+                    result,
+                    escapes=any(_prompt_candidate(PurePosixPath(name)) for name in names),
+                )
                 if component is None:
                     continue
                 component.bom_ref = f"prompt:import:{target}"
@@ -1220,7 +1573,8 @@ class PromptScanner(Scanner):
         so its exact bytes may hold configuration or secrets: an unkeyed digest of them
         would let anyone holding the inventory confirm guesses offline (see
         ``source_binding``). Its hash is withheld; with the operator key an HMAC binds
-        the content, and without one the component says the content is unbound.
+        the content, and without one the component says the content is unbound; prompt
+        templates say so together, in one finding (see ``_record_prompt_templates``).
         """
         imported = prompt_type == "imported-instruction"
         subject = "Imported file" if imported else "File"
@@ -1239,6 +1593,8 @@ class PromptScanner(Scanner):
             return
         if binding:
             component.properties.update(binding)
+            return
+        if prompt_type == PROMPT_TEMPLATE_TYPE:
             return
         component.risks.append(
             RiskAssessment(
@@ -1283,13 +1639,69 @@ class PromptScanner(Scanner):
             target, files, result, context=f"imported by {importer} but ", missing_ok=True
         )
 
+    def _record_prompt_templates(
+        self,
+        candidates: list[str],
+        recorded: dict[str, PromptComponent],
+        files: ConfinedCollection,
+        result: ScanResult,
+    ) -> None:
+        """Record each prompt file no other walk or import inventories, up to
+        ``prompt-files``.
+
+        Like a rule file, one that is not UTF-8 is a failure. Each is also checked for
+        the hidden characters its escapes spell (see ``_escaped_text``). Without the
+        operator key, the templates whose content is unbound share one low completeness
+        finding, on the first of them, so a library of templates costs one point.
+        """
+        bound = limits.bound("prompt-files")
+        unbound: list[PromptComponent] = []
+        for count, relative in enumerate(candidates, start=1):
+            if count > bound.value:
+                result.scan_failures.append(
+                    f"{relative}: prompt files from this one on are not inventoried; "
+                    + bound.exceeded()
+                )
+                break
+            content = _read_unless_credential(relative, files, result)
+            if content is None:
+                continue
+            component = self._record(
+                relative, PROMPT_TEMPLATE_TYPE, content, files, result, escapes=True
+            )
+            if component is None:
+                continue
+            recorded[relative] = component
+            properties = component.properties
+            if "content_hash_withheld" in properties and "static_value_binding" not in properties:
+                unbound.append(component)
+        if unbound:
+            unbound[0].risks.append(_unbound_templates_risk(unbound))
+
+    @staticmethod
+    def _list_skills(
+        files: ConfinedCollection,
+    ) -> list[tuple[str, list[Path], list[Path]]]:
+        """Each skill and command directory with the files its walk reaches and the
+        default-excluded names it skipped, listed before prompt templates are recorded so
+        a directory symlink to a ``prompts`` tree leaves those files to the skill walk.
+        """
+        listing: list[tuple[str, list[Path], list[Path]]] = []
+        for directory in SKILL_DIRECTORIES:
+            skipped: list[Path] = []
+            listing.append((directory, list(files.iter_files(directory, skipped=skipped)), skipped))
+        return listing
+
     def _scan_skills(
-        self, files: ConfinedCollection, result: ScanResult, reported: set[Path]
+        self,
+        listing: list[tuple[str, list[Path], list[Path]]],
+        files: ConfinedCollection,
+        result: ScanResult,
+        reported: set[Path],
     ) -> None:
         seen: set[str] = set()
-        for skill_dir in SKILL_DIRECTORIES:
-            skipped: list[Path] = []
-            for path in files.iter_files(skill_dir, skipped=skipped):
+        for skill_dir, paths, skipped in listing:
+            for path in paths:
                 relative = path.as_posix()
                 if relative in seen:
                     continue
@@ -1389,7 +1801,14 @@ class PromptScanner(Scanner):
         ]
 
     def _scan_instruction_file(
-        self, path: Path, rel_path: str, prompt_type: str, raw: bytes, text: str
+        self,
+        path: Path,
+        rel_path: str,
+        prompt_type: str,
+        raw: bytes,
+        text: str,
+        *,
+        decoded: str | None = None,
     ) -> PromptComponent:
         content_hash = hash_bytes(raw)
         file_size = len(raw)
@@ -1405,7 +1824,7 @@ class PromptScanner(Scanner):
                 )
             )
 
-        risks.extend(detect_invisible_characters(text, rel_path))
+        risks.extend(detect_invisible_characters(text, rel_path, decoded=decoded))
         if _markup(rel_path):
             risks.extend(detect_hidden_markup(text, rel_path))
 

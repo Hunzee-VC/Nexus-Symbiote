@@ -1,0 +1,3098 @@
+{
+  "metadata": {
+    "spec_version": "1.1.0",
+    "serial_number": "urn:uuid:6c24f306-8449-526f-b122-4773d24276a4",
+    "version": 1,
+    "timestamp": "2023-11-14T22:13:20Z",
+    "tool_name": "nexus-symbiote",
+    "tool_version": "0.2.0",
+    "tool_vendor": "aisecnomad",
+    "authors": [],
+    "completeness": {
+      "scope": "repository",
+      "surfaces_scanned": [
+        ".claude/rules/security.md",
+        ".claude/settings.json",
+        ".claude/skills/refund-approver/SKILL.md",
+        ".claude/skills/triage-ticket/SKILL.md",
+        ".claude/skills/triage-ticket/scripts/classify.py",
+        ".codex/config.toml",
+        ".cursor/mcp.json",
+        ".cursor/rules/python.mdc",
+        ".cursorrules",
+        ".env",
+        ".env.example",
+        ".gemini/settings.json",
+        ".github/copilot-instructions.md",
+        ".mcp.json",
+        ".vscode/mcp.json",
+        "AGENTS.md",
+        "CLAUDE.md",
+        "Dockerfile",
+        "Dockerfile.agent",
+        "GEMINI.md",
+        "a2a: Python SDK references (heuristic)",
+        "data/raw/embeddings.bin",
+        "docker-compose.yml",
+        "docs/policies.md",
+        "mcp-server/src/index.ts",
+        "models/classifier/config.json",
+        "models/classifier/model.safetensors",
+        "models/legacy/intent.pkl",
+        "models/legacy/intent.pt",
+        "models/llm/acme-intent-tiny.Q8_0.gguf",
+        "public/.well-known/agent-card.json",
+        "pyproject.toml",
+        "rag: Python vector-store imports (heuristic)",
+        "requirements.txt",
+        "shadowscan-report (no report found)",
+        "src/agent/tools.py"
+      ],
+      "surfaces_excluded": [],
+      "scan_failures": [
+        "config/secrets-link: symlink target is absolute",
+        "deep/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n: depth limit of 32 exceeded; raise it with --limit depth=N",
+        "models/escape.gguf: symlink target is outside the collection root",
+        ".codex/config.toml: invalid TOML",
+        "config/secrets-link: symlink target is absolute",
+        "deep/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n: depth limit of 32 exceeded; raise it with --limit depth=N",
+        "models/escape.gguf: symlink target is outside the collection root",
+        "config/secrets-link: symlink target is absolute",
+        "deep/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n: depth limit of 32 exceeded; raise it with --limit depth=N",
+        "models/escape.gguf: symlink target is outside the collection root",
+        "services/billing/claude.md: case variant of services/billing/CLAUDE.md is the active file on case-insensitive file systems and is not inventoried",
+        "rag: conflicting duplicate component rag:env-pinecone",
+        "config/secrets-link: symlink target is absolute",
+        "deep/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n: depth limit of 32 exceeded; raise it with --limit depth=N",
+        "models/escape.gguf: symlink target is outside the collection root",
+        "config/secrets-link: symlink target is absolute",
+        "deep/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n: depth limit of 32 exceeded; raise it with --limit depth=N",
+        "models/escape.gguf: symlink target is outside the collection root",
+        ".codex/config.toml: invalid TOML",
+        "config/secrets-link: symlink target is absolute",
+        "deep/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n: depth limit of 32 exceeded; raise it with --limit depth=N",
+        "models/escape.gguf: symlink target is outside the collection root"
+      ],
+      "timestamp": "2023-11-14T22:13:20Z",
+      "assurance_level": "observed",
+      "collectors_requested": [
+        "mcp",
+        "model",
+        "prompt",
+        "rag",
+        "registry",
+        "shadowscan",
+        "a2a",
+        "ide_agents"
+      ],
+      "collectors_completed": [
+        "registry",
+        "shadowscan"
+      ],
+      "unobserved_surfaces": [
+        "runtime",
+        "effective-identity",
+        "effective-authorization",
+        "live-tools",
+        "network"
+      ],
+      "exclusions": [
+        "**/.git",
+        "**/.venv",
+        "**/__pycache__",
+        "**/node_modules",
+        "**/venv",
+        ".git",
+        ".venv",
+        "__pycache__",
+        "node_modules"
+      ],
+      "source_unmapped_count": 0,
+      "source_unmapped_indexes": [],
+      "discovery_verification": {
+        "status": "not-applicable",
+        "method": "none",
+        "repository": "unknown",
+        "commit": "unknown",
+        "report_time": "unknown"
+      },
+      "scanner_status": {
+        "shadowscan": "complete",
+        "mcp": "failed",
+        "model": "failed",
+        "prompt": "failed",
+        "rag": "failed",
+        "registry": "complete",
+        "a2a": "failed",
+        "ide_agents": "failed"
+      }
+    },
+    "policy_source": "built-in",
+    "policy_weakened": []
+  },
+  "components": [
+    {
+      "bom_ref": "a2a-server:Acme Support Agent",
+      "component_type": "a2a-server",
+      "name": "Acme Support Agent",
+      "version": "1.4.0",
+      "hashes": {},
+      "trust_tier": "internal-unverified",
+      "assurance_level": "declared",
+      "source_path": "public/.well-known/agent-card.json",
+      "properties": {
+        "collection_mode": "static-agent-card",
+        "agent_card_paths": [
+          "public/.well-known/agent-card.json"
+        ],
+        "authentication_evidence": "declaration-only",
+        "security_scheme_types": [
+          "http"
+        ],
+        "security_scheme_origins": [],
+        "additional_interface_origins": [],
+        "supported_interface_origins": [],
+        "card_signatures": [],
+        "card_signature_verified": "not-checked",
+        "capability_flags": {
+          "pushNotifications": false,
+          "streaming": true
+        },
+        "extensions": [],
+        "provider_origin": null,
+        "source_values_bound": false,
+        "static_card_hash": "sha256:47c6bd345ad19e0b8603c549e8c0429ca9e504cfce08066ade7d635023d17f82",
+        "static_card_hash_profile": "nexus-symbiote/a2a-card-structure/v4"
+      },
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "a2a",
+          "locator": "public/.well-known/agent-card.json",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "agent_card_path": "public/.well-known/agent-card.json",
+      "endpoint_url": "https://agent.acme.example",
+      "supported_protocols": [],
+      "skills_declared": [
+        "Ticket triage",
+        "Refund handling"
+      ],
+      "authentication_required": true,
+      "risks": [
+        {
+          "severity": "low",
+          "category": "completeness",
+          "detail": "A2A agent 'Acme Support Agent' values not bound in this inventory: endpoint URL beyond its exported origin.",
+          "recommendation": "Set NEXUS_SYMBIOTE_SOURCE_BINDING_KEY during collection to detect changes to these values.",
+          "references": []
+        }
+      ]
+    },
+    {
+      "bom_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "component_type": "agent",
+      "name": "repository",
+      "description": "Repository agent definition inferred from configuration",
+      "hashes": {},
+      "trust_tier": "unknown",
+      "assurance_level": "observed",
+      "properties": {
+        "identity_source": "repository-path",
+        "runtime_use": "unknown"
+      },
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "repository-assembler",
+          "locator": ".",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        },
+        "deployment": {
+          "assurance": "declared",
+          "method": "not-collected",
+          "scope": "runtime",
+          "evidence_refs": [],
+          "unknown_reason": "Repository scan cannot identify a running workload"
+        }
+      },
+      "deployment_status": "unknown",
+      "data_refs": [
+        "rag:env-pinecone",
+        "rag:import-chroma",
+        "rag:import-pinecone"
+      ],
+      "skill_refs": [
+        "skill:.claude/skills/refund-approver/SKILL.md",
+        "skill:.claude/skills/triage-ticket/SKILL.md",
+        "skill:.claude/skills/triage-ticket/scripts/classify.py"
+      ],
+      "model_refs": [
+        "model:data/raw/embeddings.bin",
+        "model:models/classifier/model.safetensors",
+        "model:models/legacy/intent.pkl",
+        "model:models/legacy/intent.pt",
+        "model:models/llm/acme-intent-tiny.Q8_0.gguf"
+      ],
+      "tool_refs": [
+        "mcp-server:0cce754229178ca3019e16245a00c1016bf99b36a416d0c1d85a865ddc2d4f4e",
+        "mcp-server:3fbfd7787a7542d632d309995f1d7ad97c71c419488f3755fe2871ba8d8fb4eb",
+        "mcp-server:e8c8e6c3a3348d5eded17b4e6b3ac9b45c6f40a64e464b480081308f0d25c7c0",
+        "mcp-server:bd771aa146767c63b3bd0ab0d2843d77d0decc2a36e8a77db43da6d8febd4833",
+        "mcp-server:caa03812ec0f73faeef20d0f675ad578adec6861d634134f64c889f1f7079c0f",
+        "mcp-server:0ebbf02c2ef1e115f8445d5eb9853fbbedb2d2d3778ab4df96073ed665b5f34d",
+        "mcp-server:e37ae79bbad5a2f5937669a336cb72e182b2d23d2f8c693eb6aeef3d2ff0dc25",
+        "mcp-server:3263889520201b938c02c2694649f99e56a8e09161b9964f55186af27399b1ad",
+        "mcp-source:mcp-server%2Fsrc%2Findex.ts:server:5:192",
+        "tool:mcp-source:mcp-server%2Fsrc%2Findex.ts:server:5:192/lookup_customer",
+        "tool:mcp-source:mcp-server%2Fsrc%2Findex.ts:server:5:192/issue_refund",
+        "tool:python:src%2Fagent%2Ftools.py/lookup_customer",
+        "tool:python:src%2Fagent%2Ftools.py/issue_refund",
+        "tool:python:src%2Fagent%2Ftools.py/search_kb"
+      ],
+      "memory_refs": [],
+      "prompt_refs": [
+        "prompt:CLAUDE.md",
+        "prompt:AGENTS.md",
+        "prompt:GEMINI.md",
+        "prompt:.cursorrules",
+        "prompt:.github/copilot-instructions.md",
+        "prompt:.claude/rules/security.md",
+        "prompt:.cursor/rules/python.mdc",
+        "prompt:import:docs/policies.md"
+      ],
+      "guardrail_refs": [],
+      "sub_agent_refs": [],
+      "authorizations": [],
+      "risks": [],
+      "autonomy_level": null
+    },
+    {
+      "bom_ref": "ide-agent:claude-code",
+      "component_type": "ide-agent",
+      "name": "claude-code",
+      "hashes": {},
+      "trust_tier": "internal-unverified",
+      "assurance_level": "declared",
+      "source_path": ".claude/settings.json",
+      "properties": {
+        "collection_mode": "static-project-configuration",
+        "mcp_config_paths": [
+          ".mcp.json"
+        ],
+        "permission_evidence": "declaration-only",
+        "effective_authorization_verified": false,
+        "permission_policy_limitations": [
+          "User and managed settings, workspace trust, per-session flags and runtime controls were not observed.",
+          "Deny and ask rules may narrow declared allow rules.",
+          "Project/local starting-mode declarations may be ignored by the host or version."
+        ],
+        "declared_hooks": {
+          ".claude/settings.json": {
+            "PreToolUse": 1
+          }
+        },
+        "declared_permission_rule_counts": {
+          "allow": 3,
+          "ask": 0,
+          "deny": 1
+        },
+        "settings_declarations": {
+          "additional_directories": 0,
+          "enabled_plugins": 0,
+          "extra_known_marketplaces": 0,
+          "enabled_mcpjson_servers": 4,
+          "disabled_mcpjson_servers": 0,
+          "env_variables": 0,
+          "api_key_helper": false,
+          "enable_all_project_mcp_servers": false
+        },
+        "settings_hashes": {
+          ".claude/settings.json": "sha256:4e9dcb7a1cb8e757e86c1e492c287e6f388b639f59ccd7a776c6f5aac3f26b8e"
+        },
+        "settings_hashes_profile": "nexus-symbiote/ide-settings-redacted/v1",
+        "source_values_bound": false
+      },
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "ide_agents",
+          "locator": ".claude/settings.json",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "ide_type": "claude-code",
+      "config_files": [
+        ".claude/settings.json",
+        "CLAUDE.md",
+        ".claude/skills",
+        ".claude/rules"
+      ],
+      "mcp_server_refs": [],
+      "prompt_refs": [],
+      "risks": [
+        {
+          "severity": "medium",
+          "category": "hook_commands",
+          "detail": "IDE agent 'claude-code' declares 1 hook command(s) that run automatically on agent events.",
+          "recommendation": "Review this setting and approve its exact value.",
+          "references": []
+        },
+        {
+          "severity": "low",
+          "category": "completeness",
+          "detail": "IDE agent 'claude-code' settings values not bound in this inventory: the redacted values of .claude/settings.json.",
+          "recommendation": "Set NEXUS_SYMBIOTE_SOURCE_BINDING_KEY during collection to detect changes to these values.",
+          "references": []
+        }
+      ]
+    },
+    {
+      "bom_ref": "ide-agent:codex",
+      "component_type": "ide-agent",
+      "name": "codex",
+      "hashes": {},
+      "trust_tier": "internal-unverified",
+      "assurance_level": "declared",
+      "source_path": ".codex/config.toml",
+      "properties": {
+        "collection_mode": "static-project-configuration",
+        "mcp_config_paths": [],
+        "permission_evidence": "declaration-only",
+        "effective_authorization_verified": false,
+        "permission_policy_limitations": [
+          "User and managed settings, workspace trust, per-session flags and runtime controls were not observed.",
+          "Deny and ask rules may narrow declared allow rules.",
+          "Project/local starting-mode declarations may be ignored by the host or version."
+        ]
+      },
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "ide_agents",
+          "locator": ".codex/config.toml",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "ide_type": "codex",
+      "config_files": [
+        ".codex/config.toml"
+      ],
+      "mcp_server_refs": [],
+      "prompt_refs": [],
+      "risks": []
+    },
+    {
+      "bom_ref": "ide-agent:copilot",
+      "component_type": "ide-agent",
+      "name": "copilot",
+      "hashes": {},
+      "trust_tier": "internal-unverified",
+      "assurance_level": "declared",
+      "source_path": ".github/copilot-instructions.md",
+      "properties": {
+        "collection_mode": "static-project-configuration",
+        "mcp_config_paths": [],
+        "permission_evidence": "declaration-only",
+        "effective_authorization_verified": false,
+        "permission_policy_limitations": [
+          "User and managed settings, workspace trust, per-session flags and runtime controls were not observed.",
+          "Deny and ask rules may narrow declared allow rules.",
+          "Project/local starting-mode declarations may be ignored by the host or version."
+        ]
+      },
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "ide_agents",
+          "locator": ".github/copilot-instructions.md",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "ide_type": "copilot",
+      "config_files": [
+        ".github/copilot-instructions.md"
+      ],
+      "mcp_server_refs": [],
+      "prompt_refs": [],
+      "risks": []
+    },
+    {
+      "bom_ref": "ide-agent:cursor",
+      "component_type": "ide-agent",
+      "name": "cursor",
+      "hashes": {},
+      "trust_tier": "internal-unverified",
+      "assurance_level": "declared",
+      "source_path": ".cursorrules",
+      "properties": {
+        "collection_mode": "static-project-configuration",
+        "mcp_config_paths": [
+          ".cursor/mcp.json"
+        ],
+        "permission_evidence": "declaration-only",
+        "effective_authorization_verified": false,
+        "permission_policy_limitations": [
+          "User and managed settings, workspace trust, per-session flags and runtime controls were not observed.",
+          "Deny and ask rules may narrow declared allow rules.",
+          "Project/local starting-mode declarations may be ignored by the host or version."
+        ]
+      },
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "ide_agents",
+          "locator": ".cursorrules",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "ide_type": "cursor",
+      "config_files": [
+        ".cursorrules",
+        ".cursor/rules"
+      ],
+      "mcp_server_refs": [],
+      "prompt_refs": [],
+      "risks": [
+        {
+          "severity": "low",
+          "category": "instruction_layering",
+          "detail": "IDE agent 'cursor' has multiple declared instruction locations.",
+          "recommendation": "Document loading order, modification authority and approved digests.",
+          "references": []
+        }
+      ]
+    },
+    {
+      "bom_ref": "ide-agent:gemini",
+      "component_type": "ide-agent",
+      "name": "gemini",
+      "hashes": {},
+      "trust_tier": "internal-unverified",
+      "assurance_level": "declared",
+      "source_path": "GEMINI.md",
+      "properties": {
+        "collection_mode": "static-project-configuration",
+        "mcp_config_paths": [],
+        "permission_evidence": "declaration-only",
+        "effective_authorization_verified": false,
+        "permission_policy_limitations": [
+          "User and managed settings, workspace trust, per-session flags and runtime controls were not observed.",
+          "Deny and ask rules may narrow declared allow rules.",
+          "Project/local starting-mode declarations may be ignored by the host or version."
+        ],
+        "settings_hashes": {
+          ".gemini/settings.json": "sha256:97b9ffa81ed0601391e8b5739baac8f59a1afd23395e726c5958252638ad5ad9"
+        },
+        "settings_hashes_profile": "nexus-symbiote/ide-settings-redacted/v1",
+        "source_values_bound": false
+      },
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "ide_agents",
+          "locator": "GEMINI.md",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "ide_type": "gemini",
+      "config_files": [
+        "GEMINI.md",
+        ".gemini/settings.json"
+      ],
+      "mcp_server_refs": [],
+      "prompt_refs": [],
+      "risks": [
+        {
+          "severity": "low",
+          "category": "completeness",
+          "detail": "IDE agent 'gemini' settings values not bound in this inventory: the redacted values of .gemini/settings.json.",
+          "recommendation": "Set NEXUS_SYMBIOTE_SOURCE_BINDING_KEY during collection to detect changes to these values.",
+          "references": []
+        }
+      ]
+    },
+    {
+      "bom_ref": "mcp-client:claude-code",
+      "component_type": "mcp-client",
+      "name": "claude-code MCP client",
+      "hashes": {},
+      "trust_tier": "internal-unverified",
+      "assurance_level": "declared",
+      "source_path": ".mcp.json",
+      "properties": {
+        "collection_mode": "static-config",
+        "config_paths": [
+          ".mcp.json"
+        ]
+      },
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "mcp",
+          "locator": ".mcp.json",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "host_application": "claude-code",
+      "server_refs": [
+        "mcp-server:0cce754229178ca3019e16245a00c1016bf99b36a416d0c1d85a865ddc2d4f4e",
+        "mcp-server:3fbfd7787a7542d632d309995f1d7ad97c71c419488f3755fe2871ba8d8fb4eb",
+        "mcp-server:bd771aa146767c63b3bd0ab0d2843d77d0decc2a36e8a77db43da6d8febd4833",
+        "mcp-server:e8c8e6c3a3348d5eded17b4e6b3ac9b45c6f40a64e464b480081308f0d25c7c0"
+      ],
+      "config_path": ".mcp.json",
+      "risks": []
+    },
+    {
+      "bom_ref": "mcp-client:cursor",
+      "component_type": "mcp-client",
+      "name": "cursor MCP client",
+      "hashes": {},
+      "trust_tier": "internal-unverified",
+      "assurance_level": "declared",
+      "source_path": ".cursor/mcp.json",
+      "properties": {
+        "collection_mode": "static-config",
+        "config_paths": [
+          ".cursor/mcp.json"
+        ]
+      },
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "mcp",
+          "locator": ".cursor/mcp.json",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "host_application": "cursor",
+      "server_refs": [
+        "mcp-server:caa03812ec0f73faeef20d0f675ad578adec6861d634134f64c889f1f7079c0f"
+      ],
+      "config_path": ".cursor/mcp.json",
+      "risks": []
+    },
+    {
+      "bom_ref": "mcp-client:gemini-cli",
+      "component_type": "mcp-client",
+      "name": "gemini-cli MCP client",
+      "hashes": {},
+      "trust_tier": "internal-unverified",
+      "assurance_level": "declared",
+      "source_path": ".gemini/settings.json",
+      "properties": {
+        "collection_mode": "static-config",
+        "config_paths": [
+          ".gemini/settings.json"
+        ]
+      },
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "mcp",
+          "locator": ".gemini/settings.json",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "host_application": "gemini-cli",
+      "server_refs": [
+        "mcp-server:3263889520201b938c02c2694649f99e56a8e09161b9964f55186af27399b1ad",
+        "mcp-server:e37ae79bbad5a2f5937669a336cb72e182b2d23d2f8c693eb6aeef3d2ff0dc25"
+      ],
+      "config_path": ".gemini/settings.json",
+      "risks": []
+    },
+    {
+      "bom_ref": "mcp-client:sdk",
+      "component_type": "mcp-client",
+      "name": "MCP SDK client (code-detected)",
+      "hashes": {},
+      "trust_tier": "internal-unverified",
+      "assurance_level": "declared",
+      "source_path": "mcp-server/src/index.ts",
+      "properties": {
+        "collection_mode": "static-source-reference",
+        "source_paths": [
+          "mcp-server/src/index.ts"
+        ]
+      },
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "mcp",
+          "locator": "mcp-server/src/index.ts",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "host_application": "sdk",
+      "server_refs": [],
+      "risks": []
+    },
+    {
+      "bom_ref": "mcp-client:vscode",
+      "component_type": "mcp-client",
+      "name": "vscode MCP client",
+      "hashes": {},
+      "trust_tier": "internal-unverified",
+      "assurance_level": "declared",
+      "source_path": ".vscode/mcp.json",
+      "properties": {
+        "collection_mode": "static-config",
+        "config_paths": [
+          ".vscode/mcp.json"
+        ]
+      },
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "mcp",
+          "locator": ".vscode/mcp.json",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "host_application": "vscode",
+      "server_refs": [
+        "mcp-server:0ebbf02c2ef1e115f8445d5eb9853fbbedb2d2d3778ab4df96073ed665b5f34d"
+      ],
+      "config_path": ".vscode/mcp.json",
+      "risks": []
+    },
+    {
+      "bom_ref": "mcp-server:0cce754229178ca3019e16245a00c1016bf99b36a416d0c1d85a865ddc2d4f4e",
+      "component_type": "mcp-server",
+      "name": "filesystem",
+      "version": "2025.8.21",
+      "hashes": {},
+      "trust_tier": "third-party-unsigned",
+      "assurance_level": "declared",
+      "source_path": ".mcp.json",
+      "properties": {
+        "collection_mode": "static-config",
+        "launch_arguments_redacted": true,
+        "endpoint_credentials_omitted": false,
+        "declared_fields": [
+          "args",
+          "command"
+        ],
+        "launcher": "npx",
+        "packages": [
+          {
+            "identity": "npm:@modelcontextprotocol/server-filesystem",
+            "version": "2025.8.21",
+            "pinned": true,
+            "pin": "version"
+          }
+        ],
+        "source_values_bound": false,
+        "static_config_hash": "sha256:3e62bf62772bf61a2aa59dd97956044dc289d970838e5c92e39a767cdbbee856",
+        "static_config_hash_profile": "nexus-symbiote/mcp-static-config/v4"
+      },
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "mcp",
+          "locator": ".mcp.json",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "transport": "stdio",
+      "command": "npx",
+      "launcher_package": "npm:@modelcontextprotocol/server-filesystem",
+      "package_url": "pkg:npm/%40modelcontextprotocol/server-filesystem@2025.8.21",
+      "args": [
+        "***",
+        "***",
+        "***"
+      ],
+      "env": {},
+      "tool_count": 0,
+      "tool_refs": [],
+      "version_pinned": true,
+      "risks": [
+        {
+          "severity": "medium",
+          "category": "transitive_resolution",
+          "detail": "MCP server 'filesystem' pins its package but resolves dependencies at launch without a lockfile.",
+          "recommendation": "Vendor a lockfile-installed server, or launch an image by digest.",
+          "references": []
+        },
+        {
+          "severity": "medium",
+          "category": "local_process",
+          "detail": "MCP server 'filesystem' uses stdio transport (local process).",
+          "recommendation": "Ensure the command binary is integrity-checked.",
+          "references": []
+        },
+        {
+          "severity": "low",
+          "category": "completeness",
+          "detail": "MCP server 'filesystem' values not bound in this inventory: launch arguments.",
+          "recommendation": "Set NEXUS_SYMBIOTE_SOURCE_BINDING_KEY during collection to detect changes to these values.",
+          "references": []
+        }
+      ]
+    },
+    {
+      "bom_ref": "mcp-server:0ebbf02c2ef1e115f8445d5eb9853fbbedb2d2d3778ab4df96073ed665b5f34d",
+      "component_type": "mcp-server",
+      "name": "sqlite",
+      "version": "0.6.2",
+      "hashes": {},
+      "trust_tier": "third-party-unsigned",
+      "assurance_level": "declared",
+      "source_path": ".vscode/mcp.json",
+      "properties": {
+        "collection_mode": "static-config",
+        "launch_arguments_redacted": true,
+        "endpoint_credentials_omitted": false,
+        "declared_fields": [
+          "args",
+          "command",
+          "type"
+        ],
+        "launcher": "uvx",
+        "packages": [
+          {
+            "identity": "pypi:mcp-server-sqlite",
+            "version": "0.6.2",
+            "pinned": true,
+            "pin": "version"
+          }
+        ],
+        "source_values_bound": false,
+        "static_config_hash": "sha256:2986d7041ceb90d55e3f07046267ce813cceb90751d87995b95e2bcf2f8b91d3",
+        "static_config_hash_profile": "nexus-symbiote/mcp-static-config/v4"
+      },
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "mcp",
+          "locator": ".vscode/mcp.json",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "transport": "stdio",
+      "command": "uvx",
+      "launcher_package": "pypi:mcp-server-sqlite",
+      "package_url": "pkg:pypi/mcp-server-sqlite@0.6.2",
+      "args": [
+        "***",
+        "***",
+        "***"
+      ],
+      "env": {},
+      "tool_count": 0,
+      "tool_refs": [],
+      "version_pinned": true,
+      "risks": [
+        {
+          "severity": "medium",
+          "category": "transitive_resolution",
+          "detail": "MCP server 'sqlite' pins its package but resolves dependencies at launch without a lockfile.",
+          "recommendation": "Vendor a lockfile-installed server, or launch an image by digest.",
+          "references": []
+        },
+        {
+          "severity": "medium",
+          "category": "local_process",
+          "detail": "MCP server 'sqlite' uses stdio transport (local process).",
+          "recommendation": "Ensure the command binary is integrity-checked.",
+          "references": []
+        },
+        {
+          "severity": "low",
+          "category": "completeness",
+          "detail": "MCP server 'sqlite' values not bound in this inventory: launch arguments.",
+          "recommendation": "Set NEXUS_SYMBIOTE_SOURCE_BINDING_KEY during collection to detect changes to these values.",
+          "references": []
+        }
+      ]
+    },
+    {
+      "bom_ref": "mcp-server:3263889520201b938c02c2694649f99e56a8e09161b9964f55186af27399b1ad",
+      "component_type": "mcp-server",
+      "name": "slack",
+      "hashes": {},
+      "trust_tier": "third-party-unsigned",
+      "assurance_level": "declared",
+      "source_path": ".gemini/settings.json",
+      "properties": {
+        "collection_mode": "static-config",
+        "launch_arguments_redacted": false,
+        "endpoint_credentials_omitted": true,
+        "declared_fields": [
+          "httpUrl",
+          "timeout"
+        ],
+        "source_values_bound": false,
+        "static_config_hash": "sha256:40d2a1a22ffbf91b39844b3cebc8879f4a4cc56b9a60d3b97cb87ec38763b16e",
+        "static_config_hash_profile": "nexus-symbiote/mcp-static-config/v4"
+      },
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "mcp",
+          "locator": ".gemini/settings.json",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "transport": "streamable-http",
+      "args": [],
+      "env": {},
+      "endpoint_url": "https://mcp.slack.example.com",
+      "tool_count": 0,
+      "tool_refs": [],
+      "risks": [
+        {
+          "severity": "low",
+          "category": "completeness",
+          "detail": "MCP server 'slack' values not bound in this inventory: endpoint path and query.",
+          "recommendation": "Set NEXUS_SYMBIOTE_SOURCE_BINDING_KEY during collection to detect changes to these values.",
+          "references": []
+        }
+      ]
+    },
+    {
+      "bom_ref": "mcp-server:3fbfd7787a7542d632d309995f1d7ad97c71c419488f3755fe2871ba8d8fb4eb",
+      "component_type": "mcp-server",
+      "name": "github",
+      "version": "sha256:7c7f6ab9bb4a4e4e4a1d0a0c5f2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d",
+      "hashes": {},
+      "trust_tier": "third-party-unsigned",
+      "assurance_level": "declared",
+      "source_path": ".mcp.json",
+      "properties": {
+        "collection_mode": "static-config",
+        "launch_arguments_redacted": true,
+        "endpoint_credentials_omitted": false,
+        "declared_fields": [
+          "args",
+          "command",
+          "env"
+        ],
+        "launcher": "docker run",
+        "packages": [
+          {
+            "identity": "oci:ghcr.io/github/github-mcp-server",
+            "version": "sha256:7c7f6ab9bb4a4e4e4a1d0a0c5f2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d",
+            "pinned": true,
+            "pin": "digest"
+          }
+        ],
+        "source_values_bound": false,
+        "static_config_hash": "sha256:3c59a4ebbec2ca8f0b9e271dcc163bd538ed3ebcd6b80f1d723ec19813564dbd",
+        "static_config_hash_profile": "nexus-symbiote/mcp-static-config/v4"
+      },
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "mcp",
+          "locator": ".mcp.json",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "transport": "stdio",
+      "command": "docker",
+      "launcher_package": "oci:ghcr.io/github/github-mcp-server",
+      "args": [
+        "***",
+        "***",
+        "***",
+        "***",
+        "***",
+        "***"
+      ],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "***"
+      },
+      "tool_count": 0,
+      "tool_refs": [],
+      "version_pinned": true,
+      "risks": [
+        {
+          "severity": "medium",
+          "category": "local_process",
+          "detail": "MCP server 'github' uses stdio transport (local process).",
+          "recommendation": "Ensure the command binary is integrity-checked.",
+          "references": []
+        },
+        {
+          "severity": "low",
+          "category": "completeness",
+          "detail": "MCP server 'github' values not bound in this inventory: launch arguments; environment values.",
+          "recommendation": "Set NEXUS_SYMBIOTE_SOURCE_BINDING_KEY during collection to detect changes to these values.",
+          "references": []
+        }
+      ]
+    },
+    {
+      "bom_ref": "mcp-server:bd771aa146767c63b3bd0ab0d2843d77d0decc2a36e8a77db43da6d8febd4833",
+      "component_type": "mcp-server",
+      "name": "remote-crm",
+      "hashes": {},
+      "trust_tier": "third-party-unsigned",
+      "assurance_level": "declared",
+      "source_path": ".mcp.json",
+      "properties": {
+        "collection_mode": "static-config",
+        "launch_arguments_redacted": false,
+        "endpoint_credentials_omitted": true,
+        "declared_fields": [
+          "description",
+          "headers",
+          "type",
+          "url"
+        ],
+        "header_names": [
+          "Authorization"
+        ],
+        "source_values_bound": false,
+        "static_config_hash": "sha256:630e059530a4472c57307fe3556007c62acdaf3ed4be763b68b4eaa73e8ca99d",
+        "static_config_hash_profile": "nexus-symbiote/mcp-static-config/v4"
+      },
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "mcp",
+          "locator": ".mcp.json",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "transport": "streamable-http",
+      "args": [],
+      "env": {},
+      "endpoint_url": "https://mcp.crm.example.com",
+      "tool_count": 0,
+      "tool_refs": [],
+      "risks": [
+        {
+          "severity": "low",
+          "category": "completeness",
+          "detail": "MCP server 'remote-crm' values not bound in this inventory: header values; endpoint path and query.",
+          "recommendation": "Set NEXUS_SYMBIOTE_SOURCE_BINDING_KEY during collection to detect changes to these values.",
+          "references": []
+        }
+      ]
+    },
+    {
+      "bom_ref": "mcp-server:caa03812ec0f73faeef20d0f675ad578adec6861d634134f64c889f1f7079c0f",
+      "component_type": "mcp-server",
+      "name": "browser\u001b[2K\u001b[1;32m[verified]\u001b[0m",
+      "hashes": {},
+      "trust_tier": "third-party-unsigned",
+      "assurance_level": "declared",
+      "source_path": ".cursor/mcp.json",
+      "properties": {
+        "collection_mode": "static-config",
+        "launch_arguments_redacted": true,
+        "endpoint_credentials_omitted": false,
+        "declared_fields": [
+          "args",
+          "command"
+        ],
+        "launcher": "npx",
+        "packages": [
+          {
+            "identity": "npm:@playwright/mcp",
+            "version": null,
+            "pinned": false,
+            "pin": null
+          }
+        ],
+        "source_values_bound": false,
+        "static_config_hash": "sha256:f4549ca5a35e5c5ce67e98930b0960e06831827050e13a241b453917e27cc0c0",
+        "static_config_hash_profile": "nexus-symbiote/mcp-static-config/v4"
+      },
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "mcp",
+          "locator": ".cursor/mcp.json",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "transport": "stdio",
+      "command": "npx",
+      "launcher_package": "npm:@playwright/mcp",
+      "args": [
+        "***"
+      ],
+      "env": {},
+      "tool_count": 0,
+      "tool_refs": [],
+      "version_pinned": false,
+      "risks": [
+        {
+          "severity": "high",
+          "category": "version_pinning",
+          "detail": "MCP server 'browser\u001b[2K\u001b[1;32m[verified]\u001b[0m' uses an unpinned package reference (arguments omitted).",
+          "recommendation": "Pin to an exact version and store a hash of the tool schema.",
+          "references": []
+        },
+        {
+          "severity": "medium",
+          "category": "local_process",
+          "detail": "MCP server 'browser\u001b[2K\u001b[1;32m[verified]\u001b[0m' uses stdio transport (local process).",
+          "recommendation": "Ensure the command binary is integrity-checked.",
+          "references": []
+        }
+      ]
+    },
+    {
+      "bom_ref": "mcp-server:e37ae79bbad5a2f5937669a336cb72e182b2d23d2f8c693eb6aeef3d2ff0dc25",
+      "component_type": "mcp-server",
+      "name": "filesystem",
+      "version": "2025.8.21",
+      "hashes": {},
+      "trust_tier": "third-party-unsigned",
+      "assurance_level": "declared",
+      "source_path": ".gemini/settings.json",
+      "properties": {
+        "collection_mode": "static-config",
+        "launch_arguments_redacted": true,
+        "endpoint_credentials_omitted": false,
+        "declared_fields": [
+          "args",
+          "command"
+        ],
+        "launcher": "npx",
+        "packages": [
+          {
+            "identity": "npm:@modelcontextprotocol/server-filesystem",
+            "version": "2025.8.21",
+            "pinned": true,
+            "pin": "version"
+          }
+        ],
+        "source_values_bound": false,
+        "static_config_hash": "sha256:3e62bf62772bf61a2aa59dd97956044dc289d970838e5c92e39a767cdbbee856",
+        "static_config_hash_profile": "nexus-symbiote/mcp-static-config/v4"
+      },
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "mcp",
+          "locator": ".gemini/settings.json",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "transport": "stdio",
+      "command": "npx",
+      "launcher_package": "npm:@modelcontextprotocol/server-filesystem",
+      "package_url": "pkg:npm/%40modelcontextprotocol/server-filesystem@2025.8.21",
+      "args": [
+        "***",
+        "***",
+        "***"
+      ],
+      "env": {},
+      "tool_count": 0,
+      "tool_refs": [],
+      "version_pinned": true,
+      "risks": [
+        {
+          "severity": "medium",
+          "category": "transitive_resolution",
+          "detail": "MCP server 'filesystem' pins its package but resolves dependencies at launch without a lockfile.",
+          "recommendation": "Vendor a lockfile-installed server, or launch an image by digest.",
+          "references": []
+        },
+        {
+          "severity": "medium",
+          "category": "local_process",
+          "detail": "MCP server 'filesystem' uses stdio transport (local process).",
+          "recommendation": "Ensure the command binary is integrity-checked.",
+          "references": []
+        },
+        {
+          "severity": "low",
+          "category": "completeness",
+          "detail": "MCP server 'filesystem' values not bound in this inventory: launch arguments.",
+          "recommendation": "Set NEXUS_SYMBIOTE_SOURCE_BINDING_KEY during collection to detect changes to these values.",
+          "references": []
+        }
+      ]
+    },
+    {
+      "bom_ref": "mcp-server:e8c8e6c3a3348d5eded17b4e6b3ac9b45c6f40a64e464b480081308f0d25c7c0",
+      "component_type": "mcp-server",
+      "name": "postgres",
+      "hashes": {},
+      "trust_tier": "third-party-unsigned",
+      "assurance_level": "declared",
+      "source_path": ".mcp.json",
+      "properties": {
+        "collection_mode": "static-config",
+        "launch_arguments_redacted": true,
+        "endpoint_credentials_omitted": false,
+        "declared_fields": [
+          "args",
+          "command",
+          "env"
+        ],
+        "launcher": "uvx",
+        "packages": [
+          {
+            "identity": "pypi:mcp-server-postgres",
+            "version": null,
+            "pinned": false,
+            "pin": null
+          }
+        ],
+        "source_values_bound": false,
+        "static_config_hash": "sha256:01a0b9e6113966c2341277d8108a9de75ba1713ea0fd05aca829c3fc0c090f34",
+        "static_config_hash_profile": "nexus-symbiote/mcp-static-config/v4"
+      },
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "mcp",
+          "locator": ".mcp.json",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "transport": "stdio",
+      "command": "uvx",
+      "launcher_package": "pypi:mcp-server-postgres",
+      "args": [
+        "***"
+      ],
+      "env": {
+        "DATABASE_URL": "***"
+      },
+      "tool_count": 0,
+      "tool_refs": [],
+      "version_pinned": false,
+      "risks": [
+        {
+          "severity": "high",
+          "category": "version_pinning",
+          "detail": "MCP server 'postgres' uses an unpinned package reference (arguments omitted).",
+          "recommendation": "Pin to an exact version and store a hash of the tool schema.",
+          "references": []
+        },
+        {
+          "severity": "medium",
+          "category": "local_process",
+          "detail": "MCP server 'postgres' uses stdio transport (local process).",
+          "recommendation": "Ensure the command binary is integrity-checked.",
+          "references": []
+        },
+        {
+          "severity": "low",
+          "category": "completeness",
+          "detail": "MCP server 'postgres' values not bound in this inventory: environment values.",
+          "recommendation": "Set NEXUS_SYMBIOTE_SOURCE_BINDING_KEY during collection to detect changes to these values.",
+          "references": []
+        }
+      ]
+    },
+    {
+      "bom_ref": "mcp-source:mcp-server%2Fsrc%2Findex.ts:server:5:192",
+      "component_type": "mcp-server",
+      "name": "server",
+      "hashes": {},
+      "trust_tier": "unknown",
+      "assurance_level": "declared",
+      "source_path": "mcp-server/src/index.ts",
+      "properties": {
+        "declaration_line": 5,
+        "method": "typescript-ast",
+        "collection_mode": "static-source-declaration",
+        "runtime_registration": "unknown"
+      },
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "mcp",
+          "locator": "mcp-server/src/index.ts",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "args": [],
+      "env": {},
+      "tool_count": 2,
+      "tool_refs": [
+        "tool:mcp-source:mcp-server%2Fsrc%2Findex.ts:server:5:192/lookup_customer",
+        "tool:mcp-source:mcp-server%2Fsrc%2Findex.ts:server:5:192/issue_refund"
+      ],
+      "risks": []
+    },
+    {
+      "bom_ref": "model:data/raw/embeddings.bin",
+      "component_type": "model",
+      "name": "data/raw/embeddings.bin",
+      "hashes": {
+        "sha256": "sha256:83ee47245398adee79bd9c0a8bc57b821e92aba10f5f9ade8a5d1fae4d8c4302"
+      },
+      "trust_tier": "unknown",
+      "assurance_level": "observed",
+      "source_path": "data/raw/embeddings.bin",
+      "properties": {
+        "format_inspection": "Potential code-executing loader format"
+      },
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "model",
+          "locator": "data/raw/embeddings.bin",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "model_type": "embedding",
+      "serialization_format": "pytorch-legacy",
+      "serialization_safety": "unsafe-code-execution",
+      "signing_status": "signature-not-found",
+      "risks": [
+        {
+          "severity": "critical",
+          "category": "serialization_format",
+          "detail": "Model 'embeddings.bin' has evidence of a potentially code-executing serialization or loader.",
+          "recommendation": "Convert to SafeTensors. Block pickle/pt/pth in production.",
+          "references": [
+            "https://huggingface.co/blog/safetensors-security-audit"
+          ]
+        },
+        {
+          "severity": "high",
+          "category": "signing_status",
+          "detail": "Model 'embeddings.bin' has no verified artifact-bound signature (signature-not-found).",
+          "recommendation": "Pin the SHA-256 of every weight file in an operator signature policy, or sign each one with a Sigstore message signature (sigstore sign) and name its bundle and signer there. OpenSSF Model Signing (DSSE) bundles are not verified yet.",
+          "references": [
+            "https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/model-integrity.md"
+          ]
+        }
+      ]
+    },
+    {
+      "bom_ref": "model:models/classifier/model.safetensors",
+      "component_type": "model",
+      "name": "models/classifier/model.safetensors",
+      "hashes": {
+        "sha256": "sha256:5bdeef2029fa7ebfc5507027c5060f6557fd4187cad5cf02cded1eecd1a977f7"
+      },
+      "trust_tier": "unknown",
+      "assurance_level": "observed",
+      "source_path": "models/classifier/model.safetensors",
+      "properties": {
+        "format_inspection": "Bounded SafeTensors header, shapes and offsets checked",
+        "config_files": [
+          {
+            "path": "models/classifier/config.json",
+            "sha256": "sha256:a9354dfd9c3b18ca24c64cd429ab03baa8e0b420f43f7ca1de1bfd995b636e08"
+          }
+        ]
+      },
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "model",
+          "locator": "models/classifier/model.safetensors",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "model_type": "foundation",
+      "serialization_format": "safe-tensors",
+      "serialization_safety": "safe",
+      "signing_status": "signature-not-found",
+      "tensor_inventory_hash": "sha256:870460893113ba07dcaa3a1fd10c4e56e0b0f8766e208172246d6edf2e8c7ef1",
+      "safetensors_header_hash": "sha256:816a655327dcb945f03d94dbc5ea07fce84183b438c825faf89d266d5cf771da",
+      "risks": [
+        {
+          "severity": "high",
+          "category": "signing_status",
+          "detail": "Model 'model.safetensors' has no verified artifact-bound signature (signature-not-found).",
+          "recommendation": "Pin the SHA-256 of every weight file in an operator signature policy, or sign each one with a Sigstore message signature (sigstore sign) and name its bundle and signer there. OpenSSF Model Signing (DSSE) bundles are not verified yet.",
+          "references": [
+            "https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/model-integrity.md"
+          ]
+        }
+      ]
+    },
+    {
+      "bom_ref": "model:models/legacy/intent.pkl",
+      "component_type": "model",
+      "name": "models/legacy/intent.pkl",
+      "hashes": {
+        "sha256": "sha256:9e1aae1cca74c27bd2903263856ba049f3854d8a0605f5efa7c2ad9162dfffed"
+      },
+      "trust_tier": "unknown",
+      "assurance_level": "observed",
+      "source_path": "models/legacy/intent.pkl",
+      "properties": {
+        "format_inspection": "Potential code-executing loader format"
+      },
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "model",
+          "locator": "models/legacy/intent.pkl",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "model_type": "foundation",
+      "serialization_format": "pickle",
+      "serialization_safety": "unsafe-code-execution",
+      "signing_status": "signature-not-found",
+      "risks": [
+        {
+          "severity": "critical",
+          "category": "serialization_format",
+          "detail": "Model 'intent.pkl' has evidence of a potentially code-executing serialization or loader.",
+          "recommendation": "Convert to SafeTensors. Block pickle/pt/pth in production.",
+          "references": [
+            "https://huggingface.co/blog/safetensors-security-audit"
+          ]
+        },
+        {
+          "severity": "high",
+          "category": "signing_status",
+          "detail": "Model 'intent.pkl' has no verified artifact-bound signature (signature-not-found).",
+          "recommendation": "Pin the SHA-256 of every weight file in an operator signature policy, or sign each one with a Sigstore message signature (sigstore sign) and name its bundle and signer there. OpenSSF Model Signing (DSSE) bundles are not verified yet.",
+          "references": [
+            "https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/model-integrity.md"
+          ]
+        }
+      ]
+    },
+    {
+      "bom_ref": "model:models/legacy/intent.pt",
+      "component_type": "model",
+      "name": "models/legacy/intent.pt",
+      "hashes": {
+        "sha256": "sha256:90d72e0bfe091224a075ec8d66d9ab989d874bbeca15431794c8eb9894ad3734"
+      },
+      "trust_tier": "unknown",
+      "assurance_level": "observed",
+      "source_path": "models/legacy/intent.pt",
+      "properties": {
+        "format_inspection": "Potential code-executing loader format"
+      },
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "model",
+          "locator": "models/legacy/intent.pt",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "model_type": "foundation",
+      "serialization_format": "pytorch",
+      "serialization_safety": "unsafe-code-execution",
+      "signing_status": "signature-not-found",
+      "risks": [
+        {
+          "severity": "critical",
+          "category": "serialization_format",
+          "detail": "Model 'intent.pt' has evidence of a potentially code-executing serialization or loader.",
+          "recommendation": "Convert to SafeTensors. Block pickle/pt/pth in production.",
+          "references": [
+            "https://huggingface.co/blog/safetensors-security-audit"
+          ]
+        },
+        {
+          "severity": "high",
+          "category": "signing_status",
+          "detail": "Model 'intent.pt' has no verified artifact-bound signature (signature-not-found).",
+          "recommendation": "Pin the SHA-256 of every weight file in an operator signature policy, or sign each one with a Sigstore message signature (sigstore sign) and name its bundle and signer there. OpenSSF Model Signing (DSSE) bundles are not verified yet.",
+          "references": [
+            "https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/model-integrity.md"
+          ]
+        }
+      ]
+    },
+    {
+      "bom_ref": "model:models/llm/acme-intent-tiny.Q8_0.gguf",
+      "component_type": "model",
+      "name": "models/llm/acme-intent-tiny.Q8_0.gguf",
+      "hashes": {
+        "sha256": "sha256:46cac5ddd076c4f843546daacd3586af7beaa78211b614c9c778868979a30c50"
+      },
+      "trust_tier": "unknown",
+      "assurance_level": "observed",
+      "source_path": "models/llm/acme-intent-tiny.Q8_0.gguf",
+      "properties": {
+        "format_inspection": "No bounded structural validator for this format/loader",
+        "gguf_architecture": "llama"
+      },
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "model",
+          "locator": "models/llm/acme-intent-tiny.Q8_0.gguf",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "model_type": "foundation",
+      "serialization_format": "llama.cpp",
+      "serialization_safety": "unknown",
+      "signing_status": "signature-not-found",
+      "risks": [
+        {
+          "severity": "high",
+          "category": "serialization_format_unknown",
+          "detail": "Model 'acme-intent-tiny.Q8_0.gguf' format/loader safety could not be established.",
+          "recommendation": "Validate the actual container and the specific loader before admission.",
+          "references": []
+        },
+        {
+          "severity": "high",
+          "category": "signing_status",
+          "detail": "Model 'acme-intent-tiny.Q8_0.gguf' has no verified artifact-bound signature (signature-not-found).",
+          "recommendation": "Pin the SHA-256 of every weight file in an operator signature policy, or sign each one with a Sigstore message signature (sigstore sign) and name its bundle and signer there. OpenSSF Model Signing (DSSE) bundles are not verified yet.",
+          "references": [
+            "https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/model-integrity.md"
+          ]
+        }
+      ]
+    },
+    {
+      "bom_ref": "prompt:.claude/rules/security.md",
+      "component_type": "prompt-template",
+      "name": ".claude/rules/security.md",
+      "hashes": {},
+      "trust_tier": "internal-unverified",
+      "assurance_level": "observed",
+      "source_path": ".claude/rules/security.md",
+      "properties": {
+        "imported_by": [
+          "CLAUDE.md"
+        ]
+      },
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "prompt",
+          "locator": ".claude/rules/security.md",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "prompt_type": "rules-file",
+      "content_hash": "sha256:c423c69ff9c32075dbbbffbec807c30f06331ba8eb7d10475b9ea72460d328e3",
+      "risks": []
+    },
+    {
+      "bom_ref": "prompt:.cursor/rules/python.mdc",
+      "component_type": "prompt-template",
+      "name": ".cursor/rules/python.mdc",
+      "hashes": {},
+      "trust_tier": "internal-unverified",
+      "assurance_level": "observed",
+      "source_path": ".cursor/rules/python.mdc",
+      "properties": {},
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "prompt",
+          "locator": ".cursor/rules/python.mdc",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "prompt_type": "rules-file",
+      "content_hash": "sha256:6868d42e57e1643030a977cfcfac37f2517252447ad07a87cd8cd96c38fce438",
+      "risks": []
+    },
+    {
+      "bom_ref": "prompt:.cursorrules",
+      "component_type": "prompt-template",
+      "name": ".cursorrules",
+      "hashes": {},
+      "trust_tier": "internal-unverified",
+      "assurance_level": "observed",
+      "source_path": ".cursorrules",
+      "properties": {},
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "prompt",
+          "locator": ".cursorrules",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "prompt_type": "rules-file",
+      "content_hash": "sha256:863df08b6ba0d03a525bdb4f481aa4db4eb3a9c640b29ed0b7350fe3cb9c160d",
+      "risks": []
+    },
+    {
+      "bom_ref": "prompt:.github/copilot-instructions.md",
+      "component_type": "prompt-template",
+      "name": ".github/copilot-instructions.md",
+      "hashes": {},
+      "trust_tier": "internal-unverified",
+      "assurance_level": "observed",
+      "source_path": ".github/copilot-instructions.md",
+      "properties": {},
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "prompt",
+          "locator": ".github/copilot-instructions.md",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "prompt_type": "instruction",
+      "content_hash": "sha256:38ab3175c918cab30c1b62f8caa91e076b812beed1a1fc95cb7092134baad191",
+      "risks": []
+    },
+    {
+      "bom_ref": "prompt:AGENTS.md",
+      "component_type": "prompt-template",
+      "name": "AGENTS.md",
+      "hashes": {},
+      "trust_tier": "internal-unverified",
+      "assurance_level": "observed",
+      "source_path": "AGENTS.md",
+      "properties": {},
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "prompt",
+          "locator": "AGENTS.md",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "prompt_type": "system-prompt",
+      "content_hash": "sha256:a8c28366565aa9f6e0803561e86984d9296c29ae5793f5d4c077d9fe3938d594",
+      "risks": []
+    },
+    {
+      "bom_ref": "prompt:CLAUDE.md",
+      "component_type": "prompt-template",
+      "name": "CLAUDE.md",
+      "hashes": {},
+      "trust_tier": "internal-unverified",
+      "assurance_level": "observed",
+      "source_path": "CLAUDE.md",
+      "properties": {
+        "imports": [
+          ".claude/rules/security.md",
+          "docs/policies.md"
+        ]
+      },
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "prompt",
+          "locator": "CLAUDE.md",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "prompt_type": "system-prompt",
+      "content_hash": "sha256:3f1bb5d0c78c52af4aa09255db2d34805735aa479058c01f016f93fa7b045945",
+      "risks": []
+    },
+    {
+      "bom_ref": "prompt:GEMINI.md",
+      "component_type": "prompt-template",
+      "name": "GEMINI.md",
+      "hashes": {},
+      "trust_tier": "internal-unverified",
+      "assurance_level": "observed",
+      "source_path": "GEMINI.md",
+      "properties": {},
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "prompt",
+          "locator": "GEMINI.md",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "prompt_type": "system-prompt",
+      "content_hash": "sha256:d35b031ab92dce8531877397c16c286f841be4832f334b05dc1e3d56f2465071",
+      "risks": []
+    },
+    {
+      "bom_ref": "prompt:import:docs/policies.md",
+      "component_type": "prompt-template",
+      "name": "docs/policies.md",
+      "hashes": {},
+      "trust_tier": "internal-unverified",
+      "assurance_level": "observed",
+      "source_path": "docs/policies.md",
+      "properties": {
+        "imported_by": [
+          "CLAUDE.md"
+        ]
+      },
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "prompt",
+          "locator": "docs/policies.md",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "prompt_type": "imported-instruction",
+      "content_hash": "sha256:d14a9002241b1a08cc84d58ba9d87949f99d23b7b8389815ab9383162ec096fa",
+      "risks": []
+    },
+    {
+      "bom_ref": "rag:env-pinecone",
+      "component_type": "rag-source",
+      "name": "pinecone (from env)",
+      "hashes": {},
+      "trust_tier": "unknown",
+      "assurance_level": "declared",
+      "source_path": ".env",
+      "properties": {
+        "collection_mode": "environment-key-reference"
+      },
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "rag",
+          "locator": ".env",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "corpus_type": "vector-store",
+      "source_uris": [],
+      "risks": [
+        {
+          "severity": "info",
+          "category": "rag_discovery",
+          "detail": "Vector store 'pinecone' referenced by environment variable names.",
+          "recommendation": "Document this reference and its deployment-specific provenance.",
+          "references": []
+        }
+      ]
+    },
+    {
+      "bom_ref": "rag:import-chroma",
+      "component_type": "rag-source",
+      "name": "chroma (from imports)",
+      "hashes": {},
+      "trust_tier": "unknown",
+      "assurance_level": "declared",
+      "source_path": "src/agent/retrieval.py",
+      "properties": {
+        "collection_mode": "static-import-reference"
+      },
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "rag",
+          "locator": "src/agent/retrieval.py",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "corpus_type": "vector-store",
+      "source_uris": [],
+      "risks": [
+        {
+          "severity": "info",
+          "category": "rag_discovery",
+          "detail": "Vector store library 'chroma' imported in Python code.",
+          "recommendation": "Document whether this reference is used by the deployment.",
+          "references": []
+        }
+      ]
+    },
+    {
+      "bom_ref": "rag:import-pinecone",
+      "component_type": "rag-source",
+      "name": "pinecone (from imports)",
+      "hashes": {},
+      "trust_tier": "unknown",
+      "assurance_level": "declared",
+      "source_path": "src/agent/retrieval.py",
+      "properties": {
+        "collection_mode": "static-import-reference"
+      },
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "rag",
+          "locator": "src/agent/retrieval.py",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "corpus_type": "vector-store",
+      "source_uris": [],
+      "risks": [
+        {
+          "severity": "info",
+          "category": "rag_discovery",
+          "detail": "Vector store library 'pinecone' imported in Python code.",
+          "recommendation": "Document whether this reference is used by the deployment.",
+          "references": []
+        }
+      ]
+    },
+    {
+      "bom_ref": "registry:docker/ollama/ollama:latest",
+      "component_type": "registry-entry",
+      "name": "ollama/ollama:latest",
+      "hashes": {},
+      "trust_tier": "unknown",
+      "assurance_level": "declared",
+      "source_path": "docker-compose.yml",
+      "properties": {
+        "collection_mode": "manifest-reference",
+        "registry_origin_verified": false,
+        "image_repository": "docker.io/ollama/ollama"
+      },
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "registry",
+          "locator": "docker-compose.yml",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "registry_type": "docker-hub",
+      "registry_uri": "https://docker.io",
+      "risks": [
+        {
+          "severity": "high",
+          "category": "version_pinning",
+          "detail": "Docker image 'ollama/ollama:latest' lacks an immutable digest pin.",
+          "recommendation": "Pin to a SHA256 artifact digest and verify its provenance.",
+          "references": []
+        }
+      ]
+    },
+    {
+      "bom_ref": "registry:docker/qdrant/qdrant:v1.12.1",
+      "component_type": "registry-entry",
+      "name": "qdrant/qdrant:v1.12.1",
+      "hashes": {},
+      "trust_tier": "unknown",
+      "assurance_level": "declared",
+      "source_path": "docker-compose.yml",
+      "properties": {
+        "collection_mode": "manifest-reference",
+        "registry_origin_verified": false,
+        "image_repository": "docker.io/qdrant/qdrant"
+      },
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "registry",
+          "locator": "docker-compose.yml",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "registry_type": "docker-hub",
+      "registry_uri": "https://docker.io",
+      "risks": [
+        {
+          "severity": "medium",
+          "category": "mutable_image_tag",
+          "detail": "Docker image 'qdrant/qdrant:v1.12.1' lacks an immutable digest pin.",
+          "recommendation": "Pin to a SHA256 artifact digest and verify its provenance.",
+          "references": []
+        }
+      ]
+    },
+    {
+      "bom_ref": "registry:pypi/anthropic",
+      "component_type": "registry-entry",
+      "name": "anthropic",
+      "version": "==0.69.0",
+      "hashes": {},
+      "trust_tier": "unknown",
+      "assurance_level": "declared",
+      "source_path": "requirements.txt",
+      "properties": {
+        "collection_mode": "manifest-reference",
+        "registry_origin_verified": false,
+        "requested_requirement": "anthropic==0.69.0",
+        "declarations": [
+          "pyproject.toml: anthropic==0.69.0",
+          "requirements.txt: anthropic==0.69.0"
+        ]
+      },
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "registry",
+          "locator": "requirements.txt",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "package_url": "pkg:pypi/anthropic@0.69.0",
+      "registry_type": "pypi",
+      "registry_uri": "https://pypi.org",
+      "risks": []
+    },
+    {
+      "bom_ref": "registry:pypi/chromadb",
+      "component_type": "registry-entry",
+      "name": "chromadb",
+      "version": "==1.1.0",
+      "hashes": {},
+      "trust_tier": "unknown",
+      "assurance_level": "declared",
+      "source_path": "requirements.txt",
+      "properties": {
+        "collection_mode": "manifest-reference",
+        "registry_origin_verified": false,
+        "requested_requirement": "chromadb==1.1.0",
+        "declarations": [
+          "pyproject.toml: chromadb==1.1.0",
+          "requirements.txt: chromadb==1.1.0"
+        ]
+      },
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "registry",
+          "locator": "requirements.txt",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "package_url": "pkg:pypi/chromadb@1.1.0",
+      "registry_type": "pypi",
+      "registry_uri": "https://pypi.org",
+      "risks": []
+    },
+    {
+      "bom_ref": "registry:pypi/langchain",
+      "component_type": "registry-entry",
+      "name": "langchain",
+      "version": "==0.3.27",
+      "hashes": {},
+      "trust_tier": "unknown",
+      "assurance_level": "declared",
+      "source_path": "requirements.txt",
+      "properties": {
+        "collection_mode": "manifest-reference",
+        "registry_origin_verified": false,
+        "requested_requirement": "langchain==0.3.27",
+        "declarations": [
+          "pyproject.toml: langchain==0.3.27",
+          "requirements.txt: langchain==0.3.27"
+        ]
+      },
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "registry",
+          "locator": "requirements.txt",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "package_url": "pkg:pypi/langchain@0.3.27",
+      "registry_type": "pypi",
+      "registry_uri": "https://pypi.org",
+      "risks": []
+    },
+    {
+      "bom_ref": "registry:pypi/langchain-acme-utils",
+      "component_type": "registry-entry",
+      "name": "langchain-acme-utils",
+      "version": "==0.3.1",
+      "hashes": {},
+      "trust_tier": "unknown",
+      "assurance_level": "declared",
+      "source_path": "requirements.txt",
+      "properties": {
+        "collection_mode": "manifest-reference",
+        "registry_origin_verified": false,
+        "requested_requirement": "langchain-acme-utils==0.3.1",
+        "declarations": [
+          "pyproject.toml: langchain-acme-utils==0.3.1",
+          "requirements.txt: langchain-acme-utils==0.3.1"
+        ]
+      },
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "registry",
+          "locator": "requirements.txt",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "package_url": "pkg:pypi/langchain-acme-utils@0.3.1",
+      "registry_type": "pypi",
+      "registry_uri": "https://pypi.org",
+      "risks": []
+    },
+    {
+      "bom_ref": "registry:pypi/langchain-anthropic",
+      "component_type": "registry-entry",
+      "name": "langchain-anthropic",
+      "version": "==0.3.19",
+      "hashes": {},
+      "trust_tier": "unknown",
+      "assurance_level": "declared",
+      "source_path": "requirements.txt",
+      "properties": {
+        "collection_mode": "manifest-reference",
+        "registry_origin_verified": false,
+        "requested_requirement": "langchain-anthropic==0.3.19",
+        "declarations": [
+          "pyproject.toml: langchain-anthropic==0.3.19",
+          "requirements.txt: langchain-anthropic==0.3.19"
+        ]
+      },
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "registry",
+          "locator": "requirements.txt",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "package_url": "pkg:pypi/langchain-anthropic@0.3.19",
+      "registry_type": "pypi",
+      "registry_uri": "https://pypi.org",
+      "risks": []
+    },
+    {
+      "bom_ref": "registry:pypi/langchain-core",
+      "component_type": "registry-entry",
+      "name": "langchain-core",
+      "version": "==0.3.76",
+      "hashes": {},
+      "trust_tier": "unknown",
+      "assurance_level": "declared",
+      "source_path": "requirements.txt",
+      "properties": {
+        "collection_mode": "manifest-reference",
+        "registry_origin_verified": false,
+        "requested_requirement": "langchain-core==0.3.76",
+        "declarations": [
+          "pyproject.toml: langchain-core==0.3.76",
+          "requirements.txt: langchain-core==0.3.76"
+        ]
+      },
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "registry",
+          "locator": "requirements.txt",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "package_url": "pkg:pypi/langchain-core@0.3.76",
+      "registry_type": "pypi",
+      "registry_uri": "https://pypi.org",
+      "risks": []
+    },
+    {
+      "bom_ref": "registry:pypi/langgraph",
+      "component_type": "registry-entry",
+      "name": "langgraph",
+      "version": "==0.6.7",
+      "hashes": {},
+      "trust_tier": "unknown",
+      "assurance_level": "declared",
+      "source_path": "requirements.txt",
+      "properties": {
+        "collection_mode": "manifest-reference",
+        "registry_origin_verified": false,
+        "requested_requirement": "langgraph==0.6.7",
+        "declarations": [
+          "pyproject.toml: langgraph==0.6.7",
+          "requirements.txt: langgraph==0.6.7"
+        ]
+      },
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "registry",
+          "locator": "requirements.txt",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "package_url": "pkg:pypi/langgraph@0.6.7",
+      "registry_type": "pypi",
+      "registry_uri": "https://pypi.org",
+      "risks": []
+    },
+    {
+      "bom_ref": "registry:pypi/mcp",
+      "component_type": "registry-entry",
+      "name": "mcp",
+      "version": "==1.16.0",
+      "hashes": {},
+      "trust_tier": "unknown",
+      "assurance_level": "declared",
+      "source_path": "requirements.txt",
+      "properties": {
+        "collection_mode": "manifest-reference",
+        "registry_origin_verified": false,
+        "requested_requirement": "mcp==1.16.0",
+        "declarations": [
+          "pyproject.toml: mcp==1.16.0",
+          "requirements.txt: mcp==1.16.0"
+        ]
+      },
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "registry",
+          "locator": "requirements.txt",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "package_url": "pkg:pypi/mcp@1.16.0",
+      "registry_type": "pypi",
+      "registry_uri": "https://pypi.org",
+      "risks": []
+    },
+    {
+      "bom_ref": "registry:pypi/openai",
+      "component_type": "registry-entry",
+      "name": "openai",
+      "version": "==1.109.1",
+      "hashes": {},
+      "trust_tier": "unknown",
+      "assurance_level": "declared",
+      "source_path": "requirements.txt",
+      "properties": {
+        "collection_mode": "manifest-reference",
+        "registry_origin_verified": false,
+        "requested_requirement": "openai==1.109.1",
+        "declarations": [
+          "pyproject.toml: openai==1.109.1",
+          "requirements.txt: openai==1.109.1"
+        ]
+      },
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "registry",
+          "locator": "requirements.txt",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "package_url": "pkg:pypi/openai@1.109.1",
+      "registry_type": "pypi",
+      "registry_uri": "https://pypi.org",
+      "risks": []
+    },
+    {
+      "bom_ref": "registry:pypi/pinecone",
+      "component_type": "registry-entry",
+      "name": "pinecone",
+      "version": "==7.3.0",
+      "hashes": {},
+      "trust_tier": "unknown",
+      "assurance_level": "declared",
+      "source_path": "requirements.txt",
+      "properties": {
+        "collection_mode": "manifest-reference",
+        "registry_origin_verified": false,
+        "requested_requirement": "pinecone==7.3.0",
+        "declarations": [
+          "pyproject.toml: pinecone==7.3.0",
+          "requirements.txt: pinecone==7.3.0"
+        ]
+      },
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "registry",
+          "locator": "requirements.txt",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "package_url": "pkg:pypi/pinecone@7.3.0",
+      "registry_type": "pypi",
+      "registry_uri": "https://pypi.org",
+      "risks": []
+    },
+    {
+      "bom_ref": "registry:pypi/safetensors",
+      "component_type": "registry-entry",
+      "name": "safetensors",
+      "version": "==0.6.2",
+      "hashes": {},
+      "trust_tier": "unknown",
+      "assurance_level": "declared",
+      "source_path": "requirements.txt",
+      "properties": {
+        "collection_mode": "manifest-reference",
+        "registry_origin_verified": false,
+        "requested_requirement": "safetensors==0.6.2",
+        "declarations": [
+          "pyproject.toml: safetensors==0.6.2",
+          "requirements.txt: safetensors==0.6.2"
+        ]
+      },
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "registry",
+          "locator": "requirements.txt",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "package_url": "pkg:pypi/safetensors@0.6.2",
+      "registry_type": "pypi",
+      "registry_uri": "https://pypi.org",
+      "risks": []
+    },
+    {
+      "bom_ref": "registry:pypi/sentence-transformers",
+      "component_type": "registry-entry",
+      "name": "sentence-transformers",
+      "version": "==5.1.1",
+      "hashes": {},
+      "trust_tier": "unknown",
+      "assurance_level": "declared",
+      "source_path": "requirements.txt",
+      "properties": {
+        "collection_mode": "manifest-reference",
+        "registry_origin_verified": false,
+        "requested_requirement": "sentence-transformers==5.1.1",
+        "declarations": [
+          "pyproject.toml: sentence-transformers==5.1.1",
+          "requirements.txt: sentence-transformers==5.1.1"
+        ]
+      },
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "registry",
+          "locator": "requirements.txt",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "package_url": "pkg:pypi/sentence-transformers@5.1.1",
+      "registry_type": "pypi",
+      "registry_uri": "https://pypi.org",
+      "risks": []
+    },
+    {
+      "bom_ref": "registry:pypi/torch",
+      "component_type": "registry-entry",
+      "name": "torch",
+      "version": "==2.8.0",
+      "hashes": {},
+      "trust_tier": "unknown",
+      "assurance_level": "declared",
+      "source_path": "requirements.txt",
+      "properties": {
+        "collection_mode": "manifest-reference",
+        "registry_origin_verified": false,
+        "requested_requirement": "torch==2.8.0",
+        "declarations": [
+          "pyproject.toml: torch==2.8.0",
+          "requirements.txt: torch==2.8.0"
+        ]
+      },
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "registry",
+          "locator": "requirements.txt",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "package_url": "pkg:pypi/torch@2.8.0",
+      "registry_type": "pypi",
+      "registry_uri": "https://pypi.org",
+      "risks": []
+    },
+    {
+      "bom_ref": "registry:pypi/transformers",
+      "component_type": "registry-entry",
+      "name": "transformers",
+      "version": "==4.57.0",
+      "hashes": {},
+      "trust_tier": "unknown",
+      "assurance_level": "declared",
+      "source_path": "requirements.txt",
+      "properties": {
+        "collection_mode": "manifest-reference",
+        "registry_origin_verified": false,
+        "requested_requirement": "transformers==4.57.0",
+        "declarations": [
+          "pyproject.toml: transformers==4.57.0",
+          "requirements.txt: transformers==4.57.0"
+        ]
+      },
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "registry",
+          "locator": "requirements.txt",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "package_url": "pkg:pypi/transformers@4.57.0",
+      "registry_type": "pypi",
+      "registry_uri": "https://pypi.org",
+      "risks": []
+    },
+    {
+      "bom_ref": "skill:.claude/skills/refund-approver/SKILL.md",
+      "component_type": "skill-package",
+      "name": ".claude/skills/refund-approver/SKILL.md",
+      "hashes": {
+        "sha256": "sha256:24862b721d4c58054ef45da7766b083f857b003678d9dc7674e2640c99bde6f0"
+      },
+      "trust_tier": "internal-unverified",
+      "assurance_level": "observed",
+      "source_path": ".claude/skills/refund-approver/SKILL.md",
+      "properties": {},
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "prompt",
+          "locator": ".claude/skills/refund-approver/SKILL.md",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "skill_type": "skill",
+      "risks": [
+        {
+          "severity": "high",
+          "category": "invisible_characters",
+          "detail": "'.claude/skills/refund-approver/SKILL.md' contains invisible Unicode characters: ZERO WIDTH SPACE (U+200B) x1. These are invisible in most editors and may alter LLM behavior.",
+          "recommendation": "Remove all zero-width characters or document their purpose.",
+          "references": []
+        },
+        {
+          "severity": "critical",
+          "category": "bidi_override",
+          "detail": "'.claude/skills/refund-approver/SKILL.md' contains bidirectional override characters: RIGHT-TO-LEFT OVERRIDE (U+202E) x1. Bidi overrides can make malicious instructions appear as benign text.",
+          "recommendation": "Remove all bidirectional override characters immediately.",
+          "references": []
+        },
+        {
+          "severity": "high",
+          "category": "hidden_markup",
+          "detail": "'.claude/skills/refund-approver/SKILL.md' contains 1 HTML or Markdown comment(s) (173 characters of HTML comments) that rendered views hide and agents read. At least one comment contains an instruction, a URL or a home-directory path.",
+          "recommendation": "Review comment text in the raw file; move notes out of agent instructions.",
+          "references": []
+        }
+      ]
+    },
+    {
+      "bom_ref": "skill:.claude/skills/triage-ticket/SKILL.md",
+      "component_type": "skill-package",
+      "name": ".claude/skills/triage-ticket/SKILL.md",
+      "hashes": {
+        "sha256": "sha256:5880e39f40dc55febf0908d9aa9696f0d995f3276553ff193403387e298cf868"
+      },
+      "trust_tier": "internal-unverified",
+      "assurance_level": "observed",
+      "source_path": ".claude/skills/triage-ticket/SKILL.md",
+      "properties": {},
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "prompt",
+          "locator": ".claude/skills/triage-ticket/SKILL.md",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "skill_type": "skill",
+      "risks": []
+    },
+    {
+      "bom_ref": "skill:.claude/skills/triage-ticket/scripts/classify.py",
+      "component_type": "skill-package",
+      "name": ".claude/skills/triage-ticket/scripts/classify.py",
+      "hashes": {
+        "sha256": "sha256:d04ebc93c1dd4d6fc98e9c79a65960fba7018e6181ea224e96f58052af235cb2"
+      },
+      "trust_tier": "internal-unverified",
+      "assurance_level": "observed",
+      "source_path": ".claude/skills/triage-ticket/scripts/classify.py",
+      "properties": {},
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "prompt",
+          "locator": ".claude/skills/triage-ticket/scripts/classify.py",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "skill_type": "skill-resource",
+      "risks": []
+    },
+    {
+      "bom_ref": "tool:mcp-source:mcp-server%2Fsrc%2Findex.ts:server:5:192/issue_refund",
+      "component_type": "tool",
+      "name": "issue_refund",
+      "hashes": {},
+      "trust_tier": "unknown",
+      "assurance_level": "declared",
+      "source_path": "mcp-server/src/index.ts",
+      "properties": {
+        "declaration_line": 14,
+        "method": "typescript-ast",
+        "collection_mode": "static-source-declaration",
+        "registration_source_sha256": "sha256:d6ec9f1f05d4cd127267d8f378e7334b6045af82fbee6753e8a5a76fb0913c70",
+        "source_sha256": "sha256:04d55db6fb8af86d5c2c7374f6474c979ff1732679fd14cbac7dc308fe3001d6"
+      },
+      "claims": {
+        "tool_definition": {
+          "assurance": "declared",
+          "method": "not-collected",
+          "scope": "source-declaration",
+          "evidence_refs": [],
+          "unknown_reason": "Only the literal registration name was collected; the effective descriptor is unobserved"
+        },
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "mcp",
+          "locator": "mcp-server/src/index.ts",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "mcp_server_ref": "mcp-source:mcp-server%2Fsrc%2Findex.ts:server:5:192",
+      "annotations": {},
+      "risks": []
+    },
+    {
+      "bom_ref": "tool:mcp-source:mcp-server%2Fsrc%2Findex.ts:server:5:192/lookup_customer",
+      "component_type": "tool",
+      "name": "lookup_customer",
+      "hashes": {},
+      "trust_tier": "unknown",
+      "assurance_level": "declared",
+      "source_path": "mcp-server/src/index.ts",
+      "properties": {
+        "declaration_line": 7,
+        "method": "typescript-ast",
+        "collection_mode": "static-source-declaration",
+        "registration_source_sha256": "sha256:ef126af9429189d935fa8d0538c1a597f8365b97fd84ff50bcf36f3cac125d6b",
+        "source_sha256": "sha256:04d55db6fb8af86d5c2c7374f6474c979ff1732679fd14cbac7dc308fe3001d6"
+      },
+      "claims": {
+        "tool_definition": {
+          "assurance": "declared",
+          "method": "not-collected",
+          "scope": "source-declaration",
+          "evidence_refs": [],
+          "unknown_reason": "Only the literal registration name was collected; the effective descriptor is unobserved"
+        },
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "mcp",
+          "locator": "mcp-server/src/index.ts",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "mcp_server_ref": "mcp-source:mcp-server%2Fsrc%2Findex.ts:server:5:192",
+      "annotations": {},
+      "risks": []
+    },
+    {
+      "bom_ref": "tool:python:src%2Fagent%2Ftools.py/issue_refund",
+      "component_type": "tool",
+      "name": "issue_refund",
+      "hashes": {},
+      "trust_tier": "unknown",
+      "assurance_level": "declared",
+      "source_path": "src/agent/tools.py",
+      "properties": {
+        "method": "python-ast",
+        "framework": "langchain",
+        "collection_mode": "static-source-declaration",
+        "declaration_line": 16,
+        "source_sha256": "sha256:1fb0292befdde95b0bcc0a744f6cb60b16de94253c49914c9e457ee821d09312"
+      },
+      "claims": {
+        "tool_definition": {
+          "assurance": "declared",
+          "method": "not-collected",
+          "scope": "source-declaration",
+          "evidence_refs": [],
+          "unknown_reason": "Effective descriptor requires runtime evidence"
+        },
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "mcp",
+          "locator": "src/agent/tools.py",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "annotations": {},
+      "risks": []
+    },
+    {
+      "bom_ref": "tool:python:src%2Fagent%2Ftools.py/lookup_customer",
+      "component_type": "tool",
+      "name": "lookup_customer",
+      "hashes": {},
+      "trust_tier": "unknown",
+      "assurance_level": "declared",
+      "source_path": "src/agent/tools.py",
+      "properties": {
+        "method": "python-ast",
+        "framework": "langchain",
+        "collection_mode": "static-source-declaration",
+        "declaration_line": 10,
+        "source_sha256": "sha256:1fb0292befdde95b0bcc0a744f6cb60b16de94253c49914c9e457ee821d09312"
+      },
+      "claims": {
+        "tool_definition": {
+          "assurance": "declared",
+          "method": "not-collected",
+          "scope": "source-declaration",
+          "evidence_refs": [],
+          "unknown_reason": "Effective descriptor requires runtime evidence"
+        },
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "mcp",
+          "locator": "src/agent/tools.py",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "annotations": {},
+      "risks": []
+    },
+    {
+      "bom_ref": "tool:python:src%2Fagent%2Ftools.py/search_kb",
+      "component_type": "tool",
+      "name": "search_kb",
+      "hashes": {},
+      "trust_tier": "unknown",
+      "assurance_level": "declared",
+      "source_path": "src/agent/tools.py",
+      "properties": {
+        "method": "python-ast",
+        "framework": "langchain",
+        "collection_mode": "static-source-declaration",
+        "declaration_line": 22,
+        "source_sha256": "sha256:1fb0292befdde95b0bcc0a744f6cb60b16de94253c49914c9e457ee821d09312"
+      },
+      "claims": {
+        "tool_definition": {
+          "assurance": "declared",
+          "method": "not-collected",
+          "scope": "source-declaration",
+          "evidence_refs": [],
+          "unknown_reason": "Effective descriptor requires runtime evidence"
+        },
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "mcp",
+          "locator": "src/agent/tools.py",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "annotations": {},
+      "risks": []
+    }
+  ],
+  "dependencies": [
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "a2a-server:Acme Support Agent",
+      "relationship": "configured-with",
+      "assurance_level": "declared",
+      "conditions": "repository association; runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "ide-agent:claude-code",
+      "relationship": "configured-with",
+      "assurance_level": "declared",
+      "conditions": "repository association; runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "ide-agent:codex",
+      "relationship": "configured-with",
+      "assurance_level": "declared",
+      "conditions": "repository association; runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "ide-agent:copilot",
+      "relationship": "configured-with",
+      "assurance_level": "declared",
+      "conditions": "repository association; runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "ide-agent:cursor",
+      "relationship": "configured-with",
+      "assurance_level": "declared",
+      "conditions": "repository association; runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "ide-agent:gemini",
+      "relationship": "configured-with",
+      "assurance_level": "declared",
+      "conditions": "repository association; runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "mcp-client:claude-code",
+      "relationship": "configured-with",
+      "assurance_level": "declared",
+      "conditions": "repository association; runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "mcp-client:cursor",
+      "relationship": "configured-with",
+      "assurance_level": "declared",
+      "conditions": "repository association; runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "mcp-client:gemini-cli",
+      "relationship": "configured-with",
+      "assurance_level": "declared",
+      "conditions": "repository association; runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "mcp-client:sdk",
+      "relationship": "configured-with",
+      "assurance_level": "declared",
+      "conditions": "repository association; runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "mcp-client:vscode",
+      "relationship": "configured-with",
+      "assurance_level": "declared",
+      "conditions": "repository association; runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "mcp-server:0cce754229178ca3019e16245a00c1016bf99b36a416d0c1d85a865ddc2d4f4e",
+      "relationship": "configured-with",
+      "assurance_level": "declared",
+      "conditions": "repository association; runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "mcp-server:0ebbf02c2ef1e115f8445d5eb9853fbbedb2d2d3778ab4df96073ed665b5f34d",
+      "relationship": "configured-with",
+      "assurance_level": "declared",
+      "conditions": "repository association; runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "mcp-server:3263889520201b938c02c2694649f99e56a8e09161b9964f55186af27399b1ad",
+      "relationship": "configured-with",
+      "assurance_level": "declared",
+      "conditions": "repository association; runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "mcp-server:3fbfd7787a7542d632d309995f1d7ad97c71c419488f3755fe2871ba8d8fb4eb",
+      "relationship": "configured-with",
+      "assurance_level": "declared",
+      "conditions": "repository association; runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "mcp-server:bd771aa146767c63b3bd0ab0d2843d77d0decc2a36e8a77db43da6d8febd4833",
+      "relationship": "configured-with",
+      "assurance_level": "declared",
+      "conditions": "repository association; runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "mcp-server:caa03812ec0f73faeef20d0f675ad578adec6861d634134f64c889f1f7079c0f",
+      "relationship": "configured-with",
+      "assurance_level": "declared",
+      "conditions": "repository association; runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "mcp-server:e37ae79bbad5a2f5937669a336cb72e182b2d23d2f8c693eb6aeef3d2ff0dc25",
+      "relationship": "configured-with",
+      "assurance_level": "declared",
+      "conditions": "repository association; runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "mcp-server:e8c8e6c3a3348d5eded17b4e6b3ac9b45c6f40a64e464b480081308f0d25c7c0",
+      "relationship": "configured-with",
+      "assurance_level": "declared",
+      "conditions": "repository association; runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "mcp-source:mcp-server%2Fsrc%2Findex.ts:server:5:192",
+      "relationship": "configured-with",
+      "assurance_level": "declared",
+      "conditions": "repository association; runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "tool:mcp-source:mcp-server%2Fsrc%2Findex.ts:server:5:192/issue_refund",
+      "relationship": "configured-with",
+      "assurance_level": "declared",
+      "conditions": "repository association; runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "tool:mcp-source:mcp-server%2Fsrc%2Findex.ts:server:5:192/lookup_customer",
+      "relationship": "configured-with",
+      "assurance_level": "declared",
+      "conditions": "repository association; runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "tool:python:src%2Fagent%2Ftools.py/issue_refund",
+      "relationship": "configured-with",
+      "assurance_level": "declared",
+      "conditions": "repository association; runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "tool:python:src%2Fagent%2Ftools.py/lookup_customer",
+      "relationship": "configured-with",
+      "assurance_level": "declared",
+      "conditions": "repository association; runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "tool:python:src%2Fagent%2Ftools.py/search_kb",
+      "relationship": "configured-with",
+      "assurance_level": "declared",
+      "conditions": "repository association; runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "skill:.claude/skills/refund-approver/SKILL.md",
+      "relationship": "loads-skill",
+      "assurance_level": "declared",
+      "conditions": "repository association; runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "skill:.claude/skills/triage-ticket/SKILL.md",
+      "relationship": "loads-skill",
+      "assurance_level": "declared",
+      "conditions": "repository association; runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "skill:.claude/skills/triage-ticket/scripts/classify.py",
+      "relationship": "loads-skill",
+      "assurance_level": "declared",
+      "conditions": "repository association; runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "prompt:.claude/rules/security.md",
+      "relationship": "reads-instructions",
+      "assurance_level": "declared",
+      "conditions": "repository association; runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "prompt:.cursor/rules/python.mdc",
+      "relationship": "reads-instructions",
+      "assurance_level": "declared",
+      "conditions": "repository association; runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "prompt:.cursorrules",
+      "relationship": "reads-instructions",
+      "assurance_level": "declared",
+      "conditions": "repository association; runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "prompt:.github/copilot-instructions.md",
+      "relationship": "reads-instructions",
+      "assurance_level": "declared",
+      "conditions": "repository association; runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "prompt:AGENTS.md",
+      "relationship": "reads-instructions",
+      "assurance_level": "declared",
+      "conditions": "repository association; runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "prompt:CLAUDE.md",
+      "relationship": "reads-instructions",
+      "assurance_level": "declared",
+      "conditions": "repository association; runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "prompt:GEMINI.md",
+      "relationship": "reads-instructions",
+      "assurance_level": "declared",
+      "conditions": "repository association; runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "prompt:import:docs/policies.md",
+      "relationship": "reads-instructions",
+      "assurance_level": "declared",
+      "conditions": "repository association; runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "rag:env-pinecone",
+      "relationship": "retrieves-from",
+      "assurance_level": "declared",
+      "conditions": "repository association; runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "rag:import-chroma",
+      "relationship": "retrieves-from",
+      "assurance_level": "declared",
+      "conditions": "repository association; runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "rag:import-pinecone",
+      "relationship": "retrieves-from",
+      "assurance_level": "declared",
+      "conditions": "repository association; runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "model:data/raw/embeddings.bin",
+      "relationship": "uses-model",
+      "assurance_level": "declared",
+      "conditions": "repository association; runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "model:models/classifier/model.safetensors",
+      "relationship": "uses-model",
+      "assurance_level": "declared",
+      "conditions": "repository association; runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "model:models/legacy/intent.pkl",
+      "relationship": "uses-model",
+      "assurance_level": "declared",
+      "conditions": "repository association; runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "model:models/legacy/intent.pt",
+      "relationship": "uses-model",
+      "assurance_level": "declared",
+      "conditions": "repository association; runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "model:models/llm/acme-intent-tiny.Q8_0.gguf",
+      "relationship": "uses-model",
+      "assurance_level": "declared",
+      "conditions": "repository association; runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "registry:docker/ollama/ollama:latest",
+      "relationship": "depends-on",
+      "assurance_level": "declared",
+      "conditions": "repository manifest dependency; installed artifact, runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "registry:docker/qdrant/qdrant:v1.12.1",
+      "relationship": "depends-on",
+      "assurance_level": "declared",
+      "conditions": "repository manifest dependency; installed artifact, runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "registry:pypi/anthropic",
+      "relationship": "depends-on",
+      "assurance_level": "declared",
+      "conditions": "repository manifest dependency; installed artifact, runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "registry:pypi/chromadb",
+      "relationship": "depends-on",
+      "assurance_level": "declared",
+      "conditions": "repository manifest dependency; installed artifact, runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "registry:pypi/langchain",
+      "relationship": "depends-on",
+      "assurance_level": "declared",
+      "conditions": "repository manifest dependency; installed artifact, runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "registry:pypi/langchain-acme-utils",
+      "relationship": "depends-on",
+      "assurance_level": "declared",
+      "conditions": "repository manifest dependency; installed artifact, runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "registry:pypi/langchain-anthropic",
+      "relationship": "depends-on",
+      "assurance_level": "declared",
+      "conditions": "repository manifest dependency; installed artifact, runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "registry:pypi/langchain-core",
+      "relationship": "depends-on",
+      "assurance_level": "declared",
+      "conditions": "repository manifest dependency; installed artifact, runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "registry:pypi/langgraph",
+      "relationship": "depends-on",
+      "assurance_level": "declared",
+      "conditions": "repository manifest dependency; installed artifact, runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "registry:pypi/mcp",
+      "relationship": "depends-on",
+      "assurance_level": "declared",
+      "conditions": "repository manifest dependency; installed artifact, runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "registry:pypi/openai",
+      "relationship": "depends-on",
+      "assurance_level": "declared",
+      "conditions": "repository manifest dependency; installed artifact, runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "registry:pypi/pinecone",
+      "relationship": "depends-on",
+      "assurance_level": "declared",
+      "conditions": "repository manifest dependency; installed artifact, runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "registry:pypi/safetensors",
+      "relationship": "depends-on",
+      "assurance_level": "declared",
+      "conditions": "repository manifest dependency; installed artifact, runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "registry:pypi/sentence-transformers",
+      "relationship": "depends-on",
+      "assurance_level": "declared",
+      "conditions": "repository manifest dependency; installed artifact, runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "registry:pypi/torch",
+      "relationship": "depends-on",
+      "assurance_level": "declared",
+      "conditions": "repository manifest dependency; installed artifact, runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "registry:pypi/transformers",
+      "relationship": "depends-on",
+      "assurance_level": "declared",
+      "conditions": "repository manifest dependency; installed artifact, runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "mcp-source:mcp-server%2Fsrc%2Findex.ts:server:5:192",
+      "target_ref": "tool:mcp-source:mcp-server%2Fsrc%2Findex.ts:server:5:192/issue_refund",
+      "relationship": "provides-tool",
+      "assurance_level": "declared"
+    },
+    {
+      "source_ref": "mcp-source:mcp-server%2Fsrc%2Findex.ts:server:5:192",
+      "target_ref": "tool:mcp-source:mcp-server%2Fsrc%2Findex.ts:server:5:192/lookup_customer",
+      "relationship": "provides-tool",
+      "assurance_level": "declared"
+    }
+  ]
+}

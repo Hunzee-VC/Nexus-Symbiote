@@ -109,7 +109,7 @@ def test_an_escaping_template_in_any_source_is_critical(tmp_path, source, templa
     assert risk.severity == RiskSeverity.CRITICAL
     assert risk.detail == f"{DETAIL}m/{source}{DETAIL_END}"
     assert risk.references == [
-        "https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/model-integrity.md"
+        "https://github.com/aisecnomad/Nexus-Symbiote/blob/main/docs/model-integrity.md"
     ]
     assert template not in risk.detail
 
@@ -447,7 +447,7 @@ def test_joined_dunder_in_embedded_gguf_template_is_reported(tmp_path):
     assert risk.severity == RiskSeverity.CRITICAL
     assert "potential Python-internals access pattern" in risk.detail
     assert risk.references == [
-        "https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/model-integrity.md"
+        "https://github.com/aisecnomad/Nexus-Symbiote/blob/main/docs/model-integrity.md"
     ]
 
 

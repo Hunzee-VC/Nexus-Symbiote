@@ -1,0 +1,1 @@
+/aibom-run/venvs/agent-bom/bin/agent-bom --agent-mode skills scan /aibom-run/work/agent-bom/corpus 
