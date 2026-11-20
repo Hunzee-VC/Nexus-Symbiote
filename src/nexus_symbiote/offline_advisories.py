@@ -283,10 +283,10 @@ def _range_matches(
 ) -> tuple[bool, list[str], list[str]]:
     """Evaluate one OSV range: (in range, fixed versions above it, unparsable upper bounds).
 
-    The queried version and every ``introduced`` must parse. A ``fixed``, ``last_affected``
-    or ``limit`` that does not leaves the version possibly affected: the range matches with
-    that bound reported unless the lower bound or a parsable limit excludes it, or a parsable
-    bound does in an interval (by event order) that holds no unparsable one.
+    The queried version and every ``introduced`` must parse; another event that does not
+    leaves the version possibly affected, and is reported. It is out of range below its
+    ``introduced``, at or above every ``limit`` when all parse and none is "*" (a version
+    below any limit is in range), or past a parsable bound of an interval with none unparsable.
     """
     raw_type = rng.get("type")
     if raw_type is not None and (
@@ -343,7 +343,7 @@ def _range_matches(
         held = owner is None or cmp(owner, best_intro or "0") == 0
         open_interval |= held and kind in ("fixed", "last_affected") and value in unparsed
     if (
-        any(lim != "*" and lim not in unparsed and cmp(version, lim) >= 0 for lim in limits)
+        all(x != "*" and x not in unparsed and cmp(version, x) >= 0 for x in limits or ["*"])
         or any(ends_after_intro(fix) and cmp(fix, version) <= 0 for fix in fixed_versions)
         or any(ends_after_intro(last) and cmp(last, version) < 0 for last in last_affected)
     ):

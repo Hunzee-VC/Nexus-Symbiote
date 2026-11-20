@@ -994,6 +994,27 @@ def test_offline_advisories_unparsable_last_affected_beside_parsable_ones_flags(
     ] == [("PYSEC-2024-264", True, ["2.9.0-NA"])]
 
 
+@pytest.mark.parametrize(
+    ("limits", "found"),
+    [
+        (["2.0", "5.0"], [("GHSA-bad0-bad0-bad0", None)]),
+        (["2.0", "*"], [("GHSA-bad0-bad0-bad0", None)]),
+        (["2.0", "junk!"], [("GHSA-bad0-bad0-bad0", ["junk!"])]),
+        (["2.0"], []),
+    ],
+    ids=["below-another-limit", "star-limit", "unparsable-limit", "at-or-above-every-limit"],
+)
+def test_offline_advisories_a_version_below_any_limit_is_in_range(tmp_path, limits, found):
+    """OSV limits: a version is in range below any of them, and "*" bounds nothing."""
+    events = [{"introduced": "0"}, *({"limit": limit} for limit in limits)]
+    db_file = tmp_path / "osv.json"
+    record = _transformers_record(ranges=[{"type": "ECOSYSTEM", "events": events}])
+    db_file.write_text(json.dumps([record]), encoding="utf-8")
+    report, _ = match_offline_advisories(_bom_with_package(version="3.0"), db_path=db_file)
+    assert report.complete is True
+    assert [(a["id"], a.get("undecidable_bounds")) for a in report.advisories] == found
+
+
 def test_offline_advisories_bound_the_errors_from_malformed_records(tmp_path):
     bad = [_transformers_record(f"GHSA-bad0-bad0-{i:04d}", ranges="bad") for i in range(1000)]
     db_file = tmp_path / "osv.json"
