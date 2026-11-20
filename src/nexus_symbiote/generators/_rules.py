@@ -247,7 +247,7 @@ RULES: dict[str, RuleInfo] = {
     ),
     "tool_description_poisoning": RuleInfo(
         "Poisoned instructions in tool description or schema",
-        "A tool description, JSON schema field, assistant config, or agent card contains coercive "
+        "A tool description, JSON schema field, or agent card contains coercive "
         "tags, override directives, credential-relay instructions, or user-concealment guidance.",
     ),
     "runtime_undeclared": RuleInfo(

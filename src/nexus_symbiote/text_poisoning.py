@@ -11,7 +11,7 @@ components; matched payload text and secret values are never written into them.
 
 from __future__ import annotations
 
-import itertools
+import json
 import re
 import sys
 import unicodedata
@@ -23,7 +23,7 @@ from typing import Any
 
 from nexus_symbiote.core.aibom import AIBOM
 from nexus_symbiote.core.enums import RiskSeverity
-from nexus_symbiote.core.hashing import parse_json_strict
+from nexus_symbiote.core.hashing import MAX_JSON_NESTING, json_nesting_exceeds
 from nexus_symbiote.core.models import (
     A2AServerComponent,
     AgentComponent,
@@ -34,8 +34,9 @@ from nexus_symbiote.core.models import (
     SkillPackageComponent,
     ToolComponent,
 )
-from nexus_symbiote.scanners.prompt import _HIDDEN
+from nexus_symbiote.scanners.prompt import HIDDEN_CHARACTERS
 from nexus_symbiote.utils.confined import ConfinedCollection
+from nexus_symbiote.utils.jsonc import strip_jsonc
 from nexus_symbiote.utils.terminal import neutralize
 
 RULE_PACK_VERSION = "1.0.0"
@@ -47,26 +48,45 @@ _RULE_REFERENCE_PREFIX = "rule:"
 
 _MAX_TAG_BODY_CHARS = 800
 _MAX_COMMENT_BODY_CHARS = 1_200
-_MAX_JSON_DEPTH = 32
-_MAX_JSON_STRINGS = 4_096
 _MAX_WHERE_CHARS = 160
 
-_CREDENTIAL_NAME_HINTS = (".env", "secret", "credential", "id_rsa", "id_ed25519", ".netrc")
-_CREDENTIAL_SUFFIXES = frozenset({".key", ".pem", ".p12", ".pfx", ".kdbx"})
-
+# Skill resources other than text declarations (scripts, images) are files the skill may
+# use, not text loaded as instructions; every other collected source is scanned.
 _TEXT_DECLARATION_SUFFIXES = frozenset(
     {".md", ".mdc", ".markdown", ".txt", ".json", ".yaml", ".yml", ".toml", ".prompt"}
 )
-_COMPONENT_SOURCE_SUFFIXES = frozenset(
+# JSON pointer segments printed in findings: indexes and these field names. Any other
+# key is printed as "*", since a key can hold a value as sensitive as a secret.
+_POINTER_FIELDS = frozenset(
     {
-        *_TEXT_DECLARATION_SUFFIXES,
-        ".ts",
-        ".tsx",
-        ".js",
-        ".jsx",
-        ".mjs",
-        ".cjs",
-        ".py",
+        "mcpServers",
+        "servers",
+        "mcp_servers",
+        "tools",
+        "function",
+        "inputSchema",
+        "input_schema",
+        "parameters",
+        "properties",
+        "items",
+        "additionalProperties",
+        "anyOf",
+        "oneOf",
+        "allOf",
+        "$defs",
+        "definitions",
+        "description",
+        "title",
+        "name",
+        "skills",
+        "annotations",
+        "instructions",
+        "prompt",
+        "args",
+        "command",
+        "examples",
+        "default",
+        "enum",
     }
 )
 _SIDE_CHANNEL_PARAM_NAMES = frozenset(
@@ -144,23 +164,22 @@ _CONCEAL_RE = re.compile(
 )
 
 _CRED_PATH_RE = re.compile(
-    r"(?:(?:~|\$HOME|/home/[\w.-]+|/Users/[\w.-]+|/root)/\.ssh(?:/[a-z0-9._-]+)?|"
-    r"~/\.aws/credentials|\bid_(?:rsa|dsa|ecdsa|ed25519)\b|\.aws/credentials\b|\.netrc\b|"
-    r"\.git-credentials\b|\.pypirc\b|\.npmrc\b)",
+    r"(?:[/\\]\.ssh(?![\w-])(?:[/\\][\w.-]+)?|[/\\]\.aws[/\\]credentials\b|"
+    r"\bid_(?:rsa|dsa|ecdsa|ed25519)\b(?:\.pub\b)?|\.netrc\b|\.git-credentials\b|"
+    r"\.pypirc\b|\.npmrc\b)",
     re.IGNORECASE,
 )
-
-# The credential path must be the object of a read or relay verb, as in "read ~/.ssh/id_rsa"
-# or "include the contents of ~/.aws/credentials"; a negation counts only when it governs
-# that verb ("do not read ~/.ssh/id_rsa"), not anywhere near the path.
-_CRED_VERB_BEFORE_RE = re.compile(
-    r"\b(?P<neg>(?:never|not|don't|avoid|cannot)\s+)?"
-    r"(?:read|cat|open|load|copy|include|pass|send|forward|upload|post|append|exfiltrate|"
-    r"export|embed|attach|dump|print)\s+"
-    r"(?:(?:the|its|your|their|all|any|every|contents?|of|from|file|files|data|keys?|private|"
-    r"secret|at|in|out)\s+){0,4}[`'\"(\[]?$",
+# The path must be read or relayed by a verb earlier in its own sentence ("Read the
+# user's ~/.ssh/id_rsa and pass it ..."); a negation earlier in that sentence than the
+# verb ("Never, under any circumstances, read ...") makes it a prohibition.
+_SENTENCE_BREAK_RE = re.compile(r"[.!?]+(?=\s)|\n")
+_CRED_VERB_RE = re.compile(
+    r"\b(?:read|cat|open|load|copy|include|pass|send|forward|upload|post|append|exfiltrate|"
+    r"export|embed|attach|dump|print|grab|fetch|get|retrieve|access|collect|extract)\b",
     re.IGNORECASE,
 )
+_NEGATION_RE = re.compile(r"\b(?:never|not|don't|avoid|cannot|without)\b", re.IGNORECASE)
+_SENTENCE_LOOKBACK = 240
 
 _CRED_RELAY_WINDOW_RE = re.compile(
     r"(?:"
@@ -236,6 +255,8 @@ _TOOL_NAME_CALL_TEMPLATES = (
     "name': '{name}'",
     '"{name}"',
     "'{name}'",
+    ".{name}]",
+    "[{name}]",
 )
 
 _RULE_DESCRIPTIONS: dict[str, str] = {
@@ -284,6 +305,7 @@ _COMPONENT_KINDS = (
     A2AServerComponent,
     IDEAgentComponent,
 )
+_INSTRUCTION_KINDS = (PromptComponent, SkillPackageComponent)
 _ATTRIBUTION_PRIORITY = (
     ToolComponent,
     PromptComponent,
@@ -321,7 +343,7 @@ def normalize_for_lexical_scan(text: str) -> tuple[str, list[int]]:
         if ch < "\x80":
             folded.append(ch)
             byte_offsets.append(byte_pos)
-        elif unicodedata.category(ch) != "Cf" and _HIDDEN.match(ch) is None:
+        elif unicodedata.category(ch) != "Cf" and HIDDEN_CHARACTERS.match(ch) is None:
             for part in _APOSTROPHES.get(ch) or unicodedata.normalize("NFKC", ch):
                 folded.append(part)
                 byte_offsets.append(byte_pos)
@@ -330,14 +352,14 @@ def normalize_for_lexical_scan(text: str) -> tuple[str, list[int]]:
 
 
 def _byte_offset_at(byte_offsets: list[int], char_index: int) -> int:
-    if not byte_offsets or char_index <= 0:
+    if not byte_offsets:
         return 0
-    return byte_offsets[min(char_index, len(byte_offsets) - 1)]
+    return byte_offsets[min(max(char_index, 0), len(byte_offsets) - 1)]
 
 
 def _has_negated_prefix(text: str, pos: int) -> bool:
     window = text[max(0, pos - 40) : pos]
-    return _NEGATED_PREFIX_RE.search(window) is not None
+    return _NEGATED_PREFIX_RE.search(window[window.rfind("\n") + 1 :]) is not None
 
 
 def _default_category(is_tool_surface: bool) -> str:
@@ -347,27 +369,22 @@ def _default_category(is_tool_surface: bool) -> str:
 def _directive_tag_bodies(normalized: str) -> Iterator[tuple[int, str]]:
     """Yield ``(tag start, body)`` for each directive tag, in O(N) overall.
 
-    A body ends at its matching close tag, at the next directive tag, or after
-    ``_MAX_TAG_BODY_CHARS``, so bodies never overlap and each character is read by at
-    most one close-tag search. Tag names are compared case-insensitively on the short
-    names alone, never by lowercasing the text, which can change its length.
+    A body ends at its matching close tag or after ``_MAX_TAG_BODY_CHARS``. Directive
+    tags inside a body are part of it, not tags of their own, so a decoy tag cannot cut
+    a body short, and bodies never overlap. Tag names are compared case-insensitively
+    on the short names alone, never by lowercasing the text, which can change its length.
     """
-    pending: re.Match[str] | None = None
-    opens = _DIRECTIVE_TAG_OPEN_RE.finditer(normalized)
-    for following in itertools.chain(opens, (None,)):
-        if pending is not None:
-            start = pending.end()
-            limit = min(len(normalized), start + _MAX_TAG_BODY_CHARS)
-            if following is not None:
-                limit = min(limit, following.start())
-            end = limit
-            tag = pending.group(1).lower()
-            for close in _CLOSE_TAG_RE.finditer(normalized, start, limit):
-                if close.group(1).lower() == tag:
-                    end = close.start()
-                    break
-            yield pending.start(), normalized[start:end]
-        pending = following
+    pos = 0
+    while (opened := _DIRECTIVE_TAG_OPEN_RE.search(normalized, pos)) is not None:
+        start = opened.end()
+        end = min(len(normalized), start + _MAX_TAG_BODY_CHARS)
+        tag = opened.group(1).lower()
+        for close in _CLOSE_TAG_RE.finditer(normalized, start, end):
+            if close.group(1).lower() == tag:
+                end = close.start()
+                break
+        yield opened.start(), normalized[start:end]
+        pos = end
 
 
 def scan_text_block(
@@ -424,11 +441,26 @@ def scan_text_block(
         search_pos = stop
 
     # 3. TP-CRED-002: Sensitive credential path relay or exfiltration URL directive
+    # Sentence breaks, verbs and negations are each read once, front to back.
+    breaks = _SENTENCE_BREAK_RE.finditer(normalized)
+    verbs = _CRED_VERB_RE.finditer(normalized)
+    negations = _NEGATION_RE.finditer(normalized)
+    brk = verb = neg = None
+    sentence, last_verb, last_neg = 0, -1, -1
     for cred_match in _CRED_PATH_RE.finditer(normalized):
-        verb = _CRED_VERB_BEFORE_RE.search(
-            normalized, max(0, cred_match.start() - 80), cred_match.start()
-        )
-        if verb is None or verb.group("neg"):
+        at = cred_match.start()
+        while (brk := brk or next(breaks, None)) is not None and brk.end() <= at:
+            sentence, brk = brk.end(), None
+        while (verb := verb or next(verbs, None)) is not None and verb.end() <= at:
+            last_verb, verb = verb.start(), None
+        while (neg := neg or next(negations, None)) is not None and neg.start() < last_verb:
+            last_neg, neg = neg.start(), None
+        start = max(sentence, at - _SENTENCE_LOOKBACK)
+        if (
+            cred_match.group().lower().endswith(".pub")
+            or last_verb < start
+            or start <= last_neg < last_verb
+        ):
             continue
         win_start = max(0, cred_match.start() - 120)
         win_end = min(len(normalized), cred_match.end() + 120)
@@ -469,8 +501,8 @@ def scan_text_block(
 def extract_json_text_entries(
     data: object,
     *,
-    max_depth: int = _MAX_JSON_DEPTH,
-    max_entries: int = _MAX_JSON_STRINGS,
+    max_depth: int = 32,
+    max_entries: int = 4_096,
 ) -> list[tuple[str, str]]:
     """Iteratively extract ``(dotted_field_path, string_value)`` pairs from parsed JSON."""
     results: list[tuple[str, str]] = []
@@ -495,64 +527,96 @@ def extract_json_text_entries(
     return results
 
 
-_Scopes = tuple[tuple[str, dict[str, Any]], ...]
+_Owner = tuple[str, dict[str, Any]] | None
 
 
-def _json_strings_with_scopes(data: object) -> list[tuple[str, str, _Scopes]]:
-    """``(JSON pointer, string, enclosing scopes)`` for each nonblank string, bounded.
+def _pointer_segment(key: str) -> str:
+    return key if key.split("#", 1)[0] in _POINTER_FIELDS else "*"
 
-    A scope is an enclosing object with a label that can name a component: its own
-    ``name`` string, or the key it is stored under (``mcpServers.<name>``). Scopes are
-    listed innermost first.
+
+def _json_strings_with_owners(
+    data: object, names: Iterable[str]
+) -> Iterator[tuple[str, str, _Owner]]:
+    """``(JSON pointer, string, owner)`` for every nonblank string, in O(size).
+
+    The owner is the innermost enclosing object whose ``name`` names a component in
+    ``names``; failing that, the innermost one stored under a key that does (as in
+    ``mcpServers.<name>``). A ``name`` wins over a key, so a key spelled like a sibling's
+    name inside a tool cannot move the tool's text onto that sibling. Pointers print
+    indexes and known field names only, and stop growing past the printed length.
     """
-    results: list[tuple[str, str, _Scopes]] = []
-    queue: deque[tuple[str, object, int, _Scopes]] = deque([("", data, 0, ())])
-    while queue and len(results) < _MAX_JSON_STRINGS:
-        pointer, node, depth, scopes = queue.popleft()
-        if depth > _MAX_JSON_DEPTH:
-            continue
+    known = frozenset(names)
+    queue: deque[tuple[str, object, _Owner, _Owner]] = deque([("", data, None, None)])
+    while queue:
+        pointer, node, by_name, by_key = queue.popleft()
         if isinstance(node, str):
             if node.strip():
-                results.append((pointer, node, scopes))
-        elif isinstance(node, dict):
+                yield pointer, node, by_name or by_key
+            continue
+        long = len(pointer) > _MAX_WHERE_CHARS
+        if isinstance(node, dict):
             label = node.get("name")
-            inner = ((label, node), *scopes) if isinstance(label, str) else scopes
+            if isinstance(label, str) and label in known:
+                by_name = (label, node)
             for key, val in node.items():
-                child = f"{pointer}/{key.replace('~', '~0').replace('/', '~1')}"
-                outer = ((key, val), *inner) if isinstance(val, dict) else inner
-                queue.append((child, val, depth + 1, outer))
+                child = pointer if long else f"{pointer}/{_pointer_segment(key)}"
+                inner = (key, val) if key in known and isinstance(val, dict) else by_key
+                queue.append((child, val, by_name, inner))
         elif isinstance(node, list):
             for idx, item in enumerate(node):
-                queue.append((f"{pointer}/{idx}", item, depth + 1, scopes))
-    return results
+                queue.append((pointer if long else f"{pointer}/{idx}", item, by_name, by_key))
+
+
+def _keep_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    # A duplicate key must not hide the value before it, so each is kept under "key#n".
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        slot, n = key, 1
+        while slot in result:
+            n += 1
+            slot = f"{key}#{n}"
+        result[slot] = value
+    return result
+
+
+def _parse_json_leniently(text: str) -> object:
+    """Every string value of JSON or JSONC: duplicates kept, any integer, lone surrogates."""
+    if json_nesting_exceeds(text, MAX_JSON_NESTING):
+        raise RecursionError("JSON nesting exceeds the depth limit")
+    for candidate in (text, None):
+        try:
+            return json.loads(
+                strip_jsonc(text) if candidate is None else candidate,
+                object_pairs_hook=_keep_duplicates,
+                parse_int=lambda _digits: 0,
+            )
+        except ValueError:
+            if candidate is None:
+                raise
+    raise AssertionError("unreachable")
 
 
 def _collect_schema_property_names(schema: dict[str, Any] | None) -> set[str]:
     if not isinstance(schema, dict):
         return set()
     names: set[str] = set()
-    queue: deque[tuple[dict[str, Any], int]] = deque([(schema, 0)])
-    while queue and len(names) < 256:
-        node, depth = queue.popleft()
-        if depth > _MAX_JSON_DEPTH:
-            continue
+    queue: deque[dict[str, Any]] = deque([schema])
+    while queue:
+        node = queue.popleft()
         props = node.get("properties")
         if isinstance(props, dict):
             for k, v in props.items():
-                if isinstance(k, str):
-                    names.add(k)
+                names.add(k)
                 if isinstance(v, dict):
-                    queue.append((v, depth + 1))
+                    queue.append(v)
         for combiner in ("items", "additionalProperties"):
             sub = node.get(combiner)
             if isinstance(sub, dict):
-                queue.append((sub, depth + 1))
+                queue.append(sub)
         for list_key in ("anyOf", "oneOf", "allOf"):
             items = node.get(list_key)
             if isinstance(items, list):
-                for item in items:
-                    if isinstance(item, dict):
-                        queue.append((item, depth + 1))
+                queue.extend(item for item in items if isinstance(item, dict))
     return names
 
 
@@ -602,17 +666,6 @@ def check_sidenote_tool_schema(
     ]
 
 
-def _is_credential_path(rel_path: str) -> bool:
-    posix = PurePosixPath(rel_path)
-    lower = posix.as_posix().lower()
-    if any(part.startswith(".env") for part in posix.parts):
-        return True
-    if posix.suffix.lower() in _CREDENTIAL_SUFFIXES:
-        return True
-    name_lower = posix.name.lower()
-    return any(hint in name_lower or f"/{hint}" in lower for hint in _CREDENTIAL_NAME_HINTS)
-
-
 def _priority_key(component: ComponentWithRisks) -> tuple[int, str]:
     rank = next(
         (i for i, kind in enumerate(_ATTRIBUTION_PRIORITY) if isinstance(component, kind)),
@@ -647,26 +700,25 @@ def _attribute_source_component(
     if len(candidates) == 1:
         return candidates[0]
 
-    tool_candidates = [c for c in candidates if isinstance(c, ToolComponent)]
-    if tool_candidates:
-        char_pos = len(raw_bytes[:byte_offset].decode("utf-8", errors="ignore"))
-        prefix = content[max(0, char_pos - 600) : char_pos]
-        best_tool: ToolComponent | None = None
-        best_idx = -1
-        for tool in tool_candidates:
-            for tmpl in _TOOL_NAME_CALL_TEMPLATES:
-                marker = tmpl.format(name=tool.name)
-                found = prefix.rfind(marker)
-                if found > best_idx:
-                    best_idx = found
-                    best_tool = tool
-        if best_tool is not None:
-            return best_tool
-    return _fallback_component(candidates, fallback)
+    char_pos = len(raw_bytes[:byte_offset].decode("utf-8", errors="ignore"))
+    prefix = content[max(0, char_pos - 600) : char_pos]
+    best: ComponentWithRisks | None = None
+    best_idx = -1
+    # The candidate declared nearest before the hit owns it: a tool's call or definition,
+    # or a server's table or key. Ties go to tools, which sort first.
+    for candidate in sorted(candidates, key=_priority_key):
+        for tmpl in _TOOL_NAME_CALL_TEMPLATES:
+            found = prefix.rfind(tmpl.format(name=candidate.name))
+            if found > best_idx:
+                best_idx, best = found, candidate
+    return best if best is not None else _fallback_component(candidates, fallback)
 
 
+# A whole-line reference definition with a "#" or "<>" destination and at most a title;
+# anything else on the line makes it visible text.
 _MD_COMMENT_LINE_RE = re.compile(
-    r"^[ \t]{0,3}\[[^\]\n]{1,120}\]:[ \t]*(?:#|<>).*$",
+    r"^[ \t]{0,3}\[[^\]\n]{1,120}\]:[ \t]*(?:#|<>)"
+    r"(?:[ \t]+(?:\"[^\"\n]*\"|'[^'\n]*'|\([^)\n]*\)))?[ \t]*$",
     re.MULTILINE,
 )
 
@@ -682,6 +734,10 @@ def _mask_hidden_markdown_markup(text: str) -> str:
         pos = 0
         while (start := text.find(open_tok, pos)) != -1:
             end = text.find(close_tok, start + len(open_tok), start + 4096)
+            if end == -1 and open_tok == "<?":
+                # Only a closed processing instruction is hidden from rendered views.
+                pos = start + len(open_tok)
+                continue
             stop = end + len(close_tok) if end != -1 else min(len(text), start + 4096)
             masked[start:stop] = b"\x01" * (stop - start)
             pos = stop
@@ -754,7 +810,9 @@ def _scan_component_fields(comp: ComponentWithRisks) -> list[TextPoisoningHit]:
         fields = [("description", comp.description_text), ("description", comp.description)]
         fields += [
             (f"input_schema.{path}", val)
-            for path, val in extract_json_text_entries(comp.input_schema)
+            for path, val in extract_json_text_entries(
+                comp.input_schema, max_depth=sys.maxsize, max_entries=sys.maxsize
+            )
         ]
         for field, text in fields:
             if text:
@@ -808,9 +866,8 @@ def _scan_json_source(
     groups: dict[str, tuple[ComponentWithRisks, dict[str, Any] | None, list[TextPoisoningHit]]]
     groups = {}
     texts: dict[str, list[str]] = {}
-    for pointer, value, scopes in _json_strings_with_scopes(parsed):
-        owner = next(((by_name[label], node) for label, node in scopes if label in by_name), None)
-        target, node = owner if owner is not None else (fallback, None)
+    for pointer, value, owner in _json_strings_with_owners(parsed, by_name):
+        target, node = (by_name[owner[0]], owner[1]) if owner is not None else (fallback, None)
         if target is None:
             continue
         is_tool = isinstance(target, (ToolComponent, A2AServerComponent, MCPServerComponent))
@@ -876,8 +933,6 @@ def _source_candidates(
 ) -> Iterator[str]:
     for rel_path, comps in sorted(components_by_path.items()):
         suffix = PurePosixPath(rel_path).suffix.lower()
-        if suffix not in _COMPONENT_SOURCE_SUFFIXES or _is_credential_path(rel_path):
-            continue
         if suffix not in _TEXT_DECLARATION_SUFFIXES and any(
             isinstance(c, SkillPackageComponent) and c.skill_type == "skill-resource" for c in comps
         ):
@@ -922,10 +977,9 @@ def apply_text_poisoning_rules(
     scanned_rel_paths: set[str] = set()
     added = 0
 
-    def failed(subject: str, exc: Exception) -> None:
+    def failed(subject: str, reason: str) -> None:
         own_failures.append(
-            f"{neutralize(subject)}: text-poisoning rules could not be applied "
-            f"({type(exc).__name__})"
+            f"{neutralize(subject)}: text-poisoning rules could not be applied ({reason})"
         )
 
     # Source files first: their findings carry file byte offsets or JSON pointers, which
@@ -935,21 +989,27 @@ def apply_text_poisoning_rules(
             root, own_failures, own_exclusions, exclude_paths=exclude_paths
         ) as files:
             for rel_path in _source_candidates(components_by_path):
-                if files.excluded(rel_path):
+                # A collector may record a directory of rules; its files are their own sources.
+                if files.excluded(rel_path) or (root / rel_path).is_dir():
                     continue
-                raw_text = files.read_text(rel_path, missing_ok=True)
-                if raw_text is None:
+                raw = files.read_bytes(rel_path, missing_ok=True)
+                if raw is None:
                     continue
+                # The collector that recorded the file judged its encoding; the rules read
+                # whatever text it holds rather than skip it.
+                raw_text = raw.decode("utf-8", errors="replace")
                 scanned_rel_paths.add(rel_path)
                 comps = components_by_path[rel_path]
                 try:
                     parsed: object = None
                     if rel_path.lower().endswith(".json"):
                         try:
-                            parsed = parse_json_strict(raw_text, max_bytes=sys.maxsize)
-                        except (ValueError, RecursionError, TypeError):
-                            # Includes duplicate keys: the raw text holds every value.
-                            parsed = None
+                            parsed = _parse_json_leniently(raw_text)
+                        except (ValueError, RecursionError):
+                            # The raw text is still scanned, but escaped text in it is not
+                            # read. An instruction file named .json is text to its readers.
+                            if not all(isinstance(c, _INSTRUCTION_KINDS) for c in comps):
+                                failed(rel_path, "not JSON")
                     owned = (
                         _scan_json_source(rel_path, parsed, comps, root_agent)
                         if isinstance(parsed, (dict, list))
@@ -958,7 +1018,7 @@ def apply_text_poisoning_rules(
                     for target, hits in owned:
                         added += _append_consolidated_risks(target, hits, seen_keys=seen_keys)
                 except (ValueError, RecursionError) as exc:
-                    failed(rel_path, exc)
+                    failed(rel_path, type(exc).__name__)
 
     for comp in components:
         try:
@@ -966,7 +1026,7 @@ def apply_text_poisoning_rules(
                 comp, _scan_component_fields(comp), seen_keys=seen_keys
             )
         except (ValueError, RecursionError) as exc:
-            failed(comp.bom_ref, exc)
+            failed(comp.bom_ref, type(exc).__name__)
 
     if surfaces is not None:
         surfaces.extend(sorted(scanned_rel_paths))
