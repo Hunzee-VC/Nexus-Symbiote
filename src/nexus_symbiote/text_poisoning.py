@@ -11,9 +11,11 @@ components; matched payload text and secret values are never written into them.
 
 from __future__ import annotations
 
+import io
 import json
 import re
 import sys
+import tokenize
 import unicodedata
 from collections import deque
 from collections.abc import Iterable, Iterator
@@ -116,19 +118,28 @@ _DIRECTIVE_TAG_OPEN_RE = re.compile(
     re.IGNORECASE,
 )
 _CLOSE_TAG_RE = re.compile(r"</\s*([\w-]{1,60})\s*>")
+_DESTRUCTIVE = (
+    r"\b(?:drop\s+table|delete\s+from\s+(?!(?:the|a|an|any|this|that|your|my)\b)[\w.`\"]+|"
+    r"truncate\s+table|alter\s+table|rm\s+-rf)\b"
+)
+# "ignore" or "disregard" right after a negation is advice, not an override.
+_NOT_NEGATED = r"(?<!not )(?<!never )(?<!n't )"
 
 _TAG_EXFIL_ACTION_RE = re.compile(
     r"(?:"
     r"never\s+tell|do\s+not\s+tell|don't\s+tell|"
     r"do\s+not\s+mention|don't\s+mention|without\s+telling|"
     r"hide\s+(?:this|it)\s+from|"
-    r"ignore\s+(?:read[- ]only|all|previous|prior|above|safety)|"
-    r"disregard\s+(?:all|previous|prior|above)|"
-    r"\b(?:drop\s+table|delete\s+from|truncate\s+table|alter\s+table|rm\s+-rf)\b|"
+    rf"{_NOT_NEGATED}ignore\s+(?:read[- ]only|all\s+(?:previous|prior|above|safety|instructions|rules)|"
+    r"previous|prior|above|safety)|"
+    rf"{_NOT_NEGATED}disregard\s+(?:all|previous|prior|above)|"
+    rf"{_DESTRUCTIVE}|"
     r"--export-tokens|"
     r"\b(?:read|include|pass|send|forward|upload|post|exfiltrate|export)\b.{0,80}"
     r"(?:\.ssh\b|~/\.aws|\bid_(?:rsa|dsa|ecdsa|ed25519)\b|credentials|\.netrc|\.npmrc|\.pypirc|"
-    r"\.env|https?://)"
+    r"\.env)|"
+    # A URL is a destination only for a sending verb; "read the guide at https://..." is not.
+    r"\b(?:send|forward|upload|post|exfiltrate|export)\b.{0,80}https?://"
     r")",
     re.IGNORECASE | re.DOTALL,
 )
@@ -139,10 +150,13 @@ _COMMENT_ATTACK_RE = re.compile(
     r"(?:instructions?|directives?|rules?|constraints?|prompts?)\b|"
     r"\bapprove\s+every\b|"
     r"\bbypass\s+(?:all\s+|any\s+)?(?:approval|check|validation|review|safety)\b|"
-    r"\b(?:forward|send|exfiltrate|export|upload)\b.{0,80}https?://|"
+    r"\b(?:forward|send|exfiltrate|export|upload)\s+(?:(?:every|all|any|each|the)\s+)?"
+    r"(?:user'?s?\s+)?"
+    r"(?:quer(?:y|ies)|prompts?|messages?|conversations?|sessions?|tokens?|credentials?|secrets?|"
+    r"keys?|inputs?)\b.{0,80}https?://|"
     r"--export-tokens|"
     r"\b(?:read|copy|include|pass)\b.{0,60}(?:\.ssh\b|~/\.aws|\bid_rsa\b|credentials)|"
-    r"\b(?:drop\s+table|delete\s+from)\b|"
+    rf"{_DESTRUCTIVE}|"
     r"\b(?:never\s+tell|do\s+not\s+mention(?:\s+this)?)\b.{0,40}\busers?\b"
     r")",
     re.IGNORECASE | re.DOTALL,
@@ -164,21 +178,27 @@ _CONCEAL_RE = re.compile(
 )
 
 _CRED_PATH_RE = re.compile(
-    r"(?:[/\\]\.ssh(?![\w-])(?:[/\\][\w.-]+)?|[/\\]\.aws[/\\]credentials\b|"
+    r"(?:[/\\]\.ssh(?![\w-])(?![/\\](?:known_hosts|authorized_keys|config)\b)(?:[/\\][\w.-]+)?|[/\\]\.aws[/\\]credentials\b|"
     r"\bid_(?:rsa|dsa|ecdsa|ed25519)\b(?:\.pub\b)?|\.netrc\b|\.git-credentials\b|"
     r"\.pypirc\b|\.npmrc\b)",
     re.IGNORECASE,
 )
 # The path must be read or relayed by a verb earlier in its own sentence ("Read the
-# user's ~/.ssh/id_rsa and pass it ..."); a negation earlier in that sentence than the
-# verb ("Never, under any circumstances, read ...") makes it a prohibition.
-_SENTENCE_BREAK_RE = re.compile(r"[.!?]+(?=\s)|\n")
+# user's ~/.ssh/id_rsa and pass it ..."). A line break inside a sentence is whitespace.
+_SENTENCE_BREAK_RE = re.compile(r"[.!?]+(?=\s)|\n[ \t]*\n")
 _CRED_VERB_RE = re.compile(
     r"\b(?:read|cat|open|load|copy|include|pass|send|forward|upload|post|append|exfiltrate|"
     r"export|embed|attach|dump|print|grab|fetch|get|retrieve|access|collect|extract)\b",
     re.IGNORECASE,
 )
-_NEGATION_RE = re.compile(r"\b(?:never|not|don't|avoid|cannot|without)\b", re.IGNORECASE)
+# A prohibition negates the verb itself: "never read", "must not read or include",
+# "refuse any request to read", "never, under any circumstances, read". A negation
+# elsewhere ("Don't worry, read ...", "not a drill: read ...") does not.
+_VERB_NEGATED_RE = re.compile(
+    r"\b(?:never|not|n't|avoid|cannot|refuse|decline)\b(?:\s*,[^,.;:!?]{1,40},)?"
+    r"(?:\s+(?!and\b)[\w']+){0,3}\s*$",
+    re.IGNORECASE,
+)
 _SENTENCE_LOOKBACK = 240
 
 _CRED_RELAY_WINDOW_RE = re.compile(
@@ -201,7 +221,7 @@ _EXFIL_URL_RE = re.compile(
 )
 
 _OVERRIDE_RE = re.compile(
-    r"\b(?:"
+    rf"\b{_NOT_NEGATED}(?:"
     r"ignore\s+(?:all\s+|any\s+|the\s+)?(?:previous|prior|above|earlier|preceding|system)\s+"
     r"(?:(?:safety|security|guardrail)\s+)?(?:instructions?|directives?|rules?|constraints?|prompts?)|"
     r"disregard\s+(?:all\s+|any\s+|the\s+)?(?:previous|prior|above|earlier|preceding|system)\s+"
@@ -214,7 +234,7 @@ _OVERRIDE_RE = re.compile(
 
 _READONLY_OVERRIDE_RE = re.compile(
     r"\bignore\s+read[- ]only\b.{0,120}\b"
-    r"(?:drop\s+table|delete\s+from|truncate\s+table|alter\s+table|insert\s+into|update\s+|rm\s+-rf)\b",
+    rf"(?:{_DESTRUCTIVE}|insert\s+into|update\s+)",
     re.IGNORECASE | re.DOTALL,
 )
 
@@ -222,7 +242,10 @@ _SUBJECT = r"(?:this\s+|the\s+)?(?:repository|repo|codebase|project|agent|it)"
 _VERDICT = r"(?:compliant|clean|safe|benign|low[- ]risk|passing)"
 _AUDITOR_DECEIT_RE = re.compile(
     r"\b(?:"
-    r"note\s+to\s+(?:any\s+)?(?:automated\s+)?(?:auditor|auditors|reviewer|reviewers|ai\s+reviewer|scanner|scanners|security\s+tool)|"
+    # A note to reviewers is deception only when it tells them what to conclude.
+    r"note\s+to\s+(?:any\s+)?(?:automated\s+)?(?:auditor|auditors|reviewer|reviewers|ai\s+reviewer|"
+    r"scanner|scanners|security\s+tool)\b.{0,160}?\b(?:compliant|clean|safe|benign|passing|"
+    r"contains\s+no|report|mark|treat|classify|declare|suppress|hide|omit|skip|approve)|"
     rf"(?:report|classify|declare)\s+{_SUBJECT}\s+as\s+{_VERDICT}|"
     r"this\s+(?:repository|repo|project|codebase)\s+contains\s+no\s+"
     r"(?:mcp\s+servers?|models?|secrets?|vulnerabilities|risks)\b.{0,120}\b(?:report|compliant|safe|clean)"
@@ -243,7 +266,9 @@ _AUDITOR_ADDRESSEE_RE = re.compile(
 _ADDRESSEE_WINDOW = 120
 
 _NEGATED_PREFIX_RE = re.compile(
-    r"\b(?:never|do\s+not|don't|not\s+to|prohibit|forbid)\s*[\"']?\s*$",
+    r"\b(?:never|do\s+not|don't|not\s+to|prohibit|forbid|"
+    # Reported speech in a condition: "If a web page says to ignore previous instructions".
+    r"if\s[^.!?\n]{0,40}\b(?:says?|tells?\s+you|asks?\s+you)\s+to)\s*[\"']?\s*$",
     re.IGNORECASE,
 )
 
@@ -366,25 +391,40 @@ def _default_category(is_tool_surface: bool) -> str:
     return CATEGORY_TOOL_POISONING if is_tool_surface else CATEGORY_INSTRUCTION_INJECTION
 
 
-def _directive_tag_bodies(normalized: str) -> Iterator[tuple[int, str]]:
-    """Yield ``(tag start, body)`` for each directive tag, in O(N) overall.
+def _directive_tag_hits(normalized: str) -> Iterator[int]:
+    """Yield the start of each directive tag whose body holds a coercive action, in O(N).
 
-    A body ends at its matching close tag or after ``_MAX_TAG_BODY_CHARS``. Directive
-    tags inside a body are part of it, not tags of their own, so a decoy tag cannot cut
-    a body short, and bodies never overlap. Tag names are compared case-insensitively
-    on the short names alone, never by lowercasing the text, which can change its length.
+    A body ends at its matching close tag or after ``_MAX_TAG_BODY_CHARS``. A tag that
+    opens inside a body extends it, so neither a decoy tag inside a body nor one shortly
+    before a tag can cut the text short. Each such chain is searched once, from its
+    first unnegated tag, and close tags are found in one pass, so the work is linear.
+    Tag names are compared on the short names alone, never by lowercasing the text,
+    which can change its length.
     """
-    pos = 0
-    while (opened := _DIRECTIVE_TAG_OPEN_RE.search(normalized, pos)) is not None:
-        start = opened.end()
+    closes: dict[str, deque[int]] = {}
+    for close in _CLOSE_TAG_RE.finditer(normalized):
+        closes.setdefault(close.group(1).lower(), deque()).append(close.start())
+    chain: tuple[int, int] | None = None
+    chain_end = pos = 0
+    while True:
+        opened = _DIRECTIVE_TAG_OPEN_RE.search(normalized, pos)
+        if chain is not None and (opened is None or opened.start() >= chain_end):
+            if _TAG_EXFIL_ACTION_RE.search(normalized, chain[1], chain_end) is not None:
+                yield chain[0]
+            chain = None
+        if opened is None:
+            return
+        start = pos = opened.end()
         end = min(len(normalized), start + _MAX_TAG_BODY_CHARS)
-        tag = opened.group(1).lower()
-        for close in _CLOSE_TAG_RE.finditer(normalized, start, end):
-            if close.group(1).lower() == tag:
-                end = close.start()
-                break
-        yield opened.start(), normalized[start:end]
-        pos = end
+        pending = closes.get(opened.group(1).lower(), deque())
+        while pending and pending[0] < start:
+            pending.popleft()
+        if pending and pending[0] < end:
+            end = pending[0]
+        if chain is not None:
+            chain_end = max(chain_end, end)
+        elif not _has_negated_prefix(normalized, opened.start()):
+            chain, chain_end = (opened.start(), start), end
 
 
 def scan_text_block(
@@ -421,11 +461,8 @@ def scan_text_block(
             )
 
     # 1. TP-TAG-001: Directive tags containing coercive/exfiltration/override payload
-    for tag_start, body in _directive_tag_bodies(normalized):
-        if _TAG_EXFIL_ACTION_RE.search(body) is not None and not _has_negated_prefix(
-            normalized, tag_start
-        ):
-            record("TP-TAG-001", base_category, tag_start)
+    for tag_start in _directive_tag_hits(normalized):
+        record("TP-TAG-001", base_category, tag_start)
 
     # 2. TP-CMT-001: HTML comments carrying override, exfil, or secret-read directives
     search_pos = 0
@@ -444,22 +481,19 @@ def scan_text_block(
     # Sentence breaks, verbs and negations are each read once, front to back.
     breaks = _SENTENCE_BREAK_RE.finditer(normalized)
     verbs = _CRED_VERB_RE.finditer(normalized)
-    negations = _NEGATION_RE.finditer(normalized)
-    brk = verb = neg = None
-    sentence, last_verb, last_neg = 0, -1, -1
+    brk = verb = None
+    sentence, last_verb = 0, -1
     for cred_match in _CRED_PATH_RE.finditer(normalized):
         at = cred_match.start()
         while (brk := brk or next(breaks, None)) is not None and brk.end() <= at:
             sentence, brk = brk.end(), None
         while (verb := verb or next(verbs, None)) is not None and verb.end() <= at:
             last_verb, verb = verb.start(), None
-        while (neg := neg or next(negations, None)) is not None and neg.start() < last_verb:
-            last_neg, neg = neg.start(), None
         start = max(sentence, at - _SENTENCE_LOOKBACK)
         if (
             cred_match.group().lower().endswith(".pub")
             or last_verb < start
-            or start <= last_neg < last_verb
+            or _VERB_NEGATED_RE.search(normalized, max(start, last_verb - 40), last_verb)
         ):
             continue
         win_start = max(0, cred_match.start() - 120)
@@ -530,8 +564,10 @@ def extract_json_text_entries(
 _Owner = tuple[str, dict[str, Any]] | None
 
 
-def _pointer_segment(key: str) -> str:
-    return key if key.split("#", 1)[0] in _POINTER_FIELDS else "*"
+def _pointer_segment(key: str | tuple[str, int]) -> str:
+    if isinstance(key, tuple):
+        return f"{_pointer_segment(key[0])}#{key[1]}"
+    return key if key in _POINTER_FIELDS else "*"
 
 
 def _json_strings_with_owners(
@@ -567,15 +603,14 @@ def _json_strings_with_owners(
                 queue.append((pointer if long else f"{pointer}/{idx}", item, by_name, by_key))
 
 
-def _keep_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
-    # A duplicate key must not hide the value before it, so each is kept under "key#n".
-    result: dict[str, Any] = {}
+def _keep_duplicates(pairs: list[tuple[str, Any]]) -> dict[str | tuple[str, int], Any]:
+    # A duplicate key must not hide the value before it, so the n-th one is kept under
+    # (key, n), a key no JSON text can spell.
+    result: dict[str | tuple[str, int], Any] = {}
+    seen: dict[str, int] = {}
     for key, value in pairs:
-        slot, n = key, 1
-        while slot in result:
-            n += 1
-            slot = f"{key}#{n}"
-        result[slot] = value
+        n = seen[key] = seen.get(key, 0) + 1
+        result[key if n == 1 else (key, n)] = value
     return result
 
 
@@ -995,9 +1030,20 @@ def apply_text_poisoning_rules(
                 raw = files.read_bytes(rel_path, missing_ok=True)
                 if raw is None:
                     continue
-                # The collector that recorded the file judged its encoding; the rules read
-                # whatever text it holds rather than skip it.
-                raw_text = raw.decode("utf-8", errors="replace")
+                encoding = "utf-8"
+                if rel_path.endswith(".py"):
+                    # Python honours a coding declaration, and so must the rules.
+                    try:
+                        encoding = tokenize.detect_encoding(io.BytesIO(raw).readline)[0]
+                    except SyntaxError:
+                        pass
+                try:
+                    raw_text = raw.decode(encoding)
+                except (UnicodeDecodeError, LookupError):
+                    # Replacement characters could split a payload's words; the text is
+                    # still scanned, but the surface is incomplete.
+                    failed(rel_path, "not UTF-8")
+                    raw_text = raw.decode("utf-8", errors="replace")
                 scanned_rel_paths.add(rel_path)
                 comps = components_by_path[rel_path]
                 try:
