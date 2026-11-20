@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import random
 import re
 from html import unescape
 from html.parser import HTMLParser
@@ -13,6 +14,7 @@ from typing import Any
 import pytest
 from click.testing import CliRunner
 
+from nexus_symbiote import graph_view
 from nexus_symbiote.cli import main
 from nexus_symbiote.core.aibom import AIBOM, DependencyEdge
 from nexus_symbiote.core.enums import (
@@ -373,22 +375,99 @@ def test_an_ide_agent_that_is_a_sink_by_its_class_is_searched_before_idle_ones()
     assert _routes(view) == [["z"]]
 
 
-def test_sources_with_a_path_keep_their_order_at_the_cut():
-    # Past 200 sources that each have a path, the first 200 in node order are searched,
-    # whether a source is wired to a sink or is one itself.
-    mixed = [
-        AgentComponent(bom_ref=f"a{index:04d}", name=f"a{index:04d}", tool_refs=["t0000"])
-        if index % 2
+def _crowded(seed: int) -> AIBOM:
+    # More than 200 agents, each a sink itself or wired to a tool that may be one.
+    rng = random.Random(seed)  # noqa: S311 - fixed test data, not a secret
+    levels = (RiskSeverity.HIGH, RiskSeverity.CRITICAL)
+    tools = [
+        ToolComponent(
+            bom_ref=f"t{index:03d}",
+            name=f"t{index:03d}",
+            risks=[finding(rng.choice(levels))] if rng.random() < 0.5 else [],
+        )
+        for index in range(30)
+    ]
+    # Names sort against references, so node order and reference order differ.
+    agents = [
+        AgentComponent(bom_ref=f"a{index:04d}", name=f"n{9999 - index:04d}", risks=[finding(level)])
+        if (level := rng.choice(levels)) and rng.random() < 0.4
         else AgentComponent(
+            bom_ref=f"a{index:04d}",
+            name=f"n{9999 - index:04d}",
+            tool_refs=[rng.choice(tools).bom_ref],
+        )
+        for index in range(rng.randint(MAX_SOURCES + 10, 2 * MAX_SOURCES))
+    ]
+    edges = [
+        DependencyEdge(source_ref=a.bom_ref, target_ref=b.bom_ref, relationship="depends-on")
+        for a, b in (rng.sample(tools, 2) for _ in range(20))
+    ]
+    return AIBOM(components=[*agents, *tools], dependencies=edges)
+
+
+@pytest.mark.parametrize("seed", range(12))
+def test_the_capped_view_holds_the_best_paths_of_every_source(monkeypatch, seed):
+    bom = _crowded(seed)
+    capped = view_of(bom)
+    assert capped.sources_omitted > 0
+    monkeypatch.setattr(graph_view, "MAX_SOURCES", 10**9)
+    whole = view_of(bom)
+    assert whole.sources_omitted == 0
+    assert _routes(capped) == _routes(whole)
+    assert [path.nodes for path in capped.paths] == [path.nodes for path in whole.paths]
+
+
+def test_the_distance_that_decides_the_cut_is_the_shortest():
+    # `z` reaches the critical tool in two hops through `x`, and in three through `p`.
+    # Two hundred others reach it in two hops and sort after `z`, so `z` must be kept.
+    hop = ToolComponent(bom_ref="q", name="q")
+    others = [
+        AgentComponent(bom_ref=f"b{index:04d}", name=f"b{index:04d}", tool_refs=["q"])
+        for index in range(MAX_SOURCES)
+    ]
+    chain = [ToolComponent(bom_ref=ref, name=ref) for ref in ("p", "x", "y")]
+    agent = AgentComponent(bom_ref="a", name="a", tool_refs=["p", "x"])
+    links = [("q", "t0000"), ("x", "t0000"), ("y", "t0000"), ("p", "y")]
+    edges = [
+        DependencyEdge(source_ref=s, target_ref=t, relationship="depends-on") for s, t in links
+    ]
+    view = view_of(
+        AIBOM(components=[*others, agent, hop, *chain, *sink_tools(1)], dependencies=edges)
+    )
+    assert view.sources_omitted == 1
+    assert [view.nodes[index].ref for index in view.paths[0].nodes] == ["a", "x", "t0000"]
+
+
+def test_a_source_that_reaches_a_heavier_sink_is_searched_first():
+    # Imported agents rated high are sinks themselves and sort before the repository
+    # agent, which reaches a critical tool through an edge.
+    imported = [
+        AgentComponent(
             bom_ref=f"a{index:04d}", name=f"a{index:04d}", risks=[finding(RiskSeverity.HIGH)]
         )
         for index in range(MAX_SOURCES + 50)
     ]
-    view = view_of(AIBOM(components=[*mixed, *sink_tools(1)]))
-    assert (view.sources, view.sources_omitted) == (MAX_SOURCES + 50, 50)
-    assert {view.nodes[path.nodes[0]].ref for path in view.paths} == {
-        f"a{index:04d}" for index in range(MAX_SOURCES)
-    }
+    repository = AgentComponent(bom_ref="repo-agent", name="repo-agent", tool_refs=["t0000"])
+    view = view_of(AIBOM(components=[*imported, repository, *sink_tools(1)]))
+    assert (view.sources, view.sources_omitted) == (MAX_SOURCES + 51, 51)
+    assert _routes(view)[-1] == ["repo-agent", "t0000"]
+    first = view.paths[0]
+    assert [view.nodes[index].ref for index in first.nodes] == ["repo-agent", "t0000"]
+
+
+def test_a_source_reaching_a_heavy_sink_far_away_outranks_one_beside_a_light_sink():
+    # The heaviest sink a source reaches decides, not the nearest one.
+    light = ToolComponent(bom_ref="light", name="light", risks=[finding(RiskSeverity.HIGH)])
+    near = [
+        AgentComponent(bom_ref=f"a{index:04d}", name=f"a{index:04d}", tool_refs=["light"])
+        for index in range(MAX_SOURCES)
+    ]
+    far = AgentComponent(bom_ref="far", name="far", tool_refs=["hop"])
+    hop = ToolComponent(bom_ref="hop", name="hop")
+    edge = DependencyEdge(source_ref="hop", target_ref="t0000", relationship="depends-on")
+    view = view_of(AIBOM(components=[*near, far, hop, light, *sink_tools(1)], dependencies=[edge]))
+    assert view.sources_omitted == 1
+    assert [view.nodes[index].ref for index in view.paths[0].nodes] == ["far", "hop", "t0000"]
 
 
 def test_a_source_that_is_itself_a_sink_has_a_path_of_length_zero():

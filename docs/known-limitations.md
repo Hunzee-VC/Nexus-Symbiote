@@ -1853,8 +1853,11 @@ A way around a limit that its entry does not describe is worth a
 - **Exposure paths show potential reach.** A path is the shortest chain of recorded
   associations from an agent or IDE agent to a risky component. It does not show that
   the agent can invoke the component, that a credential reaches it or that an exploit
-  is possible. At most 200 agents and IDE agents are searched, those that reach a risky
-  component first, and 200 paths kept, and the view reports how many were left out.
+  is possible. At most 200 agents and IDE agents are searched, those whose best path
+  ranks highest, and the 200 best paths kept, and the view reports how many were left
+  out. An inventory with 200 sources whose paths outrank a repository agent's, such as
+  imported agents rated critical, leaves that agent's paths out of the view; `--focus`
+  on the agent still shows them.
 - **Large inventories make large pages.** `--max-nodes` bounds components, not edges,
   and the HTML page renders every detail when it is written, so a large or dense
   inventory gives a page that a browser opens slowly. Use `--focus` or
