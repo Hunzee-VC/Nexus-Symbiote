@@ -154,13 +154,16 @@ jobs:
       - run: mypy src/nexus_symbiote scripts
       - run: python scripts/check_workflows.py
       - run: python scripts/check_repository_hygiene.py
+      # The checkout is the pull request's merge commit, whose first parent is the base it was
+      # merged with. The base branch's tip can move while the job waits for a runner, and a
+      # diff against that tip would count the commits merged since as the pull request's.
       - name: Cap pull request size outside tests
         if: github.event_name == 'pull_request'
         env:
-          PR_BASE: ${{ github.base_ref }}
+          MERGE_SHA: ${{ github.sha }}
         run: |
-          git fetch --no-tags origin "$PR_BASE"
-          python scripts/check_pull_request_size.py --base "origin/$PR_BASE"
+          git fetch --no-tags --depth=2 origin "$MERGE_SHA"
+          python scripts/check_pull_request_size.py --base "$MERGE_SHA^1"
       - name: Require the locks to match pyproject.toml and each other
         run: python scripts/check_locks.py
   distribution:
