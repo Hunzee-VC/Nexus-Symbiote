@@ -495,6 +495,74 @@ jobs:
             echo "A workflow command from the scanned checkout created an annotation"
             exit 1
           fi
+  # Invariant 2 (offline by default) under a kernel control instead of the suite's Python
+  # socket tripwire: the whole suite runs in a network namespace that holds only loopback.
+  offline-invariant:
+    name: Offline invariant (OS network denied)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - name: Install locked test environment
+        run: |
+          python -m venv "$RUNNER_TEMP/offline-venv"
+          "$RUNNER_TEMP/offline-venv/bin/python" -m pip install --require-hashes --only-binary=:all: -r requirements-ci.lock
+          "$RUNNER_TEMP/offline-venv/bin/python" -m pip install --no-deps --no-build-isolation -e .
+          "$RUNNER_TEMP/offline-venv/bin/python" -m pip check
+      - name: Run full test suite inside kernel network-denied namespace
+        env:
+          PYTEST_LOG: ${{ runner.temp }}/pytest-offline-invariant.log
+        run: |
+          set -euo pipefail
+          HOST_UID="$(id -u)"
+          HOST_GID="$(id -g)"
+          OFFLINE_PYTHON="$RUNNER_TEMP/offline-venv/bin/python"
+          export HOST_UID HOST_GID OFFLINE_PYTHON
+          sudo --preserve-env=CI,HOST_UID,HOST_GID,OFFLINE_PYTHON,PYTEST_LOG,RUNNER_TEMP,HOME,TMPDIR \
+            unshare --net bash --noprofile --norc -euo pipefail -c '
+              ip link set lo up
+              setpriv --reuid="$HOST_UID" --regid="$HOST_GID" --clear-groups \
+                "$OFFLINE_PYTHON" - <<'"'"'PY'"'"'
+          import errno
+          import socket
+          for family, addr in (
+              (socket.AF_INET, ("1.1.1.1", 443)),
+              (socket.AF_INET6, ("2606:4700:4700::1111", 443)),
+          ):
+              try:
+                  sock = socket.socket(family, socket.SOCK_STREAM)
+              except OSError as error:
+                  if family == socket.AF_INET6 and error.errno == errno.EAFNOSUPPORT:
+                      continue
+                  raise
+              with sock:
+                  sock.settimeout(5.0)
+                  try:
+                      sock.connect(addr)
+                  except OSError as error:
+                      if error.errno != errno.ENETUNREACH:
+                          raise SystemExit(f"Expected ENETUNREACH for {addr}, got {error!r}")
+                  else:
+                      raise SystemExit(f"Expected kernel egress denial for {addr}")
+          PY
+              exec setpriv --reuid="$HOST_UID" --regid="$HOST_GID" --clear-groups \
+                timeout --signal=INT --kill-after=30s 30m \
+                "$OFFLINE_PYTHON" -m pytest -vv --strict-skips -o test_timeout=120 2>&1 \
+                | tee "$PYTEST_LOG"
+            '
+      - name: Preserve offline invariant diagnostics
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: pytest-log-offline-invariant
+          path: ${{ runner.temp }}/pytest-offline-invariant.log
+          if-no-files-found: error
+          retention-days: 7
   verified:
     name: Verified CI
     if: always()
@@ -509,6 +577,7 @@ jobs:
       - codeql
       - action
       - action-annotations
+      - offline-invariant
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -521,7 +590,7 @@ jobs:
           import os
           import sys
           results = json.loads(os.environ["CI_RESULTS"])
-          expected = {"test", "floor", "coverage", "quality", "distribution", "security-regressions", "dependency-audit", "codeql", "action", "action-annotations"}
+          expected = {"test", "floor", "coverage", "quality", "distribution", "security-regressions", "dependency-audit", "codeql", "action", "action-annotations", "offline-invariant"}
           if not isinstance(results, dict) or set(results) != expected:
               print("Verification metadata does not contain exactly the required jobs")
               sys.exit(1)

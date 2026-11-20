@@ -17,11 +17,12 @@ from click.testing import CliRunner
 from nexus_symbiote import modes, reporting
 from nexus_symbiote.cli import _get_scanners, main
 from nexus_symbiote.core.aibom import AIBOM
-from nexus_symbiote.core.enums import RiskSeverity, TrustTier
+from nexus_symbiote.core.enums import RiskSeverity, SerializationSafety, TrustTier
 from nexus_symbiote.core.models import (
     AgentComponent,
     AIBOMMetadata,
     CompletenessClaim,
+    ModelComponent,
     RiskAssessment,
     ToolComponent,
 )
@@ -115,18 +116,37 @@ def _click_commands(group: click.Group, prefix: tuple[str, ...] = ()) -> set[str
     return found
 
 
-def test_invariant_1_hostile_pth_and_setup_py_never_executed(tmp_path: Path) -> None:
-    marker = tmp_path / "executed.marker"
+class _CreatesDirectory:
+    def __init__(self, marker: Path) -> None:
+        self.marker = marker
+
+    def __reduce__(self) -> tuple[object, tuple[str]]:
+        # Unpickling this calls os.mkdir, which the offline guard permits: only a scanner
+        # that never unpickles leaves no marker. The guard would stop os.system by itself.
+        return (os.mkdir, (str(self.marker),))
+
+
+HOSTILE_MODEL_FILES = ("weights.pth", "model.safetensors", "embeddings.npy", "models/blob.bin")
+
+
+def test_invariant_1_hostile_pickles_and_hooks_are_inspected_without_execution(
+    tmp_path: Path,
+) -> None:
+    markers = tmp_path / "markers"
+    markers.mkdir()
     project = tmp_path / "hostile-repo"
-    project.mkdir()
+    (project / "models").mkdir(parents=True)
 
-    class _Exploit:
-        def __reduce__(self) -> tuple[object, tuple[str]]:
-            return (os.system, (f"touch {marker}",))
+    for index, name in enumerate(HOSTILE_MODEL_FILES):
+        payload = pickle.dumps(_CreatesDirectory(markers / f"model-{index}"), protocol=4)
+        (project / name).write_bytes(payload)
+    with modes.enforce(modes.Mode.OFFLINE):
+        pickle.loads((project / "model.safetensors").read_bytes())  # noqa: S301
+    assert [path.name for path in markers.iterdir()] == ["model-1"]
+    (markers / "model-1").rmdir()
 
-    (project / "weights.pth").write_bytes(pickle.dumps(_Exploit(), protocol=4))
     (project / "setup.py").write_text(
-        f'import pathlib\npathlib.Path({str(marker)!r}).write_text("pwned")\n',
+        f"import pathlib\npathlib.Path({str(markers / 'setup')!r}).mkdir()\n",
         encoding="utf-8",
     )
     hooks_dir = project / ".claude"
@@ -138,7 +158,7 @@ def test_invariant_1_hostile_pth_and_setup_py_never_executed(tmp_path: Path) -> 
                     "PreToolUse": [
                         {
                             "matcher": "Bash",
-                            "hooks": [{"type": "command", "command": f"touch {marker}"}],
+                            "hooks": [{"type": "command", "command": f"mkdir {markers / 'hook'}"}],
                         }
                     ]
                 }
@@ -152,12 +172,19 @@ def test_invariant_1_hostile_pth_and_setup_py_never_executed(tmp_path: Path) -> 
         main, ["scan", str(project), "--no-project-policy", "--report-only", "-o", str(out_bom)]
     )
     assert result.exit_code == 0, result.output
-    assert not marker.exists()
+    assert list(markers.iterdir()) == []
     bom = AIBOM.load(out_bom)
-    model_risks = [
-        r.category for c in bom.components if c.component_type.value == "model" for r in c.risks
-    ]
-    assert "serialization_format" in model_risks
+    unsafe = {
+        component.name
+        for component in bom.components
+        if isinstance(component, ModelComponent)
+        and component.serialization_safety is SerializationSafety.UNSAFE_CODE_EXECUTION
+        and any(risk.category == "serialization_format" for risk in component.risks)
+    }
+    assert unsafe == set(HOSTILE_MODEL_FILES)
+    assert any(
+        risk.category == "hook_commands" for component in bom.components for risk in component.risks
+    )
 
 
 def test_invariant_3_zero_llm_sdks_across_pyproject_wheel_and_locks() -> None:
