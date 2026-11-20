@@ -1870,3 +1870,15 @@ A way around a limit that its entry does not describe is worth a
 - **The TypeScript parser is native code.** It runs inside the scanning process with
   size, node and time bounds, but without isolation; see
   [security boundaries](../SECURITY.md#security-boundaries).
+- **One collection bound counts time.** A TypeScript or JavaScript file the grammar
+  cannot parse has no size or node bound on its parse, so the parse is held to 250 ms
+  of processor time, more when `syntax-bytes` is raised, and a file whose parse takes
+  that long is a failure. How busy the machine is does not count toward it, but how
+  fast the machine is does: a file whose parse takes about that long records
+  `TypeScript parsing exceeded its time limit` on a slower machine and a different
+  verdict on a faster one. A file that parses stays below the limit, and ordinary
+  source reaches the node limit first. The parser reads its clock only between steps
+  of its own, and some input makes one step long: 32 KiB of `f<a,` runs for about
+  ten times the limit and 1.4 GB of memory before it stops, in this release and in
+  those before it. See
+  [the TypeScript parse time limit](collection-limits.md#the-typescript-parse-time-limit).
