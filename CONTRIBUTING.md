@@ -98,7 +98,17 @@ Keep a pull request under 1,500 changed lines outside `tests/` and `benchmarks/`
 
 During the interim single-maintainer period (see [repository controls](docs/repository-controls.md)), keep every change on a pull request, up to date with `main` before it merges, and leave behavior- or security-changing pull requests open for a soak window of at least 24 hours before merging; re-read the full rendered diff after `Verified CI` completes and treat it as the reviewed artifact. Small documentation-only fixes may merge once CI is green. High-volume days of self-merged reviews are where defects slip through; the soak window is the control that compensates for the absent second reviewer. Fill in the pull request's review record: who reviewed the diff, when, and how. Publication repeats the soak mechanically: the release workflow refuses to publish to PyPI until the release commit has been on `main` for 24 hours (see [releasing](docs/releasing.md)).
 
+Name the roadmap item the change implements and any recorded decision it relies on, as the pull-request template asks, and check that no open pull request already implements the same item. Label the pull request as the [label guide](docs/labels.md) describes: at least one type label, at least one area label and, while it is open, exactly one review-state label. When work moves from one pull request to another, update both descriptions so that each lists only what its diff contains.
+
 A pull request that rewrites a whole file from an old branch can silently revert changes merged since. Resolve conflicts against current `main`, never by taking your side wholesale, and check that the diff removes nothing you did not mean to remove; `scripts/check_workflows.py` also refuses an action pin older than its recorded floor and a gate job that lost its command.
+
+### How a pull request merges
+
+- **One at a time.** Bring `main` into the branch with a merge commit; never rebase or force-push a branch someone else may hold. Wait for `Verified CI` on that head, then merge. Every other open branch is then behind `main` again.
+- **The merge commit.** Since #236 (2026-11-16), `main` has taken each pull request as a merge commit named after it, `<title> (#N)`. Before that, most pull requests were squash-merged (the integrations #202, #203, #226 and #227 were merge commits), and the [2026-11-03 review](docs/audits/closed-pr-review-2026-11-03.md#findings) records how a squash merge silently reverted #99. `git log --first-parent main` lists one commit per pull request merged directly; the constituents of an integration pull request appear only under its merge commit.
+- **Labels gate the merge.** From 2026-11-19, a pull request merges only with `review: verified` at its current head and without `do-not-merge`. The [label guide](docs/labels.md) gives what each label requires.
+- **Integration pull requests.** An integration pull request carries several reviewed pull requests at their reviewed heads, and the 1,500-line cap applies to it as a whole. Target each constituent at `main`, so that GitHub records it as merged when the integration lands. Otherwise, close each one by hand with a comment naming the integration's merge commit, and label it `superseded`.
+- **Recording.** The [pull-request reviews](docs/README.md#project-records) under `docs/audits/` record how each pull request reached `main`.
 
 ## AI-assisted contributions
 

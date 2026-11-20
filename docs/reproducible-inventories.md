@@ -227,4 +227,12 @@ against the current tree.
   them, so a checkout whose names differ between machines, for example after Unicode
   normalization, records different paths. The byte-identical results on this page were
   checked with copies of a checkout on one file system.
+- **One collection bound counts time.** Every other bound counts something a scan
+  reads, such as bytes, entries or nodes, so two scans reach it alike. The mcp
+  collector also holds the parse of a TypeScript or JavaScript file to 250 ms of
+  processor time, which only a file the grammar cannot parse comes near. A busy
+  machine does not reach that limit sooner, but a slower one does, so scans on two
+  machines of different speed can record such a file with different failure reasons;
+  neither inventories it. See
+  [the TypeScript parse time limit](collection-limits.md#the-typescript-parse-time-limit).
 - **A digest is not a signature.** No digest on this page says who wrote a file.
