@@ -334,9 +334,9 @@ nexus-symbiote advisories [OPTIONS] AIBOM_PATH
 | `--exclude` `NAME` | Never send this package name to OSV; a trailing `*` matches a prefix, and a `*` anywhere else is refused. Names are compared as PyPI normalizes them, and in any case (repeatable). |
 | `--exclude-private-origins` | Send only packages whose lockfile resolution records the public PyPI or npm registry. A Python package that no `uv.lock` or `poetry.lock` resolves has no recorded origin, so it is withheld; withhold private names with `--exclude` instead to keep public ones checked. |
 | `--dry-run` | List the package identities that would be sent, without contacting OSV (works offline). |
-| `--offline-db` `PATH` | Match exact pinned PyPI/npm packages offline against an OSV JSON bundle or directory without contacting `api.osv.dev`; deduplicates alias pairs and records bundle SHA-256 provenance. |
-| `--kev` `PATH` | Offline CISA/ENISA KEV JSON catalog used with `--offline-db` to elevate matched advisories to `critical` with source provenance (repeatable). |
-| `--epss` `PATH` | Offline EPSS CSV/JSON catalog used with `--offline-db` to attach EPSS scores and percentiles. |
+| `--offline-db` `PATH` | Match exact pinned PyPI/npm packages offline against an OSV JSON bundle or directory without contacting `api.osv.dev`; deduplicates alias pairs and records bundle SHA-256 provenance. A directory is read flat, and one with a subdirectory is refused, as is a bundle with no records or with an entry that is not an OSV record. A package whose ecosystem the bundle holds no record for is an error, so the report is not complete. |
+| `--kev` `PATH` | Offline CISA/ENISA KEV JSON catalog used with `--offline-db` to elevate matched advisories to `critical` with source provenance (repeatable). A catalog with no entries is refused. |
+| `--epss` `PATH` | Offline EPSS CSV/JSON catalog used with `--offline-db` to attach EPSS scores and percentiles. A catalog with no entries is refused. |
 
 The command sends each package's ecosystem, normalized name and exact version to
 `https://api.osv.dev/v1/querybatch`, including packages resolved from a private
@@ -1074,7 +1074,7 @@ nexus-symbiote vex [OPTIONS] AIBOM_PATH
 | `--decisions` `PATH` | Operator-owned VEX decisions YAML/JSON stored outside the scanned project and enclosing git trees; expired decisions revert to `in_triage` against wall-clock UTC time. |
 | `--project-root` `PATH` | Scanned project root used to refuse policy and trace files stored inside the checkout. |
 | `--advisories` `PATH` | Link matched advisories from a live or offline `advisories` report JSON bound to this AIBOM's SHA-256 into the VEX document. |
-| `--trace-evidence` `PATH` | `trace-diff` or execution-evidence JSON bound to this AIBOM's SHA-256 (`unobserved` stays `in_triage`; critical, KEV, and static-execution findings cannot be suppressed without an expiring operator decision). Requires `--trace-attestation` with `--trusted-key` unless `--allow-unsigned-trace-evidence` is set. |
+| `--trace-evidence` `PATH` | `trace-diff` or execution-evidence JSON bound to this AIBOM's SHA-256 (`unobserved` and `invoked` stay `in_triage`; critical, KEV, and static-execution findings cannot be suppressed without an expiring operator decision). Requires `--trace-attestation` with `--trusted-key` unless `--allow-unsigned-trace-evidence` is set. |
 | `--trace-attestation` `PATH` | Ed25519 DSSE attestation envelope authenticating `--trace-evidence`. |
 | `--trusted-key` `PATH` | Trusted Ed25519 public key PEM outside the scanned project (repeatable; used with `--trace-attestation`). |
 | `--allow-unsigned-trace-evidence` | Explicitly accept unsigned `--trace-evidence` without `--trace-attestation`. |

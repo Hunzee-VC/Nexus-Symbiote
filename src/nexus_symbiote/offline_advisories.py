@@ -1,12 +1,10 @@
 """Offline advisory matching with provenance, alias deduplication, and KEV/EPSS enrichment.
 
-Matches exact pinned PyPI and npm package identities in an AgentBOM against an
-operator-supplied offline OSV bundle (JSON file or directory) without network I/O.
-All files are opened with ``open_regular_file`` (no symlinks), bounded with explicit
-``max_bytes``, indexed by ``(ecosystem, normalized_package)`` for linear lookup, and
-evaluated by order-independent OSV version intervals (skipping ``withdrawn`` records
-and ``GIT`` ranges, honoring ``introduced`` including ``"0"``/``0``, ``fixed``,
-``last_affected``, ``limit``, and partial npm SemVer).
+Matches exact pinned PyPI and npm packages in an AgentBOM against an operator-supplied
+OSV bundle (a JSON file or a flat directory of them) without network I/O. Files are
+opened without following symlinks and bounded in size. A bundle or catalog that is empty
+or wrongly shaped is refused, and a package whose ecosystem the bundle holds no record
+for is an error, so neither can pass as a complete result with no advisories.
 """
 
 from __future__ import annotations
@@ -137,21 +135,19 @@ def _extract_severity(record: dict[str, Any]) -> str:
 
 
 def _parse_osv_records(payload: object) -> list[_ParsedAdvisory]:
+    items: object = payload
     if isinstance(payload, dict):
-        items = payload.get("advisories") or payload.get("vulnerabilities") or [payload]
-    elif isinstance(payload, list):
-        items = payload
-    else:
-        raise ValueError("Offline advisory DB must be a JSON object or array of OSV records")
+        wrapper = next((k for k in ("advisories", "vulnerabilities") if k in payload), None)
+        items = [payload] if wrapper is None else payload[wrapper]
     if not isinstance(items, list):
-        raise ValueError("Offline advisory DB entries must be a JSON array")
+        raise ValueError("Offline advisory DB must be an OSV record or an array of OSV records")
 
     parsed: list[_ParsedAdvisory] = []
     for item in items:
-        if not isinstance(item, dict) or item.get("withdrawn"):
-            continue
-        rec_id = item.get("id")
+        rec_id = item.get("id") if isinstance(item, dict) else None
         if not isinstance(rec_id, str) or not rec_id.strip():
+            raise ValueError("Offline advisory DB entry is not an OSV record with an 'id'")
+        if item.get("withdrawn"):
             continue
         raw_aliases = item.get("aliases")
         aliases = (
@@ -183,6 +179,8 @@ def load_offline_advisory_db(path: Path) -> tuple[list[_ParsedAdvisory], str]:
         manifest_lines: list[str] = []
         file_count = 0
         for entry in sorted(os.scandir(path), key=lambda e: e.name):
+            if entry.is_dir():
+                raise ValueError("Offline advisory DB directory must not contain subdirectories")
             if not entry.name.endswith(".json"):
                 continue
             if entry.is_symlink():
@@ -198,13 +196,17 @@ def load_offline_advisory_db(path: Path) -> tuple[list[_ParsedAdvisory], str]:
             if len(records) > MAX_DB_RECORDS:
                 raise ValueError(f"Offline advisory DB exceeds {MAX_DB_RECORDS} records")
         digest = "sha256:" + hashlib.sha256("\n".join(manifest_lines).encode("utf-8")).hexdigest()
-        return records, digest
-
-    data = _read_bounded_bytes(path, MAX_DB_BYTES, "Offline advisory DB")
-    records = _parse_osv_records(parse_json_strict(data.decode("utf-8"), max_bytes=MAX_DB_BYTES))
+    else:
+        data = _read_bounded_bytes(path, MAX_DB_BYTES, "Offline advisory DB")
+        records = _parse_osv_records(
+            parse_json_strict(data.decode("utf-8"), max_bytes=MAX_DB_BYTES)
+        )
+        digest = hash_bytes(data)
+    if not records:
+        raise ValueError("Offline advisory DB holds no advisory records")
     if len(records) > MAX_DB_RECORDS:
         raise ValueError(f"Offline advisory DB exceeds {MAX_DB_RECORDS} records")
-    return records, hash_bytes(data)
+    return records, digest
 
 
 def load_kev_catalog(path: Path) -> tuple[dict[str, list[_KEVEntry]], str]:
@@ -218,11 +220,9 @@ def load_kev_catalog(path: Path) -> tuple[dict[str, list[_KEVEntry]], str]:
         default_source = (
             "enisa-kev" if "enisa" in str(payload.get("title", "")).lower() else "cisa-kev"
         )
-    raw_entries = payload.get("vulnerabilities")
-    if raw_entries is None:
-        raw_entries = payload.get("entries", [])
+    raw_entries = payload.get("vulnerabilities", payload.get("entries"))
     if not isinstance(raw_entries, list):
-        raise ValueError("KEV catalog entries must be a JSON array")
+        raise ValueError("KEV catalog must hold a 'vulnerabilities' or 'entries' array")
 
     index: dict[str, list[_KEVEntry]] = {}
     for entry in raw_entries:
@@ -237,6 +237,8 @@ def load_kev_catalog(path: Path) -> tuple[dict[str, list[_KEVEntry]], str]:
         index.setdefault(raw_id.strip().upper(), []).append(
             _KEVEntry(src_name, date_added.strip() if isinstance(date_added, str) else None)
         )
+    if not index:
+        raise ValueError("KEV catalog holds no entries")
     return index, hash_bytes(data)
 
 
@@ -245,7 +247,7 @@ def load_epss_catalog(path: Path) -> tuple[dict[str, _EPSSEntry], str]:
     data = _read_bounded_bytes(path, MAX_CATALOG_BYTES, "EPSS catalog")
     text = data.decode("utf-8")
     index: dict[str, _EPSSEntry] = {}
-    if text.lstrip().startswith("{"):
+    if text.lstrip().startswith(("{", "[")):
         payload = parse_json_strict(text, max_bytes=MAX_CATALOG_BYTES)
         if not isinstance(payload, dict) or not isinstance(payload.get("data"), list):
             raise ValueError("EPSS JSON catalog must be an object with a 'data' array")
@@ -259,19 +261,18 @@ def load_epss_catalog(path: Path) -> tuple[dict[str, _EPSSEntry], str]:
                 _parse_epss_unit(epss, "score"),
                 _parse_epss_unit(pct, "percentile") if pct is not None else None,
             )
-        return index, hash_bytes(data)
-
-    lines = [
-        line for line in text.splitlines() if line.strip() and not line.lstrip().startswith("#")
-    ]
-    for row in csv.DictReader(io.StringIO("\n".join(lines))):
-        cve, epss, pct = row.get("cve"), row.get("epss"), row.get("percentile")
-        if not cve or not cve.strip() or not epss or not epss.strip():
-            continue
-        index[cve.strip().upper()] = _EPSSEntry(
-            _parse_epss_unit(epss.strip(), "score"),
-            _parse_epss_unit(pct.strip(), "percentile") if pct and pct.strip() else None,
-        )
+    else:
+        rows = [ln for ln in text.splitlines() if ln.strip() and not ln.lstrip().startswith("#")]
+        for row in csv.DictReader(io.StringIO("\n".join(rows))):
+            cve, epss, pct = row.get("cve"), row.get("epss"), row.get("percentile")
+            if not cve or not cve.strip() or not epss or not epss.strip():
+                continue
+            index[cve.strip().upper()] = _EPSSEntry(
+                _parse_epss_unit(epss.strip(), "score"),
+                _parse_epss_unit(pct.strip(), "percentile") if pct and pct.strip() else None,
+            )
+    if not index:
+        raise ValueError("EPSS catalog holds no entries")
     return index, hash_bytes(data)
 
 
@@ -481,20 +482,21 @@ def match_offline_advisories(
 
     records, db_digest = load_offline_advisory_db(db_path)
     pkg_index = _build_package_index(records)
+    covered = {ecosystem for ecosystem, _ in pkg_index}
 
     kev_index: dict[str, list[_KEVEntry]] = {}
-    kev_provenance: list[dict[str, str]] = []
+    kev_provenance: list[dict[str, Any]] = []
     for kpath in kev_paths:
         k_idx, k_digest = load_kev_catalog(kpath)
-        kev_provenance.append({"path": kpath.name, "sha256": k_digest})
+        kev_provenance.append({"path": kpath.name, "sha256": k_digest, "entries": len(k_idx)})
         for key, entries in k_idx.items():
             kev_index.setdefault(key, []).extend(entries)
 
     epss_index: dict[str, _EPSSEntry] = {}
-    epss_provenance: dict[str, str] | None = None
+    epss_provenance: dict[str, Any] | None = None
     if epss_path is not None:
-        epss_index, epss_digest = load_epss_catalog(epss_path)
-        epss_provenance = {"path": epss_path.name, "sha256": epss_digest}
+        epss_index, digest = load_epss_catalog(epss_path)
+        epss_provenance = {"path": epss_path.name, "sha256": digest, "entries": len(epss_index)}
 
     provenance: dict[str, Any] = {
         "offline": True,
@@ -539,6 +541,9 @@ def match_offline_advisories(
             report.components_excluded += 1
             report.excluded.append({"component_ref": comp.bom_ref, "reason": reason})
             continue
+        if eco.lower() not in covered:
+            report.errors.append(f"{comp.bom_ref}: offline advisory DB holds no {eco} records")
+            continue
         targets.append((comp.bom_ref, eco, name, version))
 
     if len(targets) > MAX_OFFLINE_COMPONENTS:
@@ -565,7 +570,7 @@ def match_offline_advisories(
         for entry in _deduplicate_matches(raw_matches):
             if len(report.advisories) >= MAX_ADVISORIES:
                 report.errors.append(f"Advisory report limit reached ({MAX_ADVISORIES})")
-                break
+                return report, provenance
             lookup_ids = [entry["id"].upper(), *(a.upper() for a in entry["aliases"])]
             kev_hits = [hit for lid in lookup_ids for hit in kev_index.get(lid, ())]
             entry["in_kev"] = bool(kev_hits)

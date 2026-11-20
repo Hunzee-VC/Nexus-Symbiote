@@ -105,8 +105,9 @@ def _resolve_analysis(
                 props["nexus-symbiote:vexDecisionExpiresAt"] = decision.expires_at.isoformat()
     elif execution_evidence is not None:
         outcome = execution_evidence.outcome_for(component_ref)
-        if outcome == "declared-never-loaded":
+        if outcome is not None:
             props["nexus-symbiote:executionOutcome"] = outcome
+        if outcome == "declared-never-loaded":
             if in_kev or severity == "critical" or category in _NON_SUPPRESSIBLE_CATEGORIES:
                 analysis["detail"] = (
                     "Execution-bound (reported): declared-never-loaded cannot suppress critical, "
@@ -121,20 +122,16 @@ def _resolve_analysis(
                     f"runtime execution evidence. {default_detail}"
                 )
         elif outcome == "unobserved":
-            props["nexus-symbiote:executionOutcome"] = outcome
             analysis["detail"] = (
                 "Execution-bound (reported): unobserved in runtime trace spans; absence of "
                 f"telemetry does not prove unreachability. {default_detail}"
             )
         elif outcome == "invoked":
-            props["nexus-symbiote:executionOutcome"] = outcome
-            analysis["state"] = "exploitable"
-            analysis["response"] = ["update"]
             analysis["detail"] = (
-                f"Execution-bound (reported): component was invoked in runtime trace evidence. {default_detail}"
+                "Execution-bound (reported): component was invoked in runtime trace evidence; "
+                f"an invocation does not show that the finding is exploitable. {default_detail}"
             )
         elif outcome == "shadowed":
-            props["nexus-symbiote:executionOutcome"] = outcome
             analysis["detail"] = (
                 "Execution-bound (reported): component is shadowed by another tool or server "
                 f"definition; manual triage required. {default_detail}"

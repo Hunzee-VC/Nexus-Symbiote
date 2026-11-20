@@ -114,10 +114,24 @@ def test_execution_bound_vex_yields_distinct_outcomes_and_keeps_unobserved_in_tr
     assert unobs["state"] == "in_triage"
     assert "justification" not in unobs
 
-    # 3. Real trace-diff matched (inventory_ref) -> exploitable + update response.
+    # 3. Real trace-diff matched (inventory_ref) -> in_triage: an invocation of a component
+    #    with a heuristic finding is recorded as a property and asserts no exploitability.
     invoked = by_comp["tool:invoked"]["analysis"]
-    assert invoked["state"] == "exploitable"
-    assert invoked["response"] == ["update"]
+    assert invoked["state"] == "in_triage"
+    assert "response" not in invoked
+    assert "invoked" in invoked["detail"]
+    outcomes = {
+        ref: {p["name"]: p["value"] for p in vuln["properties"]}.get(
+            "nexus-symbiote:executionOutcome"
+        )
+        for ref, vuln in by_comp.items()
+    }
+    assert outcomes == {
+        "tool:never-loaded": "declared-never-loaded",
+        "tool:unobserved": "unobserved",
+        "tool:invoked": "invoked",
+        "tool:shadowed": "shadowed",
+    }
 
     # 4. Shadowed -> in_triage + explicit shadowing reason.
     shadowed = by_comp["tool:shadowed"]["analysis"]
@@ -405,7 +419,8 @@ def test_vex_cli_requires_dsse_attestation_links_live_advisories_and_verifies_sh
     assert len(doc["vulnerabilities"]) == 1
     vuln = doc["vulnerabilities"][0]
     assert vuln["id"] == "GHSA-live-1234-5678"
-    assert vuln["analysis"]["state"] == "exploitable"
+    assert vuln["analysis"]["state"] == "in_triage"
+    assert "response" not in vuln["analysis"]
     props = {p["name"]: p["value"] for p in vuln["properties"]}
     assert props["nexus-symbiote:executionOutcome"] == "invoked"
     assert props["nexus-symbiote:assurance"] == "osv-advisory-match"
@@ -427,3 +442,22 @@ def test_vex_cli_requires_dsse_attestation_links_live_advisories_and_verifies_sh
     )
     assert res_tampered.exit_code != 0
     assert "attestation verification failed" in res_tampered.output.lower()
+
+
+def test_only_an_operator_decision_can_state_exploitable(tmp_path):
+    """Trace evidence is reported, not verified: no outcome of it may assert exploitability."""
+    bom = _three_component_bom()
+    refs = [comp.bom_ref for comp in bom.components]
+    trace_file = tmp_path / "trace-evidence.json"
+    advisories = [
+        {"advisory_id": "GHSA-live-1234-5678", "component_ref": ref, "severity": "critical"}
+        for ref in refs
+    ]
+    for key in ("invoked", "shadowed", "declared_never_loaded", "unobserved"):
+        trace_file.write_text(json.dumps({key: refs}), encoding="utf-8")
+        evidence = load_execution_evidence(trace_file, allow_unsigned=True)
+        doc = VEXGenerator(execution_evidence=evidence, advisories=advisories).generate(bom)
+        assert len(doc["vulnerabilities"]) == 2 * len(refs)
+        for vuln in doc["vulnerabilities"]:
+            assert vuln["analysis"]["state"] != "exploitable", key
+            assert "response" not in vuln["analysis"], key

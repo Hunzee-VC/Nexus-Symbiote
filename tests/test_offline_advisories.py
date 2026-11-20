@@ -12,7 +12,11 @@ from nexus_symbiote.cli import main
 from nexus_symbiote.core.aibom import AIBOM
 from nexus_symbiote.core.enums import AssuranceLevel
 from nexus_symbiote.core.models import ClaimEvidence, RegistryEntryComponent
-from nexus_symbiote.offline_advisories import match_offline_advisories
+from nexus_symbiote.offline_advisories import (
+    load_epss_catalog,
+    load_kev_catalog,
+    match_offline_advisories,
+)
 
 
 def _bom_with_package(
@@ -436,7 +440,7 @@ def test_offline_advisories_unpinned_package_marks_incomplete_and_exits_1(tmp_pa
     bom_path = tmp_path / "unpinned.json"
     _bom_with_package(name="requests", version=None, purl="pkg:pypi/requests").save(bom_path)
     db_file = tmp_path / "osv.json"
-    db_file.write_text(json.dumps({"advisories": []}), encoding="utf-8")
+    db_file.write_text(json.dumps(_sample_osv_bundle()), encoding="utf-8")
 
     runner = CliRunner()
     res = runner.invoke(main, ["advisories", str(bom_path), "--offline-db", str(db_file)])
@@ -599,3 +603,163 @@ def test_advisories_cli_offline_mode_and_help_exit_codes(tmp_path):
     res_bad = runner.invoke(main, ["advisories", str(bom_path), "--kev", str(kev_file)])
     assert res_bad.exit_code != 0
     assert "--offline-db" in res_bad.output
+
+
+def _pypi_record(record_id: str = "GHSA-cccc-dddd-eeee") -> dict:
+    return {
+        "id": record_id,
+        "affected": [
+            {
+                "package": {"ecosystem": "PyPI", "name": "transformers"},
+                "ranges": [{"type": "ECOSYSTEM", "events": [{"introduced": "0"}]}],
+            }
+        ],
+    }
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        [],
+        {"advisories": []},
+        {"vulns": [_pypi_record()]},
+        {"advisories": {"GHSA-cccc-dddd-eeee": _pypi_record()}},
+        [_pypi_record(), "GHSA-cccc-dddd-eeee"],
+        [_pypi_record(), {"affected": []}],
+        [{**_pypi_record(), "withdrawn": "2024-01-01T00:00:00Z"}],
+    ],
+    ids=[
+        "empty",
+        "empty-wrapper",
+        "unknown-wrapper",
+        "mapping",
+        "non-object",
+        "no-id",
+        "withdrawn",
+    ],
+)
+def test_offline_advisories_refuse_an_empty_or_wrongly_shaped_database(tmp_path, payload):
+    bom_path = tmp_path / "aibom.json"
+    _bom_with_package().save(bom_path)
+    db_file = tmp_path / "osv.json"
+    db_file.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="Offline advisory DB"):
+        match_offline_advisories(_bom_with_package(), db_path=db_file)
+
+    res = CliRunner().invoke(main, ["advisories", str(bom_path), "--offline-db", str(db_file)])
+    assert res.exit_code == 1
+    assert "Offline advisory DB" in res.output
+    assert '"complete"' not in res.output
+
+
+def test_offline_advisories_refuse_an_empty_or_nested_database_directory(tmp_path):
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    (empty / "README.txt").write_text("no records here", encoding="utf-8")
+    with pytest.raises(ValueError, match="holds no advisory records"):
+        match_offline_advisories(_bom_with_package(), db_path=empty)
+
+    nested = tmp_path / "nested"
+    (nested / "PyPI").mkdir(parents=True)
+    (nested / "PyPI" / "a.json").write_text(json.dumps(_pypi_record()), encoding="utf-8")
+    with pytest.raises(ValueError, match="subdirectories"):
+        match_offline_advisories(_bom_with_package(), db_path=nested)
+
+    # A top-level record does not excuse the records a subdirectory would hide.
+    (nested / "top.json").write_text(json.dumps(_pypi_record()), encoding="utf-8")
+    with pytest.raises(ValueError, match="subdirectories"):
+        match_offline_advisories(_bom_with_package(), db_path=nested)
+
+
+def test_offline_advisories_database_without_the_queried_ecosystem_is_incomplete(tmp_path):
+    db_file = tmp_path / "pypi-only.json"
+    db_file.write_text(json.dumps([_pypi_record()]), encoding="utf-8")
+    npm = _bom_with_package(name="left-pad", version="1.3.0", registry_type="npm")
+    bom = AIBOM(components=[*_bom_with_package().components, *npm.components])
+
+    report, _ = match_offline_advisories(bom, db_path=db_file)
+    assert report.components_checked == 1
+    assert [adv["package"] for adv in report.advisories] == ["transformers"]
+    assert report.complete is False
+    assert report.errors == ["pkg:npm:left-pad@1.3.0: offline advisory DB holds no npm records"]
+
+    only_npm, _ = match_offline_advisories(npm, db_path=db_file)
+    assert only_npm.components_checked == 0
+    assert only_npm.coverage == "none"
+    assert only_npm.complete is False
+
+    bom_path = tmp_path / "npm.json"
+    npm.save(bom_path)
+    res = CliRunner().invoke(main, ["advisories", str(bom_path), "--offline-db", str(db_file)])
+    assert res.exit_code == 1
+    assert json.loads(res.output)["complete"] is False
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [{}, {"catalog": []}, {"vulnerabilities": []}, {"vulnerabilities": [{"notes": "no id"}]}],
+)
+def test_offline_advisories_refuse_a_kev_catalog_without_entries(tmp_path, payload):
+    kev_file = tmp_path / "kev.json"
+    kev_file.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(ValueError, match="KEV catalog"):
+        load_kev_catalog(kev_file)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        json.dumps([{"cve": "CVE-2024-99999", "epss": 0.5}]),
+        json.dumps({"data": []}),
+        "#model_version:v2025.03.14\ncve,epss,percentile\n",
+        "",
+    ],
+    ids=["json-array", "empty-data", "header-only", "empty-file"],
+)
+def test_offline_advisories_refuse_an_epss_catalog_without_entries(tmp_path, text):
+    epss_file = tmp_path / "epss"
+    epss_file.write_text(text, encoding="utf-8")
+    with pytest.raises(ValueError, match="EPSS"):
+        load_epss_catalog(epss_file)
+
+
+def test_offline_advisories_provenance_counts_catalog_entries(tmp_path):
+    db_file = tmp_path / "osv.json"
+    db_file.write_text(json.dumps(_sample_osv_bundle()), encoding="utf-8")
+    kev_file = tmp_path / "kev.json"
+    kev_file.write_text(
+        json.dumps({"vulnerabilities": [{"cveID": "CVE-2024-99999"}, {"cveID": "CVE-2024-1"}]}),
+        encoding="utf-8",
+    )
+    epss_file = tmp_path / "epss.csv"
+    epss_file.write_text("cve,epss,percentile\nCVE-2024-99999,0.5,0.9\n", encoding="utf-8")
+
+    _, provenance = match_offline_advisories(
+        _bom_with_package(), db_path=db_file, kev_paths=[kev_file], epss_path=epss_file
+    )
+    assert provenance["records_loaded"] == 3
+    assert provenance["kev_catalogs"][0]["entries"] == 2
+    assert provenance["epss_catalog"]["entries"] == 1
+
+
+def test_offline_advisories_stop_matching_at_the_report_limit(tmp_path, monkeypatch):
+    monkeypatch.setattr("nexus_symbiote.offline_advisories.MAX_ADVISORIES", 3)
+    db_file = tmp_path / "osv.json"
+    db_file.write_text(
+        json.dumps([_pypi_record(f"GHSA-{index:04d}-dddd-eeee") for index in range(2)]),
+        encoding="utf-8",
+    )
+    bom = AIBOM(
+        components=[
+            component
+            for minor in range(5)
+            for component in _bom_with_package(version=f"4.{minor}.0").components
+        ]
+    )
+
+    report, _ = match_offline_advisories(bom, db_path=db_file)
+    assert len(report.advisories) == 3
+    assert report.errors == ["Advisory report limit reached (3)"]
+    assert report.components_checked == 2
+    assert report.complete is False
