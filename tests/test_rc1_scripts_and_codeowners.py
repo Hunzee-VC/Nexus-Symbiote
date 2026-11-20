@@ -125,6 +125,21 @@ def test_precision_gate_enforces_complete_class_floors_and_cli(tmp_path: Path) -
     assert any("skill:" in f for f in failures)
     assert any("a2a: invalid recall value" in f for f in failures)
 
+    # AIBOM-Bench writes {tool: {dataset: {"class_recall": ...}}}; only d1 scores classes.
+    bench = {"nexus-symbiote": {"d1": {"class_recall": dict(all_passing["per_class_recall"])}}}
+    assert precision_gate.evaluate_class_floors(bench) == []
+    bench["nexus-symbiote"]["d1"]["class_recall"]["skill"] = 0.5
+    assert any("skill:" in f for f in precision_gate.evaluate_class_floors(bench))
+    for broken in (
+        {"nexus-symbiote": {"d2": {"class_recall": {}}}},
+        {"nexus-symbiote": {"d1": {"digests_present": 1}}},
+        {"nexus-symbiote": []},
+        {"agent-bom": {"d1": {"class_recall": all_passing["per_class_recall"]}}},
+    ):
+        assert precision_gate.evaluate_class_floors(broken) == [
+            "scores document missing per_class_recall / classes mapping"
+        ]
+
     scores_path = tmp_path / "scores.json"
     scores_path.write_text(json.dumps(all_passing), encoding="utf-8")
     out_path = tmp_path / "precision-out.json"

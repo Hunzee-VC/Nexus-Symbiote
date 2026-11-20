@@ -83,6 +83,12 @@ def evaluate_class_floors(
     per_class = scores_doc.get("per_class_recall")
     if per_class is None:
         per_class = scores_doc.get("classes")
+    if per_class is None:
+        # The committed AIBOM-Bench layout: {tool: {dataset: {"class_recall": {...}}}}.
+        # Only dataset d1 scores component classes; any missing level fails closed below.
+        bench = scores_doc.get("nexus-symbiote")
+        corpus = bench.get("d1") if isinstance(bench, dict) else None
+        per_class = corpus.get("class_recall") if isinstance(corpus, dict) else None
     if not isinstance(per_class, dict):
         return ["scores document missing per_class_recall / classes mapping"]
     for cls_name, floor in sorted(floors.items()):
