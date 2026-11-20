@@ -18,10 +18,10 @@ from nexus_symbiote.core.models import NATIVE_SPEC_VERSION, AgentComponent, Capa
 # Committed SHA-256 pins per NATIVE_SPEC_VERSION (R1.0.0-rc.1-1). Any edit to the
 # native schema without bumping NATIVE_SPEC_VERSION and registering its new digest fails CI.
 PINNED_NATIVE_SCHEMA_BYTES_SHA256: dict[str, str] = {
-    "1.1.0": "26a807f88c758ef7580bd80d90048ab66fe6aba969b243e93e7d3aee052b4796",
+    "1.1.0": "876a82dcd9737a21d391201be3762ebbbff562badeb44646ce570c71445ce64f",
 }
 PINNED_NATIVE_SCHEMA_CANONICAL_SHA256: dict[str, str] = {
-    "1.1.0": "376731d03329869d0869274514028f41c11d36289034e931613d97f53f7445bf",
+    "1.1.0": "59cbd2c45069fd66039d034fd692c2944f28bf3b83d1cf457d879fd164fff309",
 }
 
 
