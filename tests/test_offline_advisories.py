@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import time
 
 import pytest
 from click.testing import CliRunner
@@ -17,6 +16,7 @@ from nexus_symbiote.offline_advisories import (
     load_kev_catalog,
     match_offline_advisories,
 )
+from tests.support import scaling_ratio
 
 
 def _bom_with_package(
@@ -520,14 +520,28 @@ def test_offline_advisories_over_4mb_db_and_over_500_packages_linear_speed(tmp_p
     ]
     bom = AIBOM(components=comps)
 
-    t0 = time.monotonic()
     report, _ = match_offline_advisories(bom, db_path=db_file)
-    elapsed = time.monotonic() - t0
 
     assert report.complete is True
     assert report.components_checked == 1_000
     assert [a["id"] for a in report.advisories] == ["CVE-2026-88888"]
-    assert elapsed < 5.0, f"expected linear indexed matching (<5s), got {elapsed:.2f}s"
+
+    # A wall-clock bound failed under coverage tracing (6.1 s against 5 s on main f0404849).
+    # Comparing two sizes on one machine cancels the runner and the tracer: growing the
+    # packages and the advisories 4x each costs about 4x when matching is indexed by
+    # package, and about 16x when every package is compared with every advisory.
+    sized = {}
+    for scale in (1, 4):
+        scaled_db = tmp_path / f"scaled-osv-{scale}.json"
+        scaled_db.write_text(json.dumps({"advisories": records[: 4_500 * scale]}), encoding="utf-8")
+        sized[scale] = (AIBOM(components=comps[: 250 * scale]), scaled_db)
+
+    def run(scale: int) -> None:
+        scaled_bom, scaled_db = sized[scale]
+        scaled, _ = match_offline_advisories(scaled_bom, db_path=scaled_db)
+        assert scaled.components_checked == 250 * scale
+
+    assert scaling_ratio(run) < 10
 
 
 @pytest.mark.parametrize(
