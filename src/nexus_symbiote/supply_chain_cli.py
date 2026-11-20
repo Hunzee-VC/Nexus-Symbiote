@@ -6,6 +6,7 @@ import contextlib
 import json
 import os
 import stat
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -700,6 +701,15 @@ def register_supply_chain_commands(main: click.Group) -> None:
         type=click.Path(exists=True, dir_okay=False, path_type=Path),
         help="Offline EPSS CSV/JSON catalog used with --offline-db to attach EPSS scores.",
     )
+    @click.option(
+        "--max-feed-age-days",
+        type=click.IntRange(min=1, max=36_500),
+        help=(
+            "With --offline-db, the report is incomplete (exit 1) when the bundle's newest "
+            "record, a KEV catalog's dateReleased or the EPSS score_date is missing or more "
+            "than this many days old (default: 30). The check cannot be turned off."
+        ),
+    )
     def advisories(
         aibom_path: Path,
         output: Path | None,
@@ -710,18 +720,22 @@ def register_supply_chain_commands(main: click.Group) -> None:
         offline_db: Path | None,
         kev_paths: tuple[Path, ...],
         epss_path: Path | None,
+        max_feed_age_days: int | None,
     ) -> None:
         """Live (or offline with --offline-db): query OSV for exact PyPI/npm package URLs.
 
         Live mode sends each package's ecosystem, normalized name and exact version to
         api.osv.dev, including packages from private registries unless excluded. With
         --offline-db, matching runs locally against an operator-supplied OSV bundle with
-        optional --kev and --epss catalogs and no network I/O. Exits 1 when an advisory is
+        optional --kev and --epss catalogs and no network I/O; a feed that is undated or older
+        than --max-feed-age-days makes the report incomplete. Exits 1 when an advisory is
         found (unless --no-fail-on-advisory) or when not every package in scope was looked
         up, including when none was; with --dry-run (live), only when the report lists an error.
         """
         if (kev_paths or epss_path is not None) and offline_db is None:
             raise click.ClickException("--kev and --epss require --offline-db")
+        if max_feed_age_days is not None and offline_db is None:
+            raise click.ClickException("--max-feed-age-days requires --offline-db")
         if not dry_run and offline_db is None:
             modes.require_live("advisories")
         from nexus_symbiote.advisories import fetch_advisories
@@ -740,7 +754,10 @@ def register_supply_chain_commands(main: click.Group) -> None:
             ) from exc
         try:
             if offline_db is not None:
-                from nexus_symbiote.offline_advisories import match_offline_advisories
+                from nexus_symbiote.offline_advisories import (
+                    DEFAULT_MAX_FEED_AGE_DAYS,
+                    match_offline_advisories,
+                )
 
                 report, provenance = match_offline_advisories(
                     bom,
@@ -750,6 +767,8 @@ def register_supply_chain_commands(main: click.Group) -> None:
                     exclude=exclude,
                     exclude_private_origins=exclude_private_origins,
                     inventory_sha256=hash_bytes(data),
+                    now=datetime.now(UTC),
+                    max_feed_age_days=max_feed_age_days or DEFAULT_MAX_FEED_AGE_DAYS,
                 )
                 payload = report.to_dict()
                 payload["sent_to_osv"] = "nothing (offline advisory bundle)"
