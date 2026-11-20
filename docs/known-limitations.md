@@ -1383,9 +1383,12 @@ A way around a limit that its entry does not describe is worth a
   confirm an identifier; so can a JSON report behind a leading comment line or nested one
   level deeper. A value written below a credential key is withheld when it is the one value
   on its line and the line that opens it, a key and its mark with at most a block indicator,
-  a bracket or a comment after them, is within the eight lines above. A line of several
+  a bracket or a comment after them, is within the eight lines above; keys nested in a
+  bracket between them, such as `{"values": [`, do not end that search. A line of several
   words in a block below such a key, a value further down, and a value below a typed
   declaration such as `const credentials: string[] = [` are read alone and can be named.
+  So is a value below a compact entry written with spaces, such as `{"type": "basic"},`,
+  which reads as a line of several words.
   The redactor decides which keys name a credential and reads names broadly, so a list of
   model identifiers below `requires_token:`, `cache_key = (` or `modelsRequiringApiKey = [`
   is withheld; plural names such as `api_keys:` and `tokens:` are not credential names to

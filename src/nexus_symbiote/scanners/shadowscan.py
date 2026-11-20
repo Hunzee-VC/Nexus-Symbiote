@@ -150,6 +150,9 @@ _OPENS_BELOW = re.compile(
 )
 # A line that only opens a bracket, as `[` below `"password":`.
 _BRACKET_LINE = re.compile(r"\s*+[\[({]++\s*+")
+# A line that starts or opens a bracket, as `{"values": [`: a key it opens is nested in
+# the value of a key above it, so the search for that key goes on.
+_NESTED_LINE = re.compile(r"\s*+[\[({].*+|(?:(?!#|//).)*?[\[({]\s*+(?:(?:#|//).*+)?")
 # After `=`, what a value that ends in base64 padding leaves on its line.
 _PADDING_TAIL = re.compile(r"""["'\],\s]*+""")
 _COMMENT_LINE = re.compile(r"\s*+(?:#|//)")
@@ -492,11 +495,11 @@ def _credential_readings(
     A line with a key of its own, or of several words, is read alone. A line that is one
     value is read below the line before it, as a value follows `Authorization: Bearer`. It
     is also read as the value of each key that opens it within ``MAX_KEY_LOOKBACK`` lines,
-    with blank lines, comments, lines that only open a bracket and other single values in
-    between: after `password: >-`, `password: &anchor`, `export TOKEN=\\`,
-    `"credentials": [` or a key and a comment the redactor would take the block indicator,
-    the bracket or the comment for the value. What the lines hold decides this, not which
-    identifier a report cites there.
+    with blank lines, comments, lines that only open a bracket, keys nested in a bracket
+    (`{"values": [`) and other single values in between: after `password: >-`,
+    `password: &anchor`, `export TOKEN=\\`, `"credentials": [` or a key and a comment the
+    redactor would take the block indicator, the bracket or the comment for the value. What
+    the lines hold decides this, not which identifier a report cites there.
     """
 
     def kind(number: int) -> tuple[str | None, str | None]:
@@ -517,7 +520,7 @@ def _credential_readings(
         key, value = kind(back)
         if key is not None:
             keys.append(key)
-        if value is None:
+        if value is None and (key is None or _NESTED_LINE.fullmatch(other) is None):
             break
     quoted = token.replace("\\", "\\\\").replace('"', '\\"')
     return [f"{above}\n{line}", *(f'{key}\n"{quoted}"' for key in keys)]

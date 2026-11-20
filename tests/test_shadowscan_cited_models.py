@@ -547,6 +547,27 @@ def test_a_value_written_below_a_credential_key_is_withheld(tmp_path, form):
         assert [model.name for model in _models(result)] == expected, key
 
 
+# A key nested in a bracket below a credential key opens a value inside that key's value.
+NESTED_BELOW_A_KEY = {
+    "key-in-a-compact-entry": '{{\n  "{key}": [\n    {{"values": [\n      "{value}"\n    ]}}\n  ]\n}}\n',
+    "key-in-a-compact-entry-alone": '{{\n  "{key}": [\n    {{"values":\n      "{value}"\n    }}\n  ]\n}}\n',
+    "key-in-an-object": '{{\n  "{key}": {{\n    "values": [\n      "{value}"\n    ]\n  }}\n}}\n',
+    "keys-two-levels-down": (
+        '{{\n  "{key}": [\n    {{"entries": [\n      {{"values": [\n        "{value}"\n'
+        "      ]}}\n    ]}}\n  ]\n}}\n"
+    ),
+}
+
+
+@pytest.mark.parametrize("form", sorted(NESTED_BELOW_A_KEY))
+def test_a_value_below_a_key_nested_in_a_credential_key_is_withheld(tmp_path, form):
+    for key, expected in (("credentials", []), ("secret", []), ("chat_models", [VALUE])):
+        text = NESTED_BELOW_A_KEY[form].format(key=key, value=VALUE)
+        report = _report(_evidence(f"cfg.json:{_line_holding(text, VALUE)}", VALUE))
+        result = _scan(tmp_path / key, report, {"cfg.json": text})
+        assert [model.name for model in _models(result)] == expected, key
+
+
 @pytest.mark.parametrize("padding", ["=", "=="])
 @pytest.mark.parametrize("form", ["folded-block", "json-array", "yaml-list", "blank-line-between"])
 def test_a_value_that_ends_in_padding_is_still_a_value(tmp_path, form, padding):
@@ -606,6 +627,7 @@ NOT_THE_KEYS_VALUE = {
     "a-sentence-and-a-blank-line-above": "The CLI then asks for the passphrase:\n\n    {value}\n",
     "a-comment-above-a-list": "# gated on the Hub, export HF_TOKEN:\nMODELS = [\n  '{value}',\n]\n",
     "an-empty-credential-above-an-assignment": "OPENAI_API_KEY=\nOPENAI_MODEL={value}\n",
+    "a-closed-credential-list-above": '{{\n  "credentials": [],\n  "models": [\n    "{value}"\n  ]\n}}\n',
 }
 
 
