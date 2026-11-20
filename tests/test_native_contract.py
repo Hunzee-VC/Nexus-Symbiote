@@ -17,6 +17,8 @@ from nexus_symbiote.core.models import NATIVE_SPEC_VERSION, AgentComponent, Capa
 
 # Committed SHA-256 pins per NATIVE_SPEC_VERSION (R1.0.0-rc.1-1). Any edit to the
 # native schema without bumping NATIVE_SPEC_VERSION and registering its new digest fails CI.
+# A spec version's digest may still be re-pinned until the release that first ships it is
+# tagged; from then on it is frozen (docs/releasing.md, step 1, re-verifies the pin).
 PINNED_NATIVE_SCHEMA_BYTES_SHA256: dict[str, str] = {
     "1.1.0": "876a82dcd9737a21d391201be3762ebbbff562badeb44646ce570c71445ce64f",
 }
