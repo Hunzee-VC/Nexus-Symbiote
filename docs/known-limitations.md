@@ -806,6 +806,21 @@ A way around a limit that its entry does not describe is worth a
   TFLite, Core ML and ExecuTorch files are rated `unknown`: Keras Lambda layers,
   SavedModel operations and custom operators are not inspected. Each is a high
   finding, which the default gate does not fail on by severity alone.
+- **Most formats are recorded from the file name.** Only a `.gguf` file's four magic
+  bytes and a `.safetensors` file's header are checked before the record gives a
+  format and a model type
+  ([model integrity](model-integrity.md#format-and-model-type)). A file under any
+  other model suffix, such as text saved as `model.onnx`, `model.tflite` or
+  `model.ggml`, is recorded with the format its name claims and a model type, rated
+  `unknown`, and one under a pickle-family name the same, rated by its first 64 KiB as
+  the entry above says, so a text file there is `unknown`. The GGUF check reads the magic and rates what follows: a
+  file that starts with `GGUF` is recorded as `llama.cpp` unless the content after the
+  magic is rated `unsafe-code-execution`, and
+  `properties.gguf_metadata` says when its version or metadata could not be read.
+  The standard exports keep such a file's type: a file whose format was not
+  established is still a CycloneDX `machine-learning-model` and an SPDX `ai_AIPackage`,
+  as every component of the `model` collector is, without the format and model type
+  properties.
 - **Some files are not inventoried.** A file outside the
   [listed names](model-integrity.md#model-files-and-references) is inventoried by
   its content only when it is named `.npy`, `.npz` or `.dat` or has any name below a
