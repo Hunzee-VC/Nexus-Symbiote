@@ -34,7 +34,7 @@ already implements the same item. Write "None" for a fix or chore outside the ro
 - [ ] Dependency changes: locks regenerated with `make lock`, and the "Dependency health" run is green
 - [ ] Documentation updated (if applicable)
 - [ ] CHANGELOG.md updated under Unreleased
-- [ ] Labelled with at least one type and one area label ([label guide](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/labels.md))
+- [ ] Labelled with at least one type and one area label ([label guide](https://github.com/aisecnomad/Nexus-Symbiote/blob/main/docs/labels.md))
 
 ## Review record
 
