@@ -126,7 +126,7 @@ def test_a_stalled_machine_records_the_same_inventory(tmp_path, monkeypatch):
     inventory = json.loads(stalled.read_text())
     assert inventory["metadata"]["completeness"]["scan_failures"] == []
     assert inventory["metadata"]["completeness"]["scanner_status"]["mcp"] == "complete"
-    assert {"server", "read_note"} <= {component["name"] for component in inventory["components"]}
+    assert {"demo", "read_note"} <= {component["name"] for component in inventory["components"]}
 
 
 def test_a_source_over_a_budget_is_refused_for_that_budget_on_a_stalled_machine(
