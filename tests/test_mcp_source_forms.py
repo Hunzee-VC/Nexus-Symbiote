@@ -23,7 +23,7 @@ IMPORT = f'import {{ McpServer }} from "{MODULE}";\n'
 SERVER = 'const server = new McpServer({ name: "notes", version: "1.0.0" });\n'
 TOOL = 'server.registerTool("read_note", {}, readNote);\n'
 REQUIRE = f'const {{ McpServer }} = require("{MODULE}");\n'
-INVENTORIED = [("mcp-server", "server"), ("tool", "read_note")]
+INVENTORIED = [("mcp-server", "notes"), ("tool", "read_note")]
 LOADED = "MCP server SDK loaded by require or dynamic import; servers and tools not inventoried"
 CLIENT_LOADED = (
     "MCP client SDK loaded by require or dynamic import; servers it starts or reaches not "
@@ -292,18 +292,18 @@ def test_specifier_forms_fail_the_default_gate(tmp_path, runner):
 
 
 @pytest.mark.parametrize(
-    "construction",
+    ("construction", "name"),
     [
-        "new sdk.McpServer({ name: 'notes' })",
-        'new sdk["McpServer"]({})',
-        "new sdk[`McpServer`]({})",
+        ("new sdk.McpServer({ name: 'notes' })", "notes"),
+        ('new sdk["McpServer"]({})', "server"),
+        ("new sdk[`McpServer`]({})", "server"),
     ],
 )
-def test_a_namespace_import_is_collected_when_its_binding_is_exact(tmp_path, construction):
+def test_a_namespace_import_is_collected_when_its_binding_is_exact(tmp_path, construction, name):
     source = f'import * as sdk from "{MODULE}";\nconst server = {construction};\n' + TOOL
     result = _scan(tmp_path, {"src/server.mts": source})
     assert result.surfaces_excluded == []
-    assert _inventory(result) == INVENTORIED
+    assert _inventory(result) == [("mcp-server", name), ("tool", "read_note")]
 
 
 @pytest.mark.parametrize(
@@ -713,7 +713,13 @@ def test_names_are_read_as_javascript_reads_them(tmp_path):
     tools = sorted(c.source_path for c in result.components if isinstance(c, ToolComponent))
     assert tools == ["continued.ts", "escaped.ts", "hex.ts", "identity.ts"]
     servers = [c for c in result.components if isinstance(c, MCPServerComponent)]
-    assert {server.name for server in servers} == {"server"}
+    assert sorted((server.source_path, server.name) for server in servers) == [
+        ("continued.ts", "notes"),
+        ("escaped.ts", "server"),
+        ("hex.ts", "notes"),
+        ("identity.ts", "notes"),
+    ]
+    assert {server.properties["binding"] for server in servers} == {"server"}
 
 
 def test_shadowed_names_and_other_imports_are_not_sdk_uses(tmp_path):
@@ -999,7 +1005,7 @@ def test_a_server_named_mcp_is_inventoried_without_a_gap(tmp_path):
     )
     result = _scan(tmp_path, {"pkg/server.py": source})
     assert result.surfaces_excluded == []
-    assert _inventory(result) == [("mcp-server", "server"), ("tool", "hello")]
+    assert _inventory(result) == [("mcp-server", "mcp"), ("tool", "hello")]
 
 
 def test_any_call_whose_first_argument_names_an_mcp_client_module_is_a_gap(tmp_path):
@@ -1247,7 +1253,7 @@ def test_a_python_server_class_used_where_imported_is_not_passed_on(tmp_path):
     )
     result = _scan(tmp_path, {"core/server.py": source})
     assert result.surfaces_excluded == []
-    assert _inventory(result) == [("mcp-server", "mcp"), ("tool", "add")]
+    assert _inventory(result) == [("mcp-server", "x"), ("tool", "add")]
 
 
 @pytest.mark.parametrize(
