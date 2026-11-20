@@ -1,0 +1,1359 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.7",
+  "serialNumber": "urn:uuid:1bb2fded-1d62-434d-b742-9445675074a4",
+  "version": 1,
+  "metadata": {
+    "timestamp": "2026-11-18T10:34:58Z",
+    "tools": {
+      "components": [
+        {
+          "group": "@cyclonedx",
+          "name": "cdxgen",
+          "version": "12.9.2",
+          "purl": "pkg:npm/%40cyclonedx/cdxgen@12.9.2",
+          "type": "application",
+          "bom-ref": "pkg:npm/@cyclonedx/cdxgen@12.9.2",
+          "publisher": "OWASP Foundation",
+          "authors": [
+            {
+              "name": "OWASP Foundation"
+            }
+          ]
+        }
+      ]
+    },
+    "authors": [
+      {
+        "name": "OWASP Foundation"
+      }
+    ],
+    "lifecycles": [
+      {
+        "phase": "pre-build"
+      }
+    ],
+    "component": {
+      "group": "",
+      "name": "corpus",
+      "version": "latest",
+      "type": "application",
+      "bom-ref": "pkg:generic/corpus@latest",
+      "purl": "pkg:generic/corpus@latest"
+    },
+    "properties": [
+      {
+        "name": "cdx:bom:componentTypes",
+        "value": "generic\\nhuggingface"
+      },
+      {
+        "name": "cdx:bom:componentNamespaces",
+        "value": "ai\\nazure-openai\\ncardiffnlp\\nhuggingface\\nlocal\\nmodels\\nollama"
+      }
+    ]
+  },
+  "components": [
+    {
+      "group": "",
+      "name": "Modelfile",
+      "version": "",
+      "type": "file",
+      "bom-ref": "urn:file:ai:Modelfile",
+      "tags": [
+        "ai",
+        "model-config-file",
+        "modelfile",
+        "ollama"
+      ],
+      "properties": [
+        {
+          "name": "cdx:file:kind",
+          "value": "model-config-file"
+        },
+        {
+          "name": "cdx:ai:kind",
+          "value": "model-config-file"
+        },
+        {
+          "name": "cdx:ai:source",
+          "value": "source-code-analysis"
+        }
+      ],
+      "evidence": {
+        "occurrences": [
+          {
+            "location": "Modelfile"
+          }
+        ]
+      }
+    },
+    {
+      "group": "ollama",
+      "name": "llama3.2:3b",
+      "version": "",
+      "purl": "pkg:generic/ollama/llama3.2:3b",
+      "type": "machine-learning-model",
+      "bom-ref": "cdxgen:ai:model:ollama:llama3.2:3b",
+      "tags": [
+        "ai",
+        "machine-learning-model",
+        "modelfile",
+        "ollama"
+      ],
+      "properties": [
+        {
+          "name": "cdx:ai:provider",
+          "value": "ollama"
+        },
+        {
+          "name": "cdx:ai:kind",
+          "value": "model"
+        },
+        {
+          "name": "cdx:ai:modelFamily",
+          "value": "llama"
+        },
+        {
+          "name": "cdx:ai:artifactFormat",
+          "value": "modelfile"
+        },
+        {
+          "name": "cdx:ai:runtime",
+          "value": "ollama"
+        },
+        {
+          "name": "cdx:ai:source",
+          "value": "local-config"
+        },
+        {
+          "name": "cdx:ai:confidence",
+          "value": "high"
+        },
+        {
+          "name": "cdx:ai:reviewNeeded",
+          "value": "true"
+        }
+      ],
+      "evidence": {
+        "occurrences": [
+          {
+            "location": "Modelfile"
+          }
+        ]
+      }
+    },
+    {
+      "group": "",
+      "name": "acme-intent-tiny.Q8_0.gguf",
+      "version": "",
+      "type": "file",
+      "bom-ref": "urn:file:ai:models/llm/acme-intent-tiny.Q8_0.gguf",
+      "tags": [
+        "ai",
+        "gguf",
+        "model-artifact-file"
+      ],
+      "properties": [
+        {
+          "name": "cdx:file:kind",
+          "value": "model-artifact-file"
+        },
+        {
+          "name": "cdx:ai:kind",
+          "value": "model-artifact-file"
+        },
+        {
+          "name": "cdx:ai:source",
+          "value": "source-code-analysis"
+        },
+        {
+          "name": "cdx:gguf:quantizationVersion",
+          "value": "2"
+        },
+        {
+          "name": "cdx:gguf:tokenizerTokenCount",
+          "value": "0"
+        },
+        {
+          "name": "cdx:gguf:tokenizerMergeCount",
+          "value": "0"
+        },
+        {
+          "name": "cdx:gguf:tokenizerAddedTokenCount",
+          "value": "0"
+        },
+        {
+          "name": "cdx:gguf:formatVersion",
+          "value": "3"
+        },
+        {
+          "name": "cdx:gguf:tensorCount",
+          "value": "0"
+        },
+        {
+          "name": "cdx:gguf:metadataCount",
+          "value": "8"
+        }
+      ],
+      "evidence": {
+        "occurrences": [
+          {
+            "location": "models/llm/acme-intent-tiny.Q8_0.gguf"
+          }
+        ]
+      }
+    },
+    {
+      "group": "local",
+      "name": "acme-intent-tiny",
+      "version": "",
+      "licenses": [
+        {
+          "license": {
+            "id": "Apache-2.0",
+            "url": "https://opensource.org/licenses/Apache-2.0",
+            "properties": [
+              {
+                "name": "cdx:license:category",
+                "value": "Permissive"
+              },
+              {
+                "name": "cdx:license:foss",
+                "value": "true"
+              },
+              {
+                "name": "cdx:license:osiApproved",
+                "value": "true"
+              },
+              {
+                "name": "cdx:license:fsfLibre",
+                "value": "true"
+              },
+              {
+                "name": "cdx:license:deprecated",
+                "value": "false"
+              }
+            ]
+          }
+        }
+      ],
+      "purl": "pkg:generic/local/acme-intent-tiny",
+      "pedigree": {
+        "notes": "Detected variants: quantized"
+      },
+      "modelCard": {
+        "modelParameters": {
+          "architectureFamily": "llama"
+        }
+      },
+      "type": "machine-learning-model",
+      "bom-ref": "cdxgen:ai:model:local:acme-intent-tiny",
+      "tags": [
+        "ai",
+        "gguf",
+        "local-model",
+        "machine-learning-model",
+        "quantized"
+      ],
+      "properties": [
+        {
+          "name": "cdx:ai:provider",
+          "value": "local"
+        },
+        {
+          "name": "cdx:ai:kind",
+          "value": "model"
+        },
+        {
+          "name": "cdx:ai:modelFamily",
+          "value": "acme"
+        },
+        {
+          "name": "cdx:ai:artifactFormat",
+          "value": "gguf"
+        },
+        {
+          "name": "cdx:ai:runtime",
+          "value": "llama.cpp"
+        },
+        {
+          "name": "cdx:ai:quantization",
+          "value": "F16"
+        },
+        {
+          "name": "cdx:ai:contextWindow",
+          "value": "2048"
+        },
+        {
+          "name": "cdx:ai:source",
+          "value": "local-artifact"
+        },
+        {
+          "name": "cdx:ai:confidence",
+          "value": "high"
+        },
+        {
+          "name": "cdx:ai:reviewNeeded",
+          "value": "true"
+        },
+        {
+          "name": "cdx:gguf:quantizationVersion",
+          "value": "2"
+        },
+        {
+          "name": "cdx:gguf:tokenizerTokenCount",
+          "value": "0"
+        },
+        {
+          "name": "cdx:gguf:tokenizerMergeCount",
+          "value": "0"
+        },
+        {
+          "name": "cdx:gguf:tokenizerAddedTokenCount",
+          "value": "0"
+        },
+        {
+          "name": "cdx:license:category",
+          "value": "Permissive"
+        }
+      ],
+      "evidence": {
+        "occurrences": [
+          {
+            "location": "models/llm/acme-intent-tiny.Q8_0.gguf"
+          }
+        ]
+      }
+    },
+    {
+      "group": "azure-openai",
+      "name": "gpt-3.5-turbo",
+      "version": "",
+      "purl": "pkg:generic/azure-openai/gpt-3.5-turbo",
+      "type": "machine-learning-model",
+      "bom-ref": "cdxgen:ai:model:azure-openai:gpt-3.5-turbo",
+      "tags": [
+        "ai",
+        "machine-learning-model"
+      ],
+      "properties": [
+        {
+          "name": "cdx:ai:provider",
+          "value": "azure-openai"
+        },
+        {
+          "name": "cdx:ai:kind",
+          "value": "model"
+        },
+        {
+          "name": "cdx:ai:modelFamily",
+          "value": "gpt"
+        },
+        {
+          "name": "cdx:ai:source",
+          "value": "source-code-analysis"
+        },
+        {
+          "name": "cdx:ai:confidence",
+          "value": "medium"
+        }
+      ],
+      "evidence": {
+        "occurrences": [
+          {
+            "location": "src/agent/llm.py#L18"
+          }
+        ]
+      }
+    },
+    {
+      "group": "azure-openai",
+      "name": "claude-sonnet-4-5",
+      "version": "",
+      "purl": "pkg:generic/azure-openai/claude-sonnet-4-5",
+      "type": "machine-learning-model",
+      "bom-ref": "cdxgen:ai:model:azure-openai:claude-sonnet-4-5",
+      "tags": [
+        "ai",
+        "machine-learning-model"
+      ],
+      "properties": [
+        {
+          "name": "cdx:ai:provider",
+          "value": "azure-openai"
+        },
+        {
+          "name": "cdx:ai:kind",
+          "value": "model"
+        },
+        {
+          "name": "cdx:ai:modelFamily",
+          "value": "claude"
+        },
+        {
+          "name": "cdx:ai:source",
+          "value": "source-code-analysis"
+        },
+        {
+          "name": "cdx:ai:confidence",
+          "value": "medium"
+        }
+      ],
+      "evidence": {
+        "occurrences": [
+          {
+            "location": "src/agent/llm.py#L20"
+          }
+        ]
+      }
+    },
+    {
+      "group": "cardiffnlp",
+      "name": "twitter-roberta-base-sentiment-latest",
+      "version": "",
+      "purl": "pkg:huggingface/cardiffnlp/twitter-roberta-base-sentiment-latest",
+      "type": "machine-learning-model",
+      "bom-ref": "pkg:huggingface/cardiffnlp/twitter-roberta-base-sentiment-latest",
+      "tags": [
+        "ai",
+        "machine-learning-model"
+      ],
+      "properties": [
+        {
+          "name": "cdx:ai:provider",
+          "value": "azure-openai"
+        },
+        {
+          "name": "cdx:ai:kind",
+          "value": "model"
+        },
+        {
+          "name": "cdx:ai:modelFamily",
+          "value": "cardiffnlp"
+        },
+        {
+          "name": "cdx:ai:source",
+          "value": "source-code-analysis"
+        },
+        {
+          "name": "cdx:ai:confidence",
+          "value": "medium"
+        },
+        {
+          "name": "cdx:ai:provider",
+          "value": "huggingface"
+        },
+        {
+          "name": "cdx:ai:modelFamily",
+          "value": "twitter"
+        },
+        {
+          "name": "cdx:ai:confidence",
+          "value": "high"
+        }
+      ],
+      "evidence": {
+        "occurrences": [
+          {
+            "location": "src/agent/llm.py#L40"
+          }
+        ]
+      }
+    },
+    {
+      "group": "azure-openai",
+      "name": "claude-haiku-4-5",
+      "version": "",
+      "purl": "pkg:generic/azure-openai/claude-haiku-4-5",
+      "type": "machine-learning-model",
+      "bom-ref": "cdxgen:ai:model:azure-openai:claude-haiku-4-5",
+      "tags": [
+        "ai",
+        "machine-learning-model"
+      ],
+      "properties": [
+        {
+          "name": "cdx:ai:provider",
+          "value": "azure-openai"
+        },
+        {
+          "name": "cdx:ai:kind",
+          "value": "model"
+        },
+        {
+          "name": "cdx:ai:modelFamily",
+          "value": "claude"
+        },
+        {
+          "name": "cdx:ai:source",
+          "value": "source-code-analysis"
+        },
+        {
+          "name": "cdx:ai:confidence",
+          "value": "medium"
+        }
+      ],
+      "evidence": {
+        "occurrences": [
+          {
+            "location": "src/agent/llm.py#L54"
+          }
+        ]
+      }
+    },
+    {
+      "group": "azure-openai",
+      "name": "distilbert-base-uncased",
+      "version": "",
+      "purl": "pkg:generic/azure-openai/distilbert-base-uncased",
+      "type": "machine-learning-model",
+      "bom-ref": "cdxgen:ai:model:azure-openai:distilbert-base-uncased",
+      "tags": [
+        "ai",
+        "machine-learning-model"
+      ],
+      "properties": [
+        {
+          "name": "cdx:ai:provider",
+          "value": "azure-openai"
+        },
+        {
+          "name": "cdx:ai:kind",
+          "value": "model"
+        },
+        {
+          "name": "cdx:ai:modelFamily",
+          "value": "distilbert"
+        },
+        {
+          "name": "cdx:ai:source",
+          "value": "source-code-analysis"
+        },
+        {
+          "name": "cdx:ai:confidence",
+          "value": "medium"
+        }
+      ],
+      "evidence": {
+        "occurrences": [
+          {
+            "location": "src/agent/llm.py#L43"
+          }
+        ]
+      }
+    },
+    {
+      "group": "azure-openai",
+      "name": "distilbert-base-uncased-finetuned-sst-2-english",
+      "version": "",
+      "purl": "pkg:generic/azure-openai/distilbert-base-uncased-finetuned-sst-2-english",
+      "pedigree": {
+        "notes": "Detected variants: fine-tuned"
+      },
+      "type": "machine-learning-model",
+      "bom-ref": "cdxgen:ai:model:azure-openai:distilbert-base-uncased-finetuned-sst-2-english",
+      "tags": [
+        "ai",
+        "machine-learning-model"
+      ],
+      "properties": [
+        {
+          "name": "cdx:ai:provider",
+          "value": "azure-openai"
+        },
+        {
+          "name": "cdx:ai:kind",
+          "value": "model"
+        },
+        {
+          "name": "cdx:ai:modelFamily",
+          "value": "distilbert"
+        },
+        {
+          "name": "cdx:ai:source",
+          "value": "source-code-analysis"
+        },
+        {
+          "name": "cdx:ai:confidence",
+          "value": "medium"
+        }
+      ],
+      "evidence": {
+        "occurrences": [
+          {
+            "location": "src/agent/llm.py#L44"
+          }
+        ]
+      }
+    },
+    {
+      "group": "models",
+      "name": "classifier",
+      "version": "",
+      "purl": "pkg:huggingface/models/classifier",
+      "type": "machine-learning-model",
+      "bom-ref": "pkg:huggingface/models/classifier",
+      "tags": [
+        "ai",
+        "machine-learning-model"
+      ],
+      "properties": [
+        {
+          "name": "cdx:ai:provider",
+          "value": "azure-openai"
+        },
+        {
+          "name": "cdx:ai:kind",
+          "value": "model"
+        },
+        {
+          "name": "cdx:ai:modelFamily",
+          "value": "models"
+        },
+        {
+          "name": "cdx:ai:source",
+          "value": "source-code-analysis"
+        },
+        {
+          "name": "cdx:ai:confidence",
+          "value": "medium"
+        }
+      ],
+      "evidence": {
+        "occurrences": [
+          {
+            "location": "src/agent/llm.py#L49"
+          }
+        ]
+      }
+    },
+    {
+      "group": "ai",
+      "name": "distilbert-base-uncased",
+      "version": "",
+      "purl": "pkg:generic/ai/distilbert-base-uncased",
+      "type": "machine-learning-model",
+      "bom-ref": "cdxgen:ai:model:ai:distilbert-base-uncased",
+      "tags": [
+        "ai",
+        "machine-learning-model"
+      ],
+      "properties": [
+        {
+          "name": "cdx:ai:kind",
+          "value": "model"
+        },
+        {
+          "name": "cdx:ai:modelFamily",
+          "value": "distilbert"
+        },
+        {
+          "name": "cdx:ai:runtime",
+          "value": "transformers"
+        },
+        {
+          "name": "cdx:ai:source",
+          "value": "source-code-analysis"
+        },
+        {
+          "name": "cdx:ai:confidence",
+          "value": "medium"
+        }
+      ],
+      "evidence": {
+        "occurrences": [
+          {
+            "location": "src/training/finetune.py#L10"
+          }
+        ]
+      }
+    },
+    {
+      "group": "",
+      "name": "AGENTS.md",
+      "version": "",
+      "type": "file",
+      "bom-ref": "urn:file:ai:AGENTS.md",
+      "tags": [
+        "ai",
+        "prompt-config",
+        "prompt-config-file"
+      ],
+      "properties": [
+        {
+          "name": "cdx:file:kind",
+          "value": "prompt-config-file"
+        },
+        {
+          "name": "cdx:ai:kind",
+          "value": "prompt-config-file"
+        },
+        {
+          "name": "cdx:ai:source",
+          "value": "source-code-analysis"
+        }
+      ],
+      "evidence": {
+        "occurrences": [
+          {
+            "location": "AGENTS.md"
+          }
+        ]
+      }
+    },
+    {
+      "group": "",
+      "name": "promptfooconfig.yaml",
+      "version": "",
+      "type": "file",
+      "bom-ref": "urn:file:ai:evals/promptfooconfig.yaml",
+      "tags": [
+        "ai",
+        "prompt-config",
+        "prompt-config-file"
+      ],
+      "properties": [
+        {
+          "name": "cdx:file:kind",
+          "value": "prompt-config-file"
+        },
+        {
+          "name": "cdx:ai:kind",
+          "value": "prompt-config-file"
+        },
+        {
+          "name": "cdx:ai:source",
+          "value": "source-code-analysis"
+        }
+      ],
+      "evidence": {
+        "occurrences": [
+          {
+            "location": "evals/promptfooconfig.yaml"
+          }
+        ]
+      }
+    },
+    {
+      "group": "",
+      "name": "refund_policy.txt",
+      "version": "",
+      "type": "file",
+      "bom-ref": "urn:file:ai:prompts/refund_policy.txt",
+      "tags": [
+        "ai",
+        "prompt-config",
+        "prompt-config-file"
+      ],
+      "properties": [
+        {
+          "name": "cdx:file:kind",
+          "value": "prompt-config-file"
+        },
+        {
+          "name": "cdx:ai:kind",
+          "value": "prompt-config-file"
+        },
+        {
+          "name": "cdx:ai:source",
+          "value": "source-code-analysis"
+        }
+      ],
+      "evidence": {
+        "occurrences": [
+          {
+            "location": "prompts/refund_policy.txt"
+          }
+        ]
+      }
+    },
+    {
+      "group": "",
+      "name": "system.md",
+      "version": "",
+      "type": "file",
+      "bom-ref": "urn:file:ai:prompts/system.md",
+      "tags": [
+        "ai",
+        "prompt-config",
+        "prompt-config-file"
+      ],
+      "properties": [
+        {
+          "name": "cdx:file:kind",
+          "value": "prompt-config-file"
+        },
+        {
+          "name": "cdx:ai:kind",
+          "value": "prompt-config-file"
+        },
+        {
+          "name": "cdx:ai:source",
+          "value": "source-code-analysis"
+        }
+      ],
+      "evidence": {
+        "occurrences": [
+          {
+            "location": "prompts/system.md"
+          }
+        ]
+      }
+    },
+    {
+      "group": "",
+      "name": "audit-tool-call.sh",
+      "version": "",
+      "type": "file",
+      "bom-ref": "urn:file:ai:scripts/audit-tool-call.sh",
+      "tags": [
+        "ai",
+        "prompt-config",
+        "prompt-config-file"
+      ],
+      "properties": [
+        {
+          "name": "cdx:file:kind",
+          "value": "prompt-config-file"
+        },
+        {
+          "name": "cdx:ai:kind",
+          "value": "prompt-config-file"
+        },
+        {
+          "name": "cdx:ai:source",
+          "value": "source-code-analysis"
+        }
+      ],
+      "evidence": {
+        "occurrences": [
+          {
+            "location": "scripts/audit-tool-call.sh"
+          }
+        ]
+      }
+    },
+    {
+      "group": "",
+      "name": "refund.sh",
+      "version": "",
+      "type": "file",
+      "bom-ref": "urn:file:ai:scripts/refund.sh",
+      "tags": [
+        "ai",
+        "prompt-config",
+        "prompt-config-file"
+      ],
+      "properties": [
+        {
+          "name": "cdx:file:kind",
+          "value": "prompt-config-file"
+        },
+        {
+          "name": "cdx:ai:kind",
+          "value": "prompt-config-file"
+        },
+        {
+          "name": "cdx:ai:source",
+          "value": "source-code-analysis"
+        }
+      ],
+      "evidence": {
+        "occurrences": [
+          {
+            "location": "scripts/refund.sh"
+          }
+        ]
+      }
+    },
+    {
+      "group": "acme",
+      "name": "support-tickets",
+      "version": "",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://huggingface.co/datasets/acme/support-tickets"
+        }
+      ],
+      "data": [
+        {
+          "type": "dataset",
+          "name": "acme/support-tickets",
+          "contents": {
+            "url": "https://huggingface.co/datasets/acme/support-tickets"
+          }
+        }
+      ],
+      "type": "data",
+      "bom-ref": "pkg:huggingface/acme/support-tickets?repository_url=https%3A%2F%2Fhuggingface.co%2Fdatasets",
+      "tags": [
+        "ai",
+        "data",
+        "dataset",
+        "huggingface"
+      ],
+      "properties": [
+        {
+          "name": "cdx:ai:provider",
+          "value": "huggingface"
+        },
+        {
+          "name": "cdx:ai:kind",
+          "value": "dataset"
+        },
+        {
+          "name": "cdx:ai:source",
+          "value": "local-huggingface-metadata"
+        }
+      ],
+      "evidence": {
+        "occurrences": [
+          {
+            "location": "models/classifier/README.md"
+          }
+        ]
+      }
+    },
+    {
+      "group": "huggingface",
+      "name": "classifier",
+      "version": "",
+      "licenses": [
+        {
+          "license": {
+            "id": "Apache-2.0",
+            "url": "https://opensource.org/licenses/Apache-2.0",
+            "properties": [
+              {
+                "name": "cdx:license:category",
+                "value": "Permissive"
+              },
+              {
+                "name": "cdx:license:foss",
+                "value": "true"
+              },
+              {
+                "name": "cdx:license:osiApproved",
+                "value": "true"
+              },
+              {
+                "name": "cdx:license:fsfLibre",
+                "value": "true"
+              },
+              {
+                "name": "cdx:license:deprecated",
+                "value": "false"
+              }
+            ]
+          }
+        }
+      ],
+      "purl": "pkg:generic/huggingface/classifier",
+      "modelCard": {
+        "modelParameters": {
+          "architectureFamily": "distilbert",
+          "modelArchitecture": "DistilBertForSequenceClassification",
+          "datasets": [
+            {
+              "ref": "pkg:huggingface/acme/support-tickets?repository_url=https%3A%2F%2Fhuggingface.co%2Fdatasets"
+            }
+          ]
+        }
+      },
+      "type": "machine-learning-model",
+      "bom-ref": "cdxgen:ai:model:huggingface:classifier",
+      "tags": [
+        "ai",
+        "huggingface",
+        "machine-learning-model",
+        "model-repo"
+      ],
+      "properties": [
+        {
+          "name": "cdx:ai:provider",
+          "value": "huggingface"
+        },
+        {
+          "name": "cdx:ai:kind",
+          "value": "model"
+        },
+        {
+          "name": "cdx:ai:modelFamily",
+          "value": "classifier"
+        },
+        {
+          "name": "cdx:ai:source",
+          "value": "local-huggingface-metadata"
+        },
+        {
+          "name": "cdx:ai:confidence",
+          "value": "high"
+        },
+        {
+          "name": "cdx:license:category",
+          "value": "Permissive"
+        }
+      ],
+      "evidence": {
+        "occurrences": [
+          {
+            "location": "models/classifier/README.md"
+          },
+          {
+            "location": "models/classifier/config.json"
+          }
+        ]
+      }
+    }
+  ],
+  "dependencies": [
+    {
+      "ref": "urn:file:ai:Modelfile",
+      "dependsOn": [
+        "cdxgen:ai:model:ollama:llama3.2:3b"
+      ]
+    },
+    {
+      "ref": "urn:file:ai:models/llm/acme-intent-tiny.Q8_0.gguf",
+      "dependsOn": [
+        "cdxgen:ai:model:local:acme-intent-tiny"
+      ]
+    },
+    {
+      "ref": "urn:service:ai:ollama:ollama-service",
+      "dependsOn": [
+        "cdxgen:ai:model:azure-openai:claude-haiku-4-5",
+        "cdxgen:ai:model:azure-openai:claude-sonnet-4-5",
+        "cdxgen:ai:model:azure-openai:distilbert-base-uncased",
+        "cdxgen:ai:model:azure-openai:distilbert-base-uncased-finetuned-sst-2-english",
+        "cdxgen:ai:model:azure-openai:gpt-3.5-turbo",
+        "cdxgen:ai:model:ollama:llama3.2:3b",
+        "pkg:huggingface/cardiffnlp/twitter-roberta-base-sentiment-latest",
+        "pkg:huggingface/models/classifier",
+        "urn:file:ai:Modelfile"
+      ]
+    },
+    {
+      "ref": "urn:service:ai:azure-openai:azure-openai-service",
+      "dependsOn": [
+        "cdxgen:ai:model:azure-openai:claude-haiku-4-5",
+        "cdxgen:ai:model:azure-openai:claude-sonnet-4-5",
+        "cdxgen:ai:model:azure-openai:distilbert-base-uncased",
+        "cdxgen:ai:model:azure-openai:distilbert-base-uncased-finetuned-sst-2-english",
+        "cdxgen:ai:model:azure-openai:gpt-3.5-turbo",
+        "pkg:huggingface/cardiffnlp/twitter-roberta-base-sentiment-latest",
+        "pkg:huggingface/models/classifier"
+      ]
+    },
+    {
+      "ref": "urn:service:ai:ai:ai-service",
+      "dependsOn": [
+        "cdxgen:ai:model:ai:distilbert-base-uncased"
+      ]
+    },
+    {
+      "ref": "cdxgen:ai:model:huggingface:classifier",
+      "dependsOn": [
+        "pkg:huggingface/acme/support-tickets?repository_url=https%3A%2F%2Fhuggingface.co%2Fdatasets"
+      ]
+    }
+  ],
+  "services": [
+    {
+      "bom-ref": "urn:service:ai:ollama:ollama-service",
+      "group": "ollama",
+      "name": "ollama-service",
+      "provider": {
+        "name": "ollama"
+      },
+      "version": "observed",
+      "endpoints": [
+        "http://localhost:11434/"
+      ],
+      "properties": [
+        {
+          "name": "cdx:ai:kind",
+          "value": "inference-service"
+        },
+        {
+          "name": "cdx:ai:source",
+          "value": "source-code-analysis"
+        },
+        {
+          "name": "cdx:ai:modelId",
+          "value": "llama3.2:3b"
+        },
+        {
+          "name": "cdx:ai:modelFamily",
+          "value": "llama"
+        },
+        {
+          "name": "cdx:ai:modelCount",
+          "value": "1"
+        },
+        {
+          "name": "cdx:ai:modelSelection",
+          "value": "explicit"
+        },
+        {
+          "name": "cdx:ai:deployment",
+          "value": "implicit"
+        },
+        {
+          "name": "cdx:ai:transportSecurity",
+          "value": "unknown"
+        },
+        {
+          "name": "cdx:ai:runtime",
+          "value": "ollama"
+        },
+        {
+          "name": "cdx:ai:confidence",
+          "value": "high"
+        },
+        {
+          "name": "cdx:ai:reviewNeeded",
+          "value": "true"
+        },
+        {
+          "name": "cdx:ai:modelId",
+          "value": "classifier"
+        },
+        {
+          "name": "cdx:ai:modelId",
+          "value": "claude-haiku-4-5"
+        },
+        {
+          "name": "cdx:ai:modelId",
+          "value": "claude-sonnet-4-5"
+        },
+        {
+          "name": "cdx:ai:modelId",
+          "value": "distilbert-base-uncased"
+        },
+        {
+          "name": "cdx:ai:modelId",
+          "value": "distilbert-base-uncased-finetuned-sst-2-english"
+        },
+        {
+          "name": "cdx:ai:modelId",
+          "value": "gpt-3.5-turbo"
+        },
+        {
+          "name": "cdx:ai:modelId",
+          "value": "twitter-roberta-base-sentiment-latest"
+        },
+        {
+          "name": "cdx:ai:modelFamily",
+          "value": "classifier"
+        },
+        {
+          "name": "cdx:ai:modelFamily",
+          "value": "claude"
+        },
+        {
+          "name": "cdx:ai:modelFamily",
+          "value": "distilbert"
+        },
+        {
+          "name": "cdx:ai:modelFamily",
+          "value": "gpt"
+        },
+        {
+          "name": "cdx:ai:modelFamily",
+          "value": "twitter"
+        },
+        {
+          "name": "cdx:ai:modelCount",
+          "value": "7"
+        },
+        {
+          "name": "cdx:ai:deployment",
+          "value": "local"
+        },
+        {
+          "name": "cdx:ai:transportSecurity",
+          "value": "local-only"
+        }
+      ],
+      "tags": [
+        "ai"
+      ]
+    },
+    {
+      "bom-ref": "urn:service:ai:azure-openai:azure-openai-service",
+      "group": "azure-openai",
+      "name": "Azure OpenAI API",
+      "provider": {
+        "name": "azure-openai"
+      },
+      "version": "observed",
+      "endpoints": [
+        "https://acme-eastus.openai.azure.com/"
+      ],
+      "properties": [
+        {
+          "name": "cdx:ai:kind",
+          "value": "inference-service"
+        },
+        {
+          "name": "cdx:ai:source",
+          "value": "source-code-analysis"
+        },
+        {
+          "name": "cdx:ai:modelId",
+          "value": "classifier"
+        },
+        {
+          "name": "cdx:ai:modelId",
+          "value": "claude-haiku-4-5"
+        },
+        {
+          "name": "cdx:ai:modelId",
+          "value": "claude-sonnet-4-5"
+        },
+        {
+          "name": "cdx:ai:modelId",
+          "value": "distilbert-base-uncased"
+        },
+        {
+          "name": "cdx:ai:modelId",
+          "value": "distilbert-base-uncased-finetuned-sst-2-english"
+        },
+        {
+          "name": "cdx:ai:modelId",
+          "value": "gpt-3.5-turbo"
+        },
+        {
+          "name": "cdx:ai:modelId",
+          "value": "twitter-roberta-base-sentiment-latest"
+        },
+        {
+          "name": "cdx:ai:modelFamily",
+          "value": "classifier"
+        },
+        {
+          "name": "cdx:ai:modelFamily",
+          "value": "claude"
+        },
+        {
+          "name": "cdx:ai:modelFamily",
+          "value": "distilbert"
+        },
+        {
+          "name": "cdx:ai:modelFamily",
+          "value": "gpt"
+        },
+        {
+          "name": "cdx:ai:modelFamily",
+          "value": "twitter"
+        },
+        {
+          "name": "cdx:ai:modelCount",
+          "value": "7"
+        },
+        {
+          "name": "cdx:ai:modelSelection",
+          "value": "explicit"
+        },
+        {
+          "name": "cdx:ai:deployment",
+          "value": "remote"
+        },
+        {
+          "name": "cdx:ai:transportSecurity",
+          "value": "https"
+        },
+        {
+          "name": "cdx:ai:confidence",
+          "value": "high"
+        }
+      ],
+      "tags": [
+        "ai"
+      ]
+    },
+    {
+      "bom-ref": "urn:service:ai:ai:ai-service",
+      "group": "ai",
+      "name": "ai-service",
+      "provider": {
+        "name": "ai"
+      },
+      "version": "observed",
+      "endpoints": [],
+      "properties": [
+        {
+          "name": "cdx:ai:kind",
+          "value": "inference-service"
+        },
+        {
+          "name": "cdx:ai:source",
+          "value": "source-code-analysis"
+        },
+        {
+          "name": "cdx:ai:modelId",
+          "value": "distilbert-base-uncased"
+        },
+        {
+          "name": "cdx:ai:modelFamily",
+          "value": "distilbert"
+        },
+        {
+          "name": "cdx:ai:modelCount",
+          "value": "1"
+        },
+        {
+          "name": "cdx:ai:modelSelection",
+          "value": "explicit"
+        },
+        {
+          "name": "cdx:ai:deployment",
+          "value": "implicit"
+        },
+        {
+          "name": "cdx:ai:transportSecurity",
+          "value": "unknown"
+        },
+        {
+          "name": "cdx:ai:runtime",
+          "value": "transformers"
+        },
+        {
+          "name": "cdx:ai:confidence",
+          "value": "high"
+        }
+      ],
+      "tags": [
+        "ai"
+      ]
+    }
+  ],
+  "annotations": [
+    {
+      "bom-ref": "metadata-annotations",
+      "subjects": [
+        "pkg:generic/corpus@latest"
+      ],
+      "annotator": {
+        "component": {
+          "group": "@cyclonedx",
+          "name": "cdxgen",
+          "version": "12.9.2",
+          "purl": "pkg:npm/%40cyclonedx/cdxgen@12.9.2",
+          "type": "application",
+          "bom-ref": "pkg:npm/@cyclonedx/cdxgen@12.9.2",
+          "publisher": "OWASP Foundation",
+          "authors": [
+            {
+              "name": "OWASP Foundation"
+            }
+          ]
+        }
+      },
+      "timestamp": "2026-11-18T10:34:58Z",
+      "text": "This AI Bill-of-Materials (AI-BOM) document was created on Wednesday, November 18, 2026 with cdxgen. The data was captured during the pre-build lifecycle phase without building the application. The document describes an application named 'corpus'. It inventories 11 AI model(s), 3 AI service(s), and 1 dataset(s). Recorded training or evaluation datasets include acme/support-tickets. Pedigree information is captured for 2 model(s), which helps reviewers trace upstream bases and downstream variants. Detected model variants include quantized, fine-tuned, so modified artifacts remain visible in the BOM. Usage references span 3 provider or runtime endpoint(s), including ollama, azure-openai, ai. There are 20 components. 2 package type(s) and 7 purl namespaces are described in the document under components."
+    }
+  ]
+}
