@@ -344,13 +344,16 @@ def test_the_scaling_check_tells_linear_from_quadratic_work():
         sum(range(2_000_000 * scale))
 
     def quadratic(scale):
-        n = 1_000 * scale
+        n = 2_000 * scale
         for _ in range(n):
             for _ in range(n):
                 pass
 
+    # Under pytest-xdist the other workers share the runner's cores, and a sample of a few
+    # milliseconds catches their load unevenly: two samples of a 1,000-square loop once
+    # measured 9.9 for a 16. Longer and more samples average it out.
     assert scaling_ratio(linear) < 10
-    assert scaling_ratio(quadratic) > 10
+    assert scaling_ratio(quadratic, repeats=3) > 10
 
 
 def test_a_ratio_skewed_by_a_burst_of_load_is_measured_once_more(monkeypatch):
