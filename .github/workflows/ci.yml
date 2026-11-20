@@ -14,9 +14,9 @@ jobs:
   test:
     name: Tests Python ${{ matrix.python }}
     runs-on: ubuntu-24.04
-    # Hosted runners differ in speed by about 1.6x: the 3.12 suite takes 17 to 19 min,
-    # and on slow runners it reached 29 of 30 min (#249) and was killed at 99% (#272).
-    # The budget fits the slow runners; a hung test still fails at test_timeout.
+    # In one process the 3.12 suite took 17 to 19 min, and on slow hosted runners (about 1.6x
+    # apart) it reached 29 of 30 min (#249) and was killed at 99% (#272). It now runs on every
+    # core; the budget stays until those runs are measured. A hung test fails at test_timeout.
     timeout-minutes: 50
     strategy:
       fail-fast: false
@@ -41,8 +41,8 @@ jobs:
           set -o pipefail
           timeout --signal=INT --kill-after=30s 45m \
             bash --noprofile --norc -e -o pipefail -c '
-              python -m pytest -vv --strict-skips --durations=20 -o test_timeout=120 \
-                2>&1 | tee "$PYTEST_LOG"
+              python -m pytest -n auto --dist worksteal -vv --strict-skips --durations=20 \
+                -o test_timeout=120 2>&1 | tee "$PYTEST_LOG"
             '
       - name: Preserve test diagnostics
         if: always()
@@ -77,8 +77,8 @@ jobs:
           set -o pipefail
           timeout --signal=INT --kill-after=30s 45m \
             bash --noprofile --norc -e -o pipefail -c '
-              python -m pytest -vv --strict-skips -m "not locked_only" --durations=20 \
-                -o test_timeout=120 2>&1 | tee "$PYTEST_LOG"
+              python -m pytest -n auto --dist worksteal -vv --strict-skips \
+                -m "not locked_only" --durations=20 -o test_timeout=120 2>&1 | tee "$PYTEST_LOG"
             '
       - name: Preserve floor diagnostics
         if: always()
@@ -91,9 +91,9 @@ jobs:
   coverage:
     name: Coverage Python 3.12
     runs-on: ubuntu-24.04
-    # Tracing makes the suite about twice as slow (1.6-2.7x), and hosted runners differ in speed
-    # by about 1.6x: the run of #249's head 57030e26 hit 55 minutes at 95% with no test
-    # failing and passed in 37 on its re-run, and #255's and #265's runs hit the same limit.
+    # In one process, tracing made the suite 1.6-2.7x slower and hosted runners differ by about
+    # 1.6x: #249's head 57030e26 hit 55 minutes at 95% with no test failing and passed in 37 on
+    # its re-run. It now runs on every core; the budget stays until those runs are measured.
     timeout-minutes: 80
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -115,9 +115,9 @@ jobs:
           set -o pipefail
           timeout --signal=INT --kill-after=30s 75m \
             bash --noprofile --norc -e -o pipefail -c '
-              python -m pytest -vv --strict-skips --durations=20 -o test_timeout=240 \
-                --cov=nexus_symbiote --cov=scripts --cov-branch --cov-report=term-missing \
-                --cov-report="json:$COVERAGE_JSON" \
+              python -m pytest -n auto --dist worksteal -vv --strict-skips --durations=20 \
+                -o test_timeout=240 --cov=nexus_symbiote --cov=scripts --cov-branch \
+                --cov-report=term-missing --cov-report="json:$COVERAGE_JSON" \
                 2>&1 | tee "$PYTEST_LOG"
             '
       - name: Enforce statement, branch and security-module coverage floors
@@ -154,13 +154,16 @@ jobs:
       - run: mypy src/nexus_symbiote scripts
       - run: python scripts/check_workflows.py
       - run: python scripts/check_repository_hygiene.py
+      # The checkout is the pull request's merge commit, whose first parent is the base it was
+      # merged with. The base branch's tip can move while the job waits for a runner, and a
+      # diff against that tip would count the commits merged since as the pull request's.
       - name: Cap pull request size outside tests
         if: github.event_name == 'pull_request'
         env:
-          PR_BASE: ${{ github.base_ref }}
+          MERGE_SHA: ${{ github.sha }}
         run: |
-          git fetch --no-tags origin "$PR_BASE"
-          python scripts/check_pull_request_size.py --base "origin/$PR_BASE"
+          git fetch --no-tags --depth=2 origin "$MERGE_SHA"
+          python scripts/check_pull_request_size.py --base "$MERGE_SHA^1"
       - name: Require the locks to match pyproject.toml and each other
         run: python scripts/check_locks.py
   distribution:

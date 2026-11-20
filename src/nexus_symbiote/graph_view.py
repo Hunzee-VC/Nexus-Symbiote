@@ -423,6 +423,20 @@ def _exposure(
     rank = {node.index: rank for rank, node in enumerate(sorted(nodes, key=attrgetter("ref")))}
     weight = [node.weight for node in nodes]
     sources = [node.index for node in nodes if node.type in _SOURCE_TYPES]
+    # A source that reaches no sink has no path: the first left unsearched. One search
+    # back from the sinks finds them all, in time linear in the nodes and edges.
+    predecessors: list[list[int]] = [[] for _ in nodes]
+    for origin, successors_of in enumerate(adjacency):
+        for successor in successors_of:
+            predecessors[successor].append(origin)
+    reaches = [bool(value) for value in weight]
+    pending = [index for index, reached in enumerate(reaches) if reached]
+    while pending:
+        for previous in predecessors[pending.pop()]:
+            if not reaches[previous]:
+                reaches[previous] = True
+                pending.append(previous)
+    sources.sort(key=lambda source: not reaches[source])
     kept = sources[:MAX_SOURCES]
     best: list[tuple[int, int, int, int, int, int]] = []
     total = 0

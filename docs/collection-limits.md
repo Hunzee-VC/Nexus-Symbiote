@@ -84,12 +84,12 @@ The pre-commit hooks add their arguments after the command, so set
 | Limit | Default | Maximum | What it bounds | When it is reached |
 |---|---|---|---|---|
 | `file-bytes` | 4 MiB | 1 GiB | One file a collector reads into memory: configuration, manifests, lockfiles and instruction files. The mcp collector holds this much of each source file it searches. | The file is not read. A larger source file is still searched, as a stream; see [below](#source-files-the-mcp-collector-searches) for when it fails. |
-| `total-bytes` | 32 MiB | 64 GiB | All bytes one collector reads, apart from model files, which have their own budget below. Each collector has its own budget. The mcp, a2a and rag collectors may read `source-scan-bytes` more, so their source search always reaches its own budget first. | That file is not read; later files are read only while they fit in what remains. |
+| `total-bytes` | 32 MiB | 64 GiB | All bytes one collector reads, apart from model files, which have their own budget below. Each collector has its own budget. The mcp, a2a and rag collectors may read `source-scan-bytes` more, so their source search always reaches its own budget first; the files a ShadowScan report cites are bounded by `source-scan-bytes` alone. | That file is not read; later files are read only while they fit in what remains. |
 | `entries` | 100000 | 10000000 | Entries listed by walks and exact-name verification share one collection budget. Directories named `.git`, `node_modules`, `__pycache__`, `.venv` or `venv`, and paths excluded by policy, count as one entry each and are not walked. Verifying an exact filename may also need its parent directory's entries. The same number independently bounds project-policy discovery and one collection's case-variant search, and twice it bounds the weight files the model collector, and `validate --project`, bind to models and the directory digests it records on them. | An incomplete directory listing is refused and later walks stop; an exact-name check needing that listing cannot succeed. Project-policy discovery instead refuses the command before an inventory is written. |
 | `depth` | 64 | 256 | Directory nesting below the walk's starting directory. | That directory and everything beneath it are not walked. |
 | `model-bytes` | 64 GiB | 1024 GiB | One model weight or tokenizer file that the model collector inspects and hashes; also the artifact `verify-artifact` hashes and each artifact `validate --project` hashes again. | The file is recorded without a hash. |
 | `model-total-bytes` | 256 GiB | 16384 GiB | All bytes the model collector reads, weights and model configuration included; `validate --project` reads a model's bound weight files within the same amount. `validate` charges every artifact it reads to six times this limit, so a supplied inventory cannot multiply the work of the scan behind it. | That file is recorded without a hash; later files are hashed only while they fit in what remains. In `validate`, what does not fit is reported as not checked. |
-| `source-scan-bytes` | 64 MiB | 64 GiB | Source text one collector reads while it looks for references, counted for each collector separately: the Python, TypeScript and JavaScript files the mcp collector searches for SDK and agent framework references, and the Python files the a2a and rag collectors search for SDK and vector-store imports. How many files a project has does not matter. | One failure names the file being read when the budget ran out and says the rest were not read; nothing after it is searched. The mcp collector refuses a single file larger than the whole budget as a failure of its own, without spending the budget. |
+| `source-scan-bytes` | 64 MiB | 64 GiB | Source text one collector reads while it looks for references, counted for each collector separately: the Python, TypeScript and JavaScript files the mcp collector searches for SDK and agent framework references, the Python files the a2a and rag collectors search for SDK and vector-store imports, and the files a ShadowScan report cites as holding a model identifier, which the shadowscan collector re-reads in a merged scan. How many files a project has does not matter. | One failure names the file being read when the budget ran out and says the rest were not read; nothing after it is searched. The mcp collector refuses a single file larger than the whole budget as a failure of its own, without spending the budget. |
 | `syntax-bytes` | 256 KiB | 64 MiB | One file containing an MCP SDK or agent framework reference that the mcp collector parses. | That file is not parsed. |
 | `ts-nodes` | 20000 | 10000000 | Syntax nodes in one TypeScript or JavaScript file the mcp collector parses for MCP servers and client transports. | That file is not collected. |
 | `python-nodes` | 200000 | 10000000 | Syntax nodes in one Python file the mcp collector parses for MCP servers, clients and agent tools, counted as the Python that runs the scan parses the file. | That file is not collected. |
@@ -238,8 +238,7 @@ shorten lists whose content is recorded or bound anyway.
 | Codec name in a Python encoding declaration | 64 characters |
 | Dots separating key or table-name parts in TOML read by the registry, IDE and MCP collectors, including Codex settings and package-resolver configuration; quoted parts count, dots inside strings and comments do not | 16 (17 parts); checked before parsing |
 | MCP tool registrations in one TypeScript or JavaScript file | 1,000 |
-| TypeScript native parse time per file | 250 ms, in proportion to `syntax-bytes` above its default |
-| TypeScript analysis time per file | 2 s, in proportion to `ts-nodes` above its default |
+| Processor time of one TypeScript or JavaScript parse, the only bound on this page that counts time; see [the TypeScript parse time limit](#the-typescript-parse-time-limit) | 250 ms, in proportion to `syntax-bytes` above its default |
 | Native inventories and ShadowScan reports read by any command | 16 MiB |
 | Nesting levels of arrays and objects in a native inventory read through the shared reader, the root counted (`verify-discovery` and `verify-live` stop at the recursion limit instead; `attest` records a deeper subject, up to 256 levels, as native) | 128 |
 | `agent.yaml` and `.nexus-symbiote.yaml` | 1 MiB each |
@@ -279,3 +278,36 @@ signature bound is refused with "Policy artifact or bundle is unavailable beneat
 the project root", which does not yet name the bound; a model artifact above
 5 GiB can be hashed under `model-bytes` but cannot be verified by digest pin or
 signature.
+
+### The TypeScript parse time limit
+
+Every other bound on this page counts something a scan reads, such as bytes,
+entries or nodes, so whether a scan reaches it depends on the project and the
+limits alone. The parse time limit counts time, and exists only for input that no
+such count bounds: a file the grammar cannot parse, whose error recovery can take
+far longer than the file's size or node count would suggest.
+
+It is the same 250 ms as in releases up to 0.2.0, scaled the same way by `syntax-bytes`, but
+it counts the processor time the parser itself uses, not time on the clock. So a
+busy machine does not use it up, and neither does the one-time load of the parser
+and its grammar before the first parse, which those releases counted and which
+could turn a cold first scan of a small server into a failure. The parser can be
+stopped only after an interval of wall-clock time; that interval equals the
+budget, the deadline used before, so one attempt at a runaway parse stops where it
+stopped before and uses no more time or memory. A parse the interval stops when
+the parser has had less than half of the budget as processor time was held up by
+the machine, and starts again from the beginning, for at most three attempts. That
+lets a small server through on a loaded machine; a file that never gets its
+processor time is then refused. A stopped parse that had at least half of the
+budget is refused at once, so on an idle machine a file the grammar cannot end
+costs one interval.
+
+A file whose parse reaches the limit is the failure
+`TypeScript parsing exceeded its time limit`, and fails the default gates. A file
+that parses is bounded by `syntax-bytes` and `ts-nodes` instead; the analysis
+after the parse is linear in the file's nodes, runs only within `ts-nodes` and has
+no separate deadline. Ordinary source reaches the node limit first. A valid file
+whose parse needs more than the budget is refused for time, as it was before: in
+practice only an unusual file of a few hundred kilobytes of one token-dense
+construct, such as a large array or object literal, parses slowly enough to reach
+it.
