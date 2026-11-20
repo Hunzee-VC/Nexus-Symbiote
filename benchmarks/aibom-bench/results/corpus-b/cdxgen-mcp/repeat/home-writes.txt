@@ -1,0 +1,3 @@
+./.config/go/telemetry/local/go@go1.24.7-go1.24.7-linux-amd64-2026-11-18.v1.count
+./.config/go/telemetry/local/upload.token
+./.config/go/telemetry/local/weekends

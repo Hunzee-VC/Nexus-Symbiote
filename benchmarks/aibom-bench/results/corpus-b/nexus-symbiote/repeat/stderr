@@ -1,0 +1,38 @@
+Scanning /aibom-run/work/nexus-symbiote/corpus
+  Running mcp scanner...
+    Found 11 components (failed)
+  Running model scanner...
+    Found 4 components (failed)
+  Running prompt scanner...
+    Found 2 components (failed)
+  Running rag scanner...
+    Found 0 components (failed)
+  Running registry scanner...
+    Found 12 components
+  Running shadowscan scanner...
+    Found 0 components
+  Running a2a scanner...
+    Found 0 components (failed)
+  Running ide_agents scanner...
+    Found 2 components (failed)
+Saved /aibom-run/resultsB/nexus-symbiote/repeat/bom.json
+Risk warning: score 129.0
+Scan gate failed
+  - finding at or above critical
+  - aggregate score is at or above fail_threshold
+  - collection coverage is unknown or incomplete
+  - finding: critical artifacts/churn.pt [serialization_format] Model 'churn.pt' has evidence of a potentially code-executing serialization or loader.
+  - score: 129.0 (fail threshold 50)
+  - collection: artifacts/escape.onnx: symlink target is outside the collection root (from mcp)
+  - collection: infra/secret-link: symlink target is absolute (from mcp)
+  - collection: artifacts/escape.onnx: symlink target is outside the collection root (from model)
+  - collection: infra/secret-link: symlink target is absolute (from model)
+  - collection: artifacts/escape.onnx: symlink target is outside the collection root (from prompt)
+  - collection: infra/secret-link: symlink target is absolute (from prompt)
+  - collection: artifacts/escape.onnx: symlink target is outside the collection root (from rag)
+  - collection: infra/secret-link: symlink target is absolute (from rag)
+  - collection: artifacts/escape.onnx: symlink target is outside the collection root (from a2a)
+  - collection: infra/secret-link: symlink target is absolute (from a2a)
+  - collection: artifacts/escape.onnx: symlink target is outside the collection root (from ide_agents)
+  - collection: infra/secret-link: symlink target is absolute (from ide_agents)
+  - excluded: .zed/settings.json: MCP client configuration not inventoried (from mcp)

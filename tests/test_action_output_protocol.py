@@ -459,8 +459,8 @@ def test_hostile_project_through_the_real_entry_point(tmp_path):
     hidden.mkdir(parents=True)
     (hidden / "s.py").write_text("from mcp.server import Server\n")
     (project / "models").mkdir()
-    (project / "models" / "::warning::injected.pkl").write_bytes(b"unsafe")
-    (project / "models" / "##[warning]injected.pkl").write_bytes(b"unsafe")
+    (project / "models" / "::warning::injected.pkl").write_bytes(b"\x80\x04N.")
+    (project / "models" / "##[warning]injected.pkl").write_bytes(b"\x80\x04N.")
     (project / "CLAUDE.md").write_text("Use the configured tools.\n")
     outputs = tmp_path / "outputs"
     env = {
