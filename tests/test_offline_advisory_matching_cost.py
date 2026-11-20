@@ -275,6 +275,17 @@ def _random_block(rng: random.Random, ecosystem: str) -> dict[str, Any]:
                 kind = rng.choice(["introduced", "fixed", "last_affected", "limit"])
                 bad = {kind: rng.choice(_UNPARSEABLE[ecosystem])}
                 events.insert(rng.randint(0, len(events)), bad)
+            elif 0.2 <= roll < 0.3:
+                # Two ordered intervals, an unparsable bound among one's parsable bounds or
+                # before both (the PYSEC-2024-264 shape): it keeps only its own one open.
+                cuts = sorted(
+                    rng.sample(_PARSEABLE[ecosystem], 4),
+                    key=lambda text: offline._version_key(ecosystem, text),
+                )
+                events = [{"introduced": rng.choice([cuts[0], "0"])}, {"fixed": cuts[1]}]
+                events += [{"introduced": cuts[2]}, {"last_affected": cuts[3]}]
+                bad = {rng.choice(["fixed", "last_affected"]): rng.choice(_UNPARSEABLE[ecosystem])}
+                events.insert(rng.randint(0, len(events)), bad)
             entry: dict[str, Any] = {"events": events}
             kind = rng.choice(["ECOSYSTEM", "SEMVER", "semver", None, None, "GIT", 7])
             if kind is not None:
@@ -379,6 +390,22 @@ def test_flags_and_errors_follow_the_pairwise_rules_on_a_worked_example():
         ("GHSA-4", {"versions": ["not-a-version"]}),
         # An unparsable introduced is an error for every version.
         ("GHSA-5", {"ranges": [{"events": [{"introduced": "bad!"}]}]}),
+        # Event order puts the unparsable bound in the interval from 0, not the one from 1.0.
+        (
+            "GHSA-6",
+            {
+                "ranges": [
+                    {
+                        "events": [
+                            {"introduced": "0"},
+                            {"last_affected": "j2!"},
+                            {"introduced": "1.0"},
+                            {"fixed": "2.0"},
+                        ]
+                    }
+                ]
+            },
+        ),
     ]
     budget = offline._MatchBudget(10**6)
     matcher = offline._PackageMatcher(
@@ -386,14 +413,14 @@ def test_flags_and_errors_follow_the_pairwise_rules_on_a_worked_example():
     )
     always = [("GHSA-2", not_a_list), ("GHSA-5", compared)]
     expected = {
-        "0.5": ([("GHSA-3", ["2.0"], ["j!"])], always),
-        "1.5": ([("GHSA-3", ["2.0"], ["j!"])], always),
+        "0.5": ([("GHSA-3", ["2.0"], ["j!"]), ("GHSA-6", ["2.0"], ["j2!"])], always),
+        "1.5": ([("GHSA-3", ["2.0"], ["j!"]), ("GHSA-6", ["2.0"], ["j2!"])], always),
         "2.5": ([("GHSA-1", [], ["nope!"]), ("GHSA-3", [], [])], always),
         "not-a-version": (
             [("GHSA-4", [], [])],
             [
                 *(("GHSA-1", compared), ("GHSA-2", compared), ("GHSA-3", compared)),
-                ("GHSA-5", compared),
+                *(("GHSA-5", compared), ("GHSA-6", compared)),
             ],
         ),
     }
