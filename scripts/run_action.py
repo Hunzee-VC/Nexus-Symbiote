@@ -637,9 +637,15 @@ def run(
         failures = claim.get("scan_failures")
         if failures:
             record("collection", "failed")
+            records = len(failures)
+            distinct = len({str(failure) for failure in failures})
+            counted = f"{distinct} distinct collection failure{'' if distinct == 1 else 's'}"
+            if records != distinct:
+                counted += f" ({records} records)"
+            verb = "was" if distinct == 1 else "were"
             _say(
-                f"Collection failed: {len(failures)} collection failures were recorded (listed "
-                "above and in the inventory's metadata.completeness), so no gate ran."
+                f"Collection failed: {counted} {verb} recorded (listed above and in the "
+                "inventory's metadata.completeness), so no gate ran."
             )
             return finish()
         record("collection", "passed")

@@ -38,7 +38,10 @@ def _tools(result) -> list[str]:
 
 
 def _servers(result) -> list[str]:
-    return [c.name for c in result.components if isinstance(c, MCPServerComponent)]
+    """The variable each server is bound to, which the scope rules are about."""
+    return [
+        str(c.properties["binding"]) for c in result.components if isinstance(c, MCPServerComponent)
+    ]
 
 
 @pytest.mark.parametrize(
