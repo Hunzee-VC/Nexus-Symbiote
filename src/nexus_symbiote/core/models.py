@@ -357,7 +357,7 @@ class PromptComponent(ComponentBase):
         default=None,
         description=(
             "system-prompt, planner, instruction, rules-file, skill-definition, subagent, "
-            "imported-instruction"
+            "imported-instruction, template"
         ),
     )
     content_hash: str | None = Field(default=None, description="Hash of the exact prompt bytes")
