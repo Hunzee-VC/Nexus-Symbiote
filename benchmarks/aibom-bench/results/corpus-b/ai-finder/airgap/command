@@ -1,0 +1,1 @@
+/aibom-run/venvs/ai-finder/bin/ai-finder scan /aibom-run/work/ai-finder/corpus -r -f json -o /aibom-run/resultsB/ai-finder/airgap/report.json 

@@ -1,0 +1,1597 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.7",
+  "version": 1,
+  "serialNumber": "urn:uuid:3c803339-400e-5181-8113-b1bb85a7df4c",
+  "metadata": {
+    "tools": {
+      "components": [
+        {
+          "type": "application",
+          "name": "nexus-symbiote",
+          "version": "0.2.0",
+          "publisher": "aisecnomad"
+        }
+      ]
+    },
+    "timestamp": "2023-11-14T22:13:20+00:00"
+  },
+  "components": [
+    {
+      "type": "application",
+      "bom-ref": "a2a-server:Acme Support Agent",
+      "name": "Acme Support Agent",
+      "version": "1.4.0"
+    },
+    {
+      "type": "application",
+      "bom-ref": "ide-agent:claude-code",
+      "name": "claude-code"
+    },
+    {
+      "type": "application",
+      "bom-ref": "ide-agent:cursor",
+      "name": "cursor"
+    },
+    {
+      "type": "application",
+      "bom-ref": "ide-agent:gemini",
+      "name": "gemini"
+    },
+    {
+      "type": "application",
+      "bom-ref": "mcp-server:0cce754229178ca3019e16245a00c1016bf99b36a416d0c1d85a865ddc2d4f4e",
+      "name": "filesystem",
+      "version": "2025.8.21",
+      "purl": "pkg:npm/%40modelcontextprotocol/server-filesystem@2025.8.21"
+    },
+    {
+      "type": "application",
+      "bom-ref": "mcp-server:0ebbf02c2ef1e115f8445d5eb9853fbbedb2d2d3778ab4df96073ed665b5f34d",
+      "name": "sqlite",
+      "version": "0.6.2",
+      "purl": "pkg:pypi/mcp-server-sqlite@0.6.2"
+    },
+    {
+      "type": "application",
+      "bom-ref": "mcp-server:3263889520201b938c02c2694649f99e56a8e09161b9964f55186af27399b1ad",
+      "name": "slack"
+    },
+    {
+      "type": "application",
+      "bom-ref": "mcp-server:3fbfd7787a7542d632d309995f1d7ad97c71c419488f3755fe2871ba8d8fb4eb",
+      "name": "github",
+      "version": "sha256:7c7f6ab9bb4a4e4e4a1d0a0c5f2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d"
+    },
+    {
+      "type": "application",
+      "bom-ref": "mcp-server:bd771aa146767c63b3bd0ab0d2843d77d0decc2a36e8a77db43da6d8febd4833",
+      "name": "remote-crm"
+    },
+    {
+      "type": "application",
+      "bom-ref": "mcp-server:caa03812ec0f73faeef20d0f675ad578adec6861d634134f64c889f1f7079c0f",
+      "name": "browser\u001b[2K\u001b[1;32m[verified]\u001b[0m"
+    },
+    {
+      "type": "application",
+      "bom-ref": "mcp-server:e37ae79bbad5a2f5937669a336cb72e182b2d23d2f8c693eb6aeef3d2ff0dc25",
+      "name": "filesystem",
+      "version": "2025.8.21",
+      "purl": "pkg:npm/%40modelcontextprotocol/server-filesystem@2025.8.21"
+    },
+    {
+      "type": "application",
+      "bom-ref": "mcp-server:e8c8e6c3a3348d5eded17b4e6b3ac9b45c6f40a64e464b480081308f0d25c7c0",
+      "name": "postgres"
+    },
+    {
+      "type": "machine-learning-model",
+      "bom-ref": "model:data/raw/embeddings.bin",
+      "name": "data/raw/embeddings.bin",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "83ee47245398adee79bd9c0a8bc57b821e92aba10f5f9ade8a5d1fae4d8c4302"
+        }
+      ]
+    },
+    {
+      "type": "machine-learning-model",
+      "bom-ref": "model:models/classifier/model.safetensors",
+      "name": "models/classifier/model.safetensors",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "5bdeef2029fa7ebfc5507027c5060f6557fd4187cad5cf02cded1eecd1a977f7"
+        }
+      ]
+    },
+    {
+      "type": "machine-learning-model",
+      "bom-ref": "model:models/legacy/intent.pkl",
+      "name": "models/legacy/intent.pkl",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "9e1aae1cca74c27bd2903263856ba049f3854d8a0605f5efa7c2ad9162dfffed"
+        }
+      ]
+    },
+    {
+      "type": "machine-learning-model",
+      "bom-ref": "model:models/legacy/intent.pt",
+      "name": "models/legacy/intent.pt",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "90d72e0bfe091224a075ec8d66d9ab989d874bbeca15431794c8eb9894ad3734"
+        }
+      ]
+    },
+    {
+      "type": "machine-learning-model",
+      "bom-ref": "model:models/llm/acme-intent-tiny.Q8_0.gguf",
+      "name": "models/llm/acme-intent-tiny.Q8_0.gguf",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "46cac5ddd076c4f843546daacd3586af7beaa78211b614c9c778868979a30c50"
+        }
+      ]
+    },
+    {
+      "type": "data",
+      "bom-ref": "rag:env-pinecone",
+      "name": "pinecone (from env)"
+    },
+    {
+      "type": "data",
+      "bom-ref": "rag:import-chroma",
+      "name": "chroma (from imports)"
+    },
+    {
+      "type": "data",
+      "bom-ref": "rag:import-pinecone",
+      "name": "pinecone (from imports)"
+    },
+    {
+      "type": "container",
+      "bom-ref": "registry:docker/ollama/ollama:latest",
+      "name": "ollama/ollama:latest"
+    },
+    {
+      "type": "container",
+      "bom-ref": "registry:docker/qdrant/qdrant:v1.12.1",
+      "name": "qdrant/qdrant:v1.12.1"
+    },
+    {
+      "type": "library",
+      "bom-ref": "skill:.claude/skills/refund-approver/SKILL.md",
+      "name": ".claude/skills/refund-approver/SKILL.md",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "24862b721d4c58054ef45da7766b083f857b003678d9dc7674e2640c99bde6f0"
+        }
+      ]
+    }
+  ],
+  "vulnerabilities": [
+    {
+      "bom-ref": "vulnerability:NEXUS-0f666abd03b8aedabffb261702296f9ce8695ae9611fee7ef8385dbd10b908eb",
+      "id": "NEXUS-0f666abd03b8aedabffb261702296f9ce8695ae9611fee7ef8385dbd10b908eb",
+      "source": {
+        "name": "Nexus SymBiote inventory findings"
+      },
+      "description": "A2A agent 'Acme Support Agent' values not bound in this inventory: endpoint URL beyond its exported origin.",
+      "ratings": [
+        {
+          "severity": "low"
+        }
+      ],
+      "analysis": {
+        "state": "in_triage",
+        "detail": "Inventory risk finding; exploitability and deployment impact are unverified. Set NEXUS_SYMBIOTE_SOURCE_BINDING_KEY during collection to detect changes to these values.",
+        "lastUpdated": "2023-11-14T22:13:20+00:00"
+      },
+      "affects": [
+        {
+          "ref": "a2a-server:Acme Support Agent"
+        }
+      ],
+      "properties": [
+        {
+          "name": "nexus-symbiote:assurance",
+          "value": "declared-inventory-finding"
+        },
+        {
+          "name": "nexus-symbiote:category",
+          "value": "completeness"
+        }
+      ]
+    },
+    {
+      "bom-ref": "vulnerability:NEXUS-a5c1b93291a3a74c9d310c54f90ea30ba0d8479bf05d39fb3f2ef86b081ef388",
+      "id": "NEXUS-a5c1b93291a3a74c9d310c54f90ea30ba0d8479bf05d39fb3f2ef86b081ef388",
+      "source": {
+        "name": "Nexus SymBiote inventory findings"
+      },
+      "description": "IDE agent 'claude-code' declares 1 hook command(s) that run automatically on agent events.",
+      "ratings": [
+        {
+          "severity": "medium"
+        }
+      ],
+      "analysis": {
+        "state": "in_triage",
+        "detail": "Inventory risk finding; exploitability and deployment impact are unverified. Review this setting and approve its exact value.",
+        "lastUpdated": "2023-11-14T22:13:20+00:00"
+      },
+      "affects": [
+        {
+          "ref": "ide-agent:claude-code"
+        }
+      ],
+      "properties": [
+        {
+          "name": "nexus-symbiote:assurance",
+          "value": "declared-inventory-finding"
+        },
+        {
+          "name": "nexus-symbiote:category",
+          "value": "hook_commands"
+        }
+      ]
+    },
+    {
+      "bom-ref": "vulnerability:NEXUS-e6d58b5ca7d50b7f86d76e84a05f10406487c371f6e53c73d0fa4f394d576b19",
+      "id": "NEXUS-e6d58b5ca7d50b7f86d76e84a05f10406487c371f6e53c73d0fa4f394d576b19",
+      "source": {
+        "name": "Nexus SymBiote inventory findings"
+      },
+      "description": "IDE agent 'claude-code' settings values not bound in this inventory: the redacted values of .claude/settings.json.",
+      "ratings": [
+        {
+          "severity": "low"
+        }
+      ],
+      "analysis": {
+        "state": "in_triage",
+        "detail": "Inventory risk finding; exploitability and deployment impact are unverified. Set NEXUS_SYMBIOTE_SOURCE_BINDING_KEY during collection to detect changes to these values.",
+        "lastUpdated": "2023-11-14T22:13:20+00:00"
+      },
+      "affects": [
+        {
+          "ref": "ide-agent:claude-code"
+        }
+      ],
+      "properties": [
+        {
+          "name": "nexus-symbiote:assurance",
+          "value": "declared-inventory-finding"
+        },
+        {
+          "name": "nexus-symbiote:category",
+          "value": "completeness"
+        }
+      ]
+    },
+    {
+      "bom-ref": "vulnerability:NEXUS-08fc6d20aaadf033f9c8710ef2f6666318a12508211f1a91ce2c802fa8a9ffc5",
+      "id": "NEXUS-08fc6d20aaadf033f9c8710ef2f6666318a12508211f1a91ce2c802fa8a9ffc5",
+      "source": {
+        "name": "Nexus SymBiote inventory findings"
+      },
+      "description": "IDE agent 'cursor' has multiple declared instruction locations.",
+      "ratings": [
+        {
+          "severity": "low"
+        }
+      ],
+      "analysis": {
+        "state": "in_triage",
+        "detail": "Inventory risk finding; exploitability and deployment impact are unverified. Document loading order, modification authority and approved digests.",
+        "lastUpdated": "2023-11-14T22:13:20+00:00"
+      },
+      "affects": [
+        {
+          "ref": "ide-agent:cursor"
+        }
+      ],
+      "properties": [
+        {
+          "name": "nexus-symbiote:assurance",
+          "value": "declared-inventory-finding"
+        },
+        {
+          "name": "nexus-symbiote:category",
+          "value": "instruction_layering"
+        }
+      ]
+    },
+    {
+      "bom-ref": "vulnerability:NEXUS-2b4b9a07366f29d0c0c7f09d35f2d5842517d02d37c67fadd4f5f442276d0e5a",
+      "id": "NEXUS-2b4b9a07366f29d0c0c7f09d35f2d5842517d02d37c67fadd4f5f442276d0e5a",
+      "source": {
+        "name": "Nexus SymBiote inventory findings"
+      },
+      "description": "IDE agent 'gemini' settings values not bound in this inventory: the redacted values of .gemini/settings.json.",
+      "ratings": [
+        {
+          "severity": "low"
+        }
+      ],
+      "analysis": {
+        "state": "in_triage",
+        "detail": "Inventory risk finding; exploitability and deployment impact are unverified. Set NEXUS_SYMBIOTE_SOURCE_BINDING_KEY during collection to detect changes to these values.",
+        "lastUpdated": "2023-11-14T22:13:20+00:00"
+      },
+      "affects": [
+        {
+          "ref": "ide-agent:gemini"
+        }
+      ],
+      "properties": [
+        {
+          "name": "nexus-symbiote:assurance",
+          "value": "declared-inventory-finding"
+        },
+        {
+          "name": "nexus-symbiote:category",
+          "value": "completeness"
+        }
+      ]
+    },
+    {
+      "bom-ref": "vulnerability:NEXUS-295e1bec0428d14605c5ae48b41cde605f71c29e46f8d39569d8aa198bc0dbf5",
+      "id": "NEXUS-295e1bec0428d14605c5ae48b41cde605f71c29e46f8d39569d8aa198bc0dbf5",
+      "source": {
+        "name": "Nexus SymBiote inventory findings"
+      },
+      "description": "MCP server 'filesystem' uses stdio transport (local process).",
+      "ratings": [
+        {
+          "severity": "medium"
+        }
+      ],
+      "analysis": {
+        "state": "in_triage",
+        "detail": "Inventory risk finding; exploitability and deployment impact are unverified. Ensure the command binary is integrity-checked.",
+        "lastUpdated": "2023-11-14T22:13:20+00:00"
+      },
+      "affects": [
+        {
+          "ref": "mcp-server:0cce754229178ca3019e16245a00c1016bf99b36a416d0c1d85a865ddc2d4f4e"
+        }
+      ],
+      "properties": [
+        {
+          "name": "nexus-symbiote:assurance",
+          "value": "declared-inventory-finding"
+        },
+        {
+          "name": "nexus-symbiote:category",
+          "value": "local_process"
+        }
+      ]
+    },
+    {
+      "bom-ref": "vulnerability:NEXUS-93b7a7f49406ecf790d5472af4dd67b52443a05357b42f7bf5f0e040543e646d",
+      "id": "NEXUS-93b7a7f49406ecf790d5472af4dd67b52443a05357b42f7bf5f0e040543e646d",
+      "source": {
+        "name": "Nexus SymBiote inventory findings"
+      },
+      "description": "MCP server 'filesystem' pins its package but resolves dependencies at launch without a lockfile.",
+      "ratings": [
+        {
+          "severity": "medium"
+        }
+      ],
+      "analysis": {
+        "state": "in_triage",
+        "detail": "Inventory risk finding; exploitability and deployment impact are unverified. Vendor a lockfile-installed server, or launch an image by digest.",
+        "lastUpdated": "2023-11-14T22:13:20+00:00"
+      },
+      "affects": [
+        {
+          "ref": "mcp-server:0cce754229178ca3019e16245a00c1016bf99b36a416d0c1d85a865ddc2d4f4e"
+        }
+      ],
+      "properties": [
+        {
+          "name": "nexus-symbiote:assurance",
+          "value": "declared-inventory-finding"
+        },
+        {
+          "name": "nexus-symbiote:category",
+          "value": "transitive_resolution"
+        }
+      ]
+    },
+    {
+      "bom-ref": "vulnerability:NEXUS-a7cc45f88e8598e39828b10da334d79a8bc299043b51b898326f75233079c65d",
+      "id": "NEXUS-a7cc45f88e8598e39828b10da334d79a8bc299043b51b898326f75233079c65d",
+      "source": {
+        "name": "Nexus SymBiote inventory findings"
+      },
+      "description": "MCP server 'filesystem' values not bound in this inventory: launch arguments.",
+      "ratings": [
+        {
+          "severity": "low"
+        }
+      ],
+      "analysis": {
+        "state": "in_triage",
+        "detail": "Inventory risk finding; exploitability and deployment impact are unverified. Set NEXUS_SYMBIOTE_SOURCE_BINDING_KEY during collection to detect changes to these values.",
+        "lastUpdated": "2023-11-14T22:13:20+00:00"
+      },
+      "affects": [
+        {
+          "ref": "mcp-server:0cce754229178ca3019e16245a00c1016bf99b36a416d0c1d85a865ddc2d4f4e"
+        }
+      ],
+      "properties": [
+        {
+          "name": "nexus-symbiote:assurance",
+          "value": "declared-inventory-finding"
+        },
+        {
+          "name": "nexus-symbiote:category",
+          "value": "completeness"
+        }
+      ]
+    },
+    {
+      "bom-ref": "vulnerability:NEXUS-8d566c0daea268fe1f1f29ffbca7c35bd02252bf0a084c417594138f003e3602",
+      "id": "NEXUS-8d566c0daea268fe1f1f29ffbca7c35bd02252bf0a084c417594138f003e3602",
+      "source": {
+        "name": "Nexus SymBiote inventory findings"
+      },
+      "description": "MCP server 'sqlite' uses stdio transport (local process).",
+      "ratings": [
+        {
+          "severity": "medium"
+        }
+      ],
+      "analysis": {
+        "state": "in_triage",
+        "detail": "Inventory risk finding; exploitability and deployment impact are unverified. Ensure the command binary is integrity-checked.",
+        "lastUpdated": "2023-11-14T22:13:20+00:00"
+      },
+      "affects": [
+        {
+          "ref": "mcp-server:0ebbf02c2ef1e115f8445d5eb9853fbbedb2d2d3778ab4df96073ed665b5f34d"
+        }
+      ],
+      "properties": [
+        {
+          "name": "nexus-symbiote:assurance",
+          "value": "declared-inventory-finding"
+        },
+        {
+          "name": "nexus-symbiote:category",
+          "value": "local_process"
+        }
+      ]
+    },
+    {
+      "bom-ref": "vulnerability:NEXUS-43bb7018d2ab875256d96391f26296f06003835b54c05c901cc3220e94bac39c",
+      "id": "NEXUS-43bb7018d2ab875256d96391f26296f06003835b54c05c901cc3220e94bac39c",
+      "source": {
+        "name": "Nexus SymBiote inventory findings"
+      },
+      "description": "MCP server 'sqlite' pins its package but resolves dependencies at launch without a lockfile.",
+      "ratings": [
+        {
+          "severity": "medium"
+        }
+      ],
+      "analysis": {
+        "state": "in_triage",
+        "detail": "Inventory risk finding; exploitability and deployment impact are unverified. Vendor a lockfile-installed server, or launch an image by digest.",
+        "lastUpdated": "2023-11-14T22:13:20+00:00"
+      },
+      "affects": [
+        {
+          "ref": "mcp-server:0ebbf02c2ef1e115f8445d5eb9853fbbedb2d2d3778ab4df96073ed665b5f34d"
+        }
+      ],
+      "properties": [
+        {
+          "name": "nexus-symbiote:assurance",
+          "value": "declared-inventory-finding"
+        },
+        {
+          "name": "nexus-symbiote:category",
+          "value": "transitive_resolution"
+        }
+      ]
+    },
+    {
+      "bom-ref": "vulnerability:NEXUS-dce6c69fa30ccb6b07856d2267d76ce1a68cb6edd3a0a0f548c7f17a42caf6f3",
+      "id": "NEXUS-dce6c69fa30ccb6b07856d2267d76ce1a68cb6edd3a0a0f548c7f17a42caf6f3",
+      "source": {
+        "name": "Nexus SymBiote inventory findings"
+      },
+      "description": "MCP server 'sqlite' values not bound in this inventory: launch arguments.",
+      "ratings": [
+        {
+          "severity": "low"
+        }
+      ],
+      "analysis": {
+        "state": "in_triage",
+        "detail": "Inventory risk finding; exploitability and deployment impact are unverified. Set NEXUS_SYMBIOTE_SOURCE_BINDING_KEY during collection to detect changes to these values.",
+        "lastUpdated": "2023-11-14T22:13:20+00:00"
+      },
+      "affects": [
+        {
+          "ref": "mcp-server:0ebbf02c2ef1e115f8445d5eb9853fbbedb2d2d3778ab4df96073ed665b5f34d"
+        }
+      ],
+      "properties": [
+        {
+          "name": "nexus-symbiote:assurance",
+          "value": "declared-inventory-finding"
+        },
+        {
+          "name": "nexus-symbiote:category",
+          "value": "completeness"
+        }
+      ]
+    },
+    {
+      "bom-ref": "vulnerability:NEXUS-ca39fd009c61e971698623767d3ea6b09bf1bafda2cec7c19aff7dd98fc659a0",
+      "id": "NEXUS-ca39fd009c61e971698623767d3ea6b09bf1bafda2cec7c19aff7dd98fc659a0",
+      "source": {
+        "name": "Nexus SymBiote inventory findings"
+      },
+      "description": "MCP server 'slack' values not bound in this inventory: endpoint path and query.",
+      "ratings": [
+        {
+          "severity": "low"
+        }
+      ],
+      "analysis": {
+        "state": "in_triage",
+        "detail": "Inventory risk finding; exploitability and deployment impact are unverified. Set NEXUS_SYMBIOTE_SOURCE_BINDING_KEY during collection to detect changes to these values.",
+        "lastUpdated": "2023-11-14T22:13:20+00:00"
+      },
+      "affects": [
+        {
+          "ref": "mcp-server:3263889520201b938c02c2694649f99e56a8e09161b9964f55186af27399b1ad"
+        }
+      ],
+      "properties": [
+        {
+          "name": "nexus-symbiote:assurance",
+          "value": "declared-inventory-finding"
+        },
+        {
+          "name": "nexus-symbiote:category",
+          "value": "completeness"
+        }
+      ]
+    },
+    {
+      "bom-ref": "vulnerability:NEXUS-2e0de4a618fa155d603cbbf8d15e761f632e514998a8b22567b6c3b8dddaede2",
+      "id": "NEXUS-2e0de4a618fa155d603cbbf8d15e761f632e514998a8b22567b6c3b8dddaede2",
+      "source": {
+        "name": "Nexus SymBiote inventory findings"
+      },
+      "description": "MCP server 'github' uses stdio transport (local process).",
+      "ratings": [
+        {
+          "severity": "medium"
+        }
+      ],
+      "analysis": {
+        "state": "in_triage",
+        "detail": "Inventory risk finding; exploitability and deployment impact are unverified. Ensure the command binary is integrity-checked.",
+        "lastUpdated": "2023-11-14T22:13:20+00:00"
+      },
+      "affects": [
+        {
+          "ref": "mcp-server:3fbfd7787a7542d632d309995f1d7ad97c71c419488f3755fe2871ba8d8fb4eb"
+        }
+      ],
+      "properties": [
+        {
+          "name": "nexus-symbiote:assurance",
+          "value": "declared-inventory-finding"
+        },
+        {
+          "name": "nexus-symbiote:category",
+          "value": "local_process"
+        }
+      ]
+    },
+    {
+      "bom-ref": "vulnerability:NEXUS-e62f2ac3a7757e3b5af664fc205898e2752a180dbe5a19b326b51b69ab770b64",
+      "id": "NEXUS-e62f2ac3a7757e3b5af664fc205898e2752a180dbe5a19b326b51b69ab770b64",
+      "source": {
+        "name": "Nexus SymBiote inventory findings"
+      },
+      "description": "MCP server 'github' values not bound in this inventory: launch arguments; environment values.",
+      "ratings": [
+        {
+          "severity": "low"
+        }
+      ],
+      "analysis": {
+        "state": "in_triage",
+        "detail": "Inventory risk finding; exploitability and deployment impact are unverified. Set NEXUS_SYMBIOTE_SOURCE_BINDING_KEY during collection to detect changes to these values.",
+        "lastUpdated": "2023-11-14T22:13:20+00:00"
+      },
+      "affects": [
+        {
+          "ref": "mcp-server:3fbfd7787a7542d632d309995f1d7ad97c71c419488f3755fe2871ba8d8fb4eb"
+        }
+      ],
+      "properties": [
+        {
+          "name": "nexus-symbiote:assurance",
+          "value": "declared-inventory-finding"
+        },
+        {
+          "name": "nexus-symbiote:category",
+          "value": "completeness"
+        }
+      ]
+    },
+    {
+      "bom-ref": "vulnerability:NEXUS-5db872c7a920926dc82fd4c135d97e71b062ac1d58f728877081d5324431b9e7",
+      "id": "NEXUS-5db872c7a920926dc82fd4c135d97e71b062ac1d58f728877081d5324431b9e7",
+      "source": {
+        "name": "Nexus SymBiote inventory findings"
+      },
+      "description": "MCP server 'remote-crm' values not bound in this inventory: header values; endpoint path and query.",
+      "ratings": [
+        {
+          "severity": "low"
+        }
+      ],
+      "analysis": {
+        "state": "in_triage",
+        "detail": "Inventory risk finding; exploitability and deployment impact are unverified. Set NEXUS_SYMBIOTE_SOURCE_BINDING_KEY during collection to detect changes to these values.",
+        "lastUpdated": "2023-11-14T22:13:20+00:00"
+      },
+      "affects": [
+        {
+          "ref": "mcp-server:bd771aa146767c63b3bd0ab0d2843d77d0decc2a36e8a77db43da6d8febd4833"
+        }
+      ],
+      "properties": [
+        {
+          "name": "nexus-symbiote:assurance",
+          "value": "declared-inventory-finding"
+        },
+        {
+          "name": "nexus-symbiote:category",
+          "value": "completeness"
+        }
+      ]
+    },
+    {
+      "bom-ref": "vulnerability:NEXUS-bd37dc8856b4dd9a2942290dfc133ac030e8a98b0ac046daa225baf6c747bafb",
+      "id": "NEXUS-bd37dc8856b4dd9a2942290dfc133ac030e8a98b0ac046daa225baf6c747bafb",
+      "source": {
+        "name": "Nexus SymBiote inventory findings"
+      },
+      "description": "MCP server 'browser\ufffd\\[2K\ufffd\\[1;32m\\[verified\\]\ufffd\\[0m' uses an unpinned package reference (arguments omitted).",
+      "ratings": [
+        {
+          "severity": "high"
+        }
+      ],
+      "analysis": {
+        "state": "in_triage",
+        "detail": "Inventory risk finding; exploitability and deployment impact are unverified. Pin to an exact version and store a hash of the tool schema.",
+        "lastUpdated": "2023-11-14T22:13:20+00:00"
+      },
+      "affects": [
+        {
+          "ref": "mcp-server:caa03812ec0f73faeef20d0f675ad578adec6861d634134f64c889f1f7079c0f"
+        }
+      ],
+      "properties": [
+        {
+          "name": "nexus-symbiote:assurance",
+          "value": "declared-inventory-finding"
+        },
+        {
+          "name": "nexus-symbiote:category",
+          "value": "version_pinning"
+        }
+      ]
+    },
+    {
+      "bom-ref": "vulnerability:NEXUS-b14fc2cae037b9dcf88455424c369719ccf9f821bcb79091437a1abbe5b46f6e",
+      "id": "NEXUS-b14fc2cae037b9dcf88455424c369719ccf9f821bcb79091437a1abbe5b46f6e",
+      "source": {
+        "name": "Nexus SymBiote inventory findings"
+      },
+      "description": "MCP server 'browser\ufffd\\[2K\ufffd\\[1;32m\\[verified\\]\ufffd\\[0m' uses stdio transport (local process).",
+      "ratings": [
+        {
+          "severity": "medium"
+        }
+      ],
+      "analysis": {
+        "state": "in_triage",
+        "detail": "Inventory risk finding; exploitability and deployment impact are unverified. Ensure the command binary is integrity-checked.",
+        "lastUpdated": "2023-11-14T22:13:20+00:00"
+      },
+      "affects": [
+        {
+          "ref": "mcp-server:caa03812ec0f73faeef20d0f675ad578adec6861d634134f64c889f1f7079c0f"
+        }
+      ],
+      "properties": [
+        {
+          "name": "nexus-symbiote:assurance",
+          "value": "declared-inventory-finding"
+        },
+        {
+          "name": "nexus-symbiote:category",
+          "value": "local_process"
+        }
+      ]
+    },
+    {
+      "bom-ref": "vulnerability:NEXUS-4f38da595f58f386ed69a18bf796a0b732b00b71183c9a100c2060e7fa9585c5",
+      "id": "NEXUS-4f38da595f58f386ed69a18bf796a0b732b00b71183c9a100c2060e7fa9585c5",
+      "source": {
+        "name": "Nexus SymBiote inventory findings"
+      },
+      "description": "MCP server 'filesystem' uses stdio transport (local process).",
+      "ratings": [
+        {
+          "severity": "medium"
+        }
+      ],
+      "analysis": {
+        "state": "in_triage",
+        "detail": "Inventory risk finding; exploitability and deployment impact are unverified. Ensure the command binary is integrity-checked.",
+        "lastUpdated": "2023-11-14T22:13:20+00:00"
+      },
+      "affects": [
+        {
+          "ref": "mcp-server:e37ae79bbad5a2f5937669a336cb72e182b2d23d2f8c693eb6aeef3d2ff0dc25"
+        }
+      ],
+      "properties": [
+        {
+          "name": "nexus-symbiote:assurance",
+          "value": "declared-inventory-finding"
+        },
+        {
+          "name": "nexus-symbiote:category",
+          "value": "local_process"
+        }
+      ]
+    },
+    {
+      "bom-ref": "vulnerability:NEXUS-3a9d605b2bd675a3c5b1294245a55713b4a3654624af47aa4bfe6cdafa8883e1",
+      "id": "NEXUS-3a9d605b2bd675a3c5b1294245a55713b4a3654624af47aa4bfe6cdafa8883e1",
+      "source": {
+        "name": "Nexus SymBiote inventory findings"
+      },
+      "description": "MCP server 'filesystem' pins its package but resolves dependencies at launch without a lockfile.",
+      "ratings": [
+        {
+          "severity": "medium"
+        }
+      ],
+      "analysis": {
+        "state": "in_triage",
+        "detail": "Inventory risk finding; exploitability and deployment impact are unverified. Vendor a lockfile-installed server, or launch an image by digest.",
+        "lastUpdated": "2023-11-14T22:13:20+00:00"
+      },
+      "affects": [
+        {
+          "ref": "mcp-server:e37ae79bbad5a2f5937669a336cb72e182b2d23d2f8c693eb6aeef3d2ff0dc25"
+        }
+      ],
+      "properties": [
+        {
+          "name": "nexus-symbiote:assurance",
+          "value": "declared-inventory-finding"
+        },
+        {
+          "name": "nexus-symbiote:category",
+          "value": "transitive_resolution"
+        }
+      ]
+    },
+    {
+      "bom-ref": "vulnerability:NEXUS-c6b0dc37755d5222673d4fe68da9d26c903adeb2c9f7c0f2cd2a26ce8631b905",
+      "id": "NEXUS-c6b0dc37755d5222673d4fe68da9d26c903adeb2c9f7c0f2cd2a26ce8631b905",
+      "source": {
+        "name": "Nexus SymBiote inventory findings"
+      },
+      "description": "MCP server 'filesystem' values not bound in this inventory: launch arguments.",
+      "ratings": [
+        {
+          "severity": "low"
+        }
+      ],
+      "analysis": {
+        "state": "in_triage",
+        "detail": "Inventory risk finding; exploitability and deployment impact are unverified. Set NEXUS_SYMBIOTE_SOURCE_BINDING_KEY during collection to detect changes to these values.",
+        "lastUpdated": "2023-11-14T22:13:20+00:00"
+      },
+      "affects": [
+        {
+          "ref": "mcp-server:e37ae79bbad5a2f5937669a336cb72e182b2d23d2f8c693eb6aeef3d2ff0dc25"
+        }
+      ],
+      "properties": [
+        {
+          "name": "nexus-symbiote:assurance",
+          "value": "declared-inventory-finding"
+        },
+        {
+          "name": "nexus-symbiote:category",
+          "value": "completeness"
+        }
+      ]
+    },
+    {
+      "bom-ref": "vulnerability:NEXUS-7921b2e7d3641481fed82ef3384354e022d12222a33d0c76c8315582ebf0f7b5",
+      "id": "NEXUS-7921b2e7d3641481fed82ef3384354e022d12222a33d0c76c8315582ebf0f7b5",
+      "source": {
+        "name": "Nexus SymBiote inventory findings"
+      },
+      "description": "MCP server 'postgres' uses an unpinned package reference (arguments omitted).",
+      "ratings": [
+        {
+          "severity": "high"
+        }
+      ],
+      "analysis": {
+        "state": "in_triage",
+        "detail": "Inventory risk finding; exploitability and deployment impact are unverified. Pin to an exact version and store a hash of the tool schema.",
+        "lastUpdated": "2023-11-14T22:13:20+00:00"
+      },
+      "affects": [
+        {
+          "ref": "mcp-server:e8c8e6c3a3348d5eded17b4e6b3ac9b45c6f40a64e464b480081308f0d25c7c0"
+        }
+      ],
+      "properties": [
+        {
+          "name": "nexus-symbiote:assurance",
+          "value": "declared-inventory-finding"
+        },
+        {
+          "name": "nexus-symbiote:category",
+          "value": "version_pinning"
+        }
+      ]
+    },
+    {
+      "bom-ref": "vulnerability:NEXUS-4012cebc4dcadea583c7af2fb85a53bcf676fb149311b1b592e19dd8ba9f39b2",
+      "id": "NEXUS-4012cebc4dcadea583c7af2fb85a53bcf676fb149311b1b592e19dd8ba9f39b2",
+      "source": {
+        "name": "Nexus SymBiote inventory findings"
+      },
+      "description": "MCP server 'postgres' uses stdio transport (local process).",
+      "ratings": [
+        {
+          "severity": "medium"
+        }
+      ],
+      "analysis": {
+        "state": "in_triage",
+        "detail": "Inventory risk finding; exploitability and deployment impact are unverified. Ensure the command binary is integrity-checked.",
+        "lastUpdated": "2023-11-14T22:13:20+00:00"
+      },
+      "affects": [
+        {
+          "ref": "mcp-server:e8c8e6c3a3348d5eded17b4e6b3ac9b45c6f40a64e464b480081308f0d25c7c0"
+        }
+      ],
+      "properties": [
+        {
+          "name": "nexus-symbiote:assurance",
+          "value": "declared-inventory-finding"
+        },
+        {
+          "name": "nexus-symbiote:category",
+          "value": "local_process"
+        }
+      ]
+    },
+    {
+      "bom-ref": "vulnerability:NEXUS-ff9e901b8a1adf7bcf3b86b7a6a0537e3f65d6cd5f3110b187253ec51fa4e845",
+      "id": "NEXUS-ff9e901b8a1adf7bcf3b86b7a6a0537e3f65d6cd5f3110b187253ec51fa4e845",
+      "source": {
+        "name": "Nexus SymBiote inventory findings"
+      },
+      "description": "MCP server 'postgres' values not bound in this inventory: environment values.",
+      "ratings": [
+        {
+          "severity": "low"
+        }
+      ],
+      "analysis": {
+        "state": "in_triage",
+        "detail": "Inventory risk finding; exploitability and deployment impact are unverified. Set NEXUS_SYMBIOTE_SOURCE_BINDING_KEY during collection to detect changes to these values.",
+        "lastUpdated": "2023-11-14T22:13:20+00:00"
+      },
+      "affects": [
+        {
+          "ref": "mcp-server:e8c8e6c3a3348d5eded17b4e6b3ac9b45c6f40a64e464b480081308f0d25c7c0"
+        }
+      ],
+      "properties": [
+        {
+          "name": "nexus-symbiote:assurance",
+          "value": "declared-inventory-finding"
+        },
+        {
+          "name": "nexus-symbiote:category",
+          "value": "completeness"
+        }
+      ]
+    },
+    {
+      "bom-ref": "vulnerability:NEXUS-d24f1ce6e913ea11da2d1f914f742397c7ae2dafeb55bf2dddf40bafedc673db",
+      "id": "NEXUS-d24f1ce6e913ea11da2d1f914f742397c7ae2dafeb55bf2dddf40bafedc673db",
+      "source": {
+        "name": "Nexus SymBiote inventory findings"
+      },
+      "description": "Model 'embeddings.bin' has evidence of a potentially code-executing serialization or loader.",
+      "ratings": [
+        {
+          "severity": "critical"
+        }
+      ],
+      "analysis": {
+        "state": "in_triage",
+        "detail": "Inventory risk finding; exploitability and deployment impact are unverified. Convert to SafeTensors. Block pickle/pt/pth in production.",
+        "lastUpdated": "2023-11-14T22:13:20+00:00"
+      },
+      "affects": [
+        {
+          "ref": "model:data/raw/embeddings.bin"
+        }
+      ],
+      "properties": [
+        {
+          "name": "nexus-symbiote:artifactDigest",
+          "value": "sha256:83ee47245398adee79bd9c0a8bc57b821e92aba10f5f9ade8a5d1fae4d8c4302"
+        },
+        {
+          "name": "nexus-symbiote:assurance",
+          "value": "declared-inventory-finding"
+        },
+        {
+          "name": "nexus-symbiote:category",
+          "value": "serialization_format"
+        },
+        {
+          "name": "nexus-symbiote:weightDigest",
+          "value": "sha256:83ee47245398adee79bd9c0a8bc57b821e92aba10f5f9ade8a5d1fae4d8c4302"
+        }
+      ]
+    },
+    {
+      "bom-ref": "vulnerability:NEXUS-0d05156e6da2eda58088432a229d17894f17f9c5d951e76b15a1e2badf9d0dda",
+      "id": "NEXUS-0d05156e6da2eda58088432a229d17894f17f9c5d951e76b15a1e2badf9d0dda",
+      "source": {
+        "name": "Nexus SymBiote inventory findings"
+      },
+      "description": "Model 'embeddings.bin' has no verified artifact-bound signature (signature-not-found).",
+      "ratings": [
+        {
+          "severity": "high"
+        }
+      ],
+      "analysis": {
+        "state": "in_triage",
+        "detail": "Inventory risk finding; exploitability and deployment impact are unverified. Pin the SHA-256 of every weight file in an operator signature policy, or sign each one with a Sigstore message signature (sigstore sign) and name its bundle and signer there. OpenSSF Model Signing (DSSE) bundles are not verified yet.",
+        "lastUpdated": "2023-11-14T22:13:20+00:00"
+      },
+      "affects": [
+        {
+          "ref": "model:data/raw/embeddings.bin"
+        }
+      ],
+      "properties": [
+        {
+          "name": "nexus-symbiote:artifactDigest",
+          "value": "sha256:83ee47245398adee79bd9c0a8bc57b821e92aba10f5f9ade8a5d1fae4d8c4302"
+        },
+        {
+          "name": "nexus-symbiote:assurance",
+          "value": "declared-inventory-finding"
+        },
+        {
+          "name": "nexus-symbiote:category",
+          "value": "signing_status"
+        },
+        {
+          "name": "nexus-symbiote:weightDigest",
+          "value": "sha256:83ee47245398adee79bd9c0a8bc57b821e92aba10f5f9ade8a5d1fae4d8c4302"
+        }
+      ]
+    },
+    {
+      "bom-ref": "vulnerability:NEXUS-21f98d60585805187690bc5bee20d45e5f91dc9e4e165c8dddbdbf60bf60dd35",
+      "id": "NEXUS-21f98d60585805187690bc5bee20d45e5f91dc9e4e165c8dddbdbf60bf60dd35",
+      "source": {
+        "name": "Nexus SymBiote inventory findings"
+      },
+      "description": "Model 'model.safetensors' has no verified artifact-bound signature (signature-not-found).",
+      "ratings": [
+        {
+          "severity": "high"
+        }
+      ],
+      "analysis": {
+        "state": "in_triage",
+        "detail": "Inventory risk finding; exploitability and deployment impact are unverified. Pin the SHA-256 of every weight file in an operator signature policy, or sign each one with a Sigstore message signature (sigstore sign) and name its bundle and signer there. OpenSSF Model Signing (DSSE) bundles are not verified yet.",
+        "lastUpdated": "2023-11-14T22:13:20+00:00"
+      },
+      "affects": [
+        {
+          "ref": "model:models/classifier/model.safetensors"
+        }
+      ],
+      "properties": [
+        {
+          "name": "nexus-symbiote:artifactDigest",
+          "value": "sha256:5bdeef2029fa7ebfc5507027c5060f6557fd4187cad5cf02cded1eecd1a977f7"
+        },
+        {
+          "name": "nexus-symbiote:assurance",
+          "value": "declared-inventory-finding"
+        },
+        {
+          "name": "nexus-symbiote:category",
+          "value": "signing_status"
+        },
+        {
+          "name": "nexus-symbiote:tensorMetadataDigest",
+          "value": "sha256:870460893113ba07dcaa3a1fd10c4e56e0b0f8766e208172246d6edf2e8c7ef1"
+        },
+        {
+          "name": "nexus-symbiote:weightDigest",
+          "value": "sha256:5bdeef2029fa7ebfc5507027c5060f6557fd4187cad5cf02cded1eecd1a977f7"
+        }
+      ]
+    },
+    {
+      "bom-ref": "vulnerability:NEXUS-bb07e468db3ac2b33ac9cb7046956fab16287324163cf3416effd9902d87f9ea",
+      "id": "NEXUS-bb07e468db3ac2b33ac9cb7046956fab16287324163cf3416effd9902d87f9ea",
+      "source": {
+        "name": "Nexus SymBiote inventory findings"
+      },
+      "description": "Model 'intent.pkl' has evidence of a potentially code-executing serialization or loader.",
+      "ratings": [
+        {
+          "severity": "critical"
+        }
+      ],
+      "analysis": {
+        "state": "in_triage",
+        "detail": "Inventory risk finding; exploitability and deployment impact are unverified. Convert to SafeTensors. Block pickle/pt/pth in production.",
+        "lastUpdated": "2023-11-14T22:13:20+00:00"
+      },
+      "affects": [
+        {
+          "ref": "model:models/legacy/intent.pkl"
+        }
+      ],
+      "properties": [
+        {
+          "name": "nexus-symbiote:artifactDigest",
+          "value": "sha256:9e1aae1cca74c27bd2903263856ba049f3854d8a0605f5efa7c2ad9162dfffed"
+        },
+        {
+          "name": "nexus-symbiote:assurance",
+          "value": "declared-inventory-finding"
+        },
+        {
+          "name": "nexus-symbiote:category",
+          "value": "serialization_format"
+        },
+        {
+          "name": "nexus-symbiote:weightDigest",
+          "value": "sha256:9e1aae1cca74c27bd2903263856ba049f3854d8a0605f5efa7c2ad9162dfffed"
+        }
+      ]
+    },
+    {
+      "bom-ref": "vulnerability:NEXUS-df12add47bf486136a9d6000c19344ba65ad92d6d6a2b5e59d79b8b876a3faec",
+      "id": "NEXUS-df12add47bf486136a9d6000c19344ba65ad92d6d6a2b5e59d79b8b876a3faec",
+      "source": {
+        "name": "Nexus SymBiote inventory findings"
+      },
+      "description": "Model 'intent.pkl' has no verified artifact-bound signature (signature-not-found).",
+      "ratings": [
+        {
+          "severity": "high"
+        }
+      ],
+      "analysis": {
+        "state": "in_triage",
+        "detail": "Inventory risk finding; exploitability and deployment impact are unverified. Pin the SHA-256 of every weight file in an operator signature policy, or sign each one with a Sigstore message signature (sigstore sign) and name its bundle and signer there. OpenSSF Model Signing (DSSE) bundles are not verified yet.",
+        "lastUpdated": "2023-11-14T22:13:20+00:00"
+      },
+      "affects": [
+        {
+          "ref": "model:models/legacy/intent.pkl"
+        }
+      ],
+      "properties": [
+        {
+          "name": "nexus-symbiote:artifactDigest",
+          "value": "sha256:9e1aae1cca74c27bd2903263856ba049f3854d8a0605f5efa7c2ad9162dfffed"
+        },
+        {
+          "name": "nexus-symbiote:assurance",
+          "value": "declared-inventory-finding"
+        },
+        {
+          "name": "nexus-symbiote:category",
+          "value": "signing_status"
+        },
+        {
+          "name": "nexus-symbiote:weightDigest",
+          "value": "sha256:9e1aae1cca74c27bd2903263856ba049f3854d8a0605f5efa7c2ad9162dfffed"
+        }
+      ]
+    },
+    {
+      "bom-ref": "vulnerability:NEXUS-e154b084860dd562efd1d79c72a3a02d4d8f02c3fd8585a872ee8e7a7762425b",
+      "id": "NEXUS-e154b084860dd562efd1d79c72a3a02d4d8f02c3fd8585a872ee8e7a7762425b",
+      "source": {
+        "name": "Nexus SymBiote inventory findings"
+      },
+      "description": "Model 'intent.pt' has evidence of a potentially code-executing serialization or loader.",
+      "ratings": [
+        {
+          "severity": "critical"
+        }
+      ],
+      "analysis": {
+        "state": "in_triage",
+        "detail": "Inventory risk finding; exploitability and deployment impact are unverified. Convert to SafeTensors. Block pickle/pt/pth in production.",
+        "lastUpdated": "2023-11-14T22:13:20+00:00"
+      },
+      "affects": [
+        {
+          "ref": "model:models/legacy/intent.pt"
+        }
+      ],
+      "properties": [
+        {
+          "name": "nexus-symbiote:artifactDigest",
+          "value": "sha256:90d72e0bfe091224a075ec8d66d9ab989d874bbeca15431794c8eb9894ad3734"
+        },
+        {
+          "name": "nexus-symbiote:assurance",
+          "value": "declared-inventory-finding"
+        },
+        {
+          "name": "nexus-symbiote:category",
+          "value": "serialization_format"
+        },
+        {
+          "name": "nexus-symbiote:weightDigest",
+          "value": "sha256:90d72e0bfe091224a075ec8d66d9ab989d874bbeca15431794c8eb9894ad3734"
+        }
+      ]
+    },
+    {
+      "bom-ref": "vulnerability:NEXUS-421b7bfc634b7bc8fd445ed35343e84695a2032e5742bfe95e41542b496df9f7",
+      "id": "NEXUS-421b7bfc634b7bc8fd445ed35343e84695a2032e5742bfe95e41542b496df9f7",
+      "source": {
+        "name": "Nexus SymBiote inventory findings"
+      },
+      "description": "Model 'intent.pt' has no verified artifact-bound signature (signature-not-found).",
+      "ratings": [
+        {
+          "severity": "high"
+        }
+      ],
+      "analysis": {
+        "state": "in_triage",
+        "detail": "Inventory risk finding; exploitability and deployment impact are unverified. Pin the SHA-256 of every weight file in an operator signature policy, or sign each one with a Sigstore message signature (sigstore sign) and name its bundle and signer there. OpenSSF Model Signing (DSSE) bundles are not verified yet.",
+        "lastUpdated": "2023-11-14T22:13:20+00:00"
+      },
+      "affects": [
+        {
+          "ref": "model:models/legacy/intent.pt"
+        }
+      ],
+      "properties": [
+        {
+          "name": "nexus-symbiote:artifactDigest",
+          "value": "sha256:90d72e0bfe091224a075ec8d66d9ab989d874bbeca15431794c8eb9894ad3734"
+        },
+        {
+          "name": "nexus-symbiote:assurance",
+          "value": "declared-inventory-finding"
+        },
+        {
+          "name": "nexus-symbiote:category",
+          "value": "signing_status"
+        },
+        {
+          "name": "nexus-symbiote:weightDigest",
+          "value": "sha256:90d72e0bfe091224a075ec8d66d9ab989d874bbeca15431794c8eb9894ad3734"
+        }
+      ]
+    },
+    {
+      "bom-ref": "vulnerability:NEXUS-643e85265ab9334b82bb6266123c963113d9411f54f7782eb43ddd8615496e81",
+      "id": "NEXUS-643e85265ab9334b82bb6266123c963113d9411f54f7782eb43ddd8615496e81",
+      "source": {
+        "name": "Nexus SymBiote inventory findings"
+      },
+      "description": "Model 'acme-intent-tiny.Q8_0.gguf' format/loader safety could not be established.",
+      "ratings": [
+        {
+          "severity": "high"
+        }
+      ],
+      "analysis": {
+        "state": "in_triage",
+        "detail": "Inventory risk finding; exploitability and deployment impact are unverified. Validate the actual container and the specific loader before admission.",
+        "lastUpdated": "2023-11-14T22:13:20+00:00"
+      },
+      "affects": [
+        {
+          "ref": "model:models/llm/acme-intent-tiny.Q8_0.gguf"
+        }
+      ],
+      "properties": [
+        {
+          "name": "nexus-symbiote:artifactDigest",
+          "value": "sha256:46cac5ddd076c4f843546daacd3586af7beaa78211b614c9c778868979a30c50"
+        },
+        {
+          "name": "nexus-symbiote:assurance",
+          "value": "declared-inventory-finding"
+        },
+        {
+          "name": "nexus-symbiote:category",
+          "value": "serialization_format_unknown"
+        },
+        {
+          "name": "nexus-symbiote:weightDigest",
+          "value": "sha256:46cac5ddd076c4f843546daacd3586af7beaa78211b614c9c778868979a30c50"
+        }
+      ]
+    },
+    {
+      "bom-ref": "vulnerability:NEXUS-cf2e415f64baad16d6f2304e9beade634738b9099fc5c5f5a43c55f51de15b0b",
+      "id": "NEXUS-cf2e415f64baad16d6f2304e9beade634738b9099fc5c5f5a43c55f51de15b0b",
+      "source": {
+        "name": "Nexus SymBiote inventory findings"
+      },
+      "description": "Model 'acme-intent-tiny.Q8_0.gguf' has no verified artifact-bound signature (signature-not-found).",
+      "ratings": [
+        {
+          "severity": "high"
+        }
+      ],
+      "analysis": {
+        "state": "in_triage",
+        "detail": "Inventory risk finding; exploitability and deployment impact are unverified. Pin the SHA-256 of every weight file in an operator signature policy, or sign each one with a Sigstore message signature (sigstore sign) and name its bundle and signer there. OpenSSF Model Signing (DSSE) bundles are not verified yet.",
+        "lastUpdated": "2023-11-14T22:13:20+00:00"
+      },
+      "affects": [
+        {
+          "ref": "model:models/llm/acme-intent-tiny.Q8_0.gguf"
+        }
+      ],
+      "properties": [
+        {
+          "name": "nexus-symbiote:artifactDigest",
+          "value": "sha256:46cac5ddd076c4f843546daacd3586af7beaa78211b614c9c778868979a30c50"
+        },
+        {
+          "name": "nexus-symbiote:assurance",
+          "value": "declared-inventory-finding"
+        },
+        {
+          "name": "nexus-symbiote:category",
+          "value": "signing_status"
+        },
+        {
+          "name": "nexus-symbiote:weightDigest",
+          "value": "sha256:46cac5ddd076c4f843546daacd3586af7beaa78211b614c9c778868979a30c50"
+        }
+      ]
+    },
+    {
+      "bom-ref": "vulnerability:NEXUS-aaf155305eb31818c58074207174560c9c2d171296e899875da35028853dab32",
+      "id": "NEXUS-aaf155305eb31818c58074207174560c9c2d171296e899875da35028853dab32",
+      "source": {
+        "name": "Nexus SymBiote inventory findings"
+      },
+      "description": "Vector store 'pinecone' referenced by environment variable names.",
+      "ratings": [
+        {
+          "severity": "info"
+        }
+      ],
+      "analysis": {
+        "state": "in_triage",
+        "detail": "Inventory risk finding; exploitability and deployment impact are unverified. Document this reference and its deployment-specific provenance.",
+        "lastUpdated": "2023-11-14T22:13:20+00:00"
+      },
+      "affects": [
+        {
+          "ref": "rag:env-pinecone"
+        }
+      ],
+      "properties": [
+        {
+          "name": "nexus-symbiote:assurance",
+          "value": "declared-inventory-finding"
+        },
+        {
+          "name": "nexus-symbiote:category",
+          "value": "rag_discovery"
+        }
+      ]
+    },
+    {
+      "bom-ref": "vulnerability:NEXUS-4306ac1f7a993065852ac32877012a28970cd6a6665a03b55285513d4b1847c9",
+      "id": "NEXUS-4306ac1f7a993065852ac32877012a28970cd6a6665a03b55285513d4b1847c9",
+      "source": {
+        "name": "Nexus SymBiote inventory findings"
+      },
+      "description": "Vector store library 'chroma' imported in Python code.",
+      "ratings": [
+        {
+          "severity": "info"
+        }
+      ],
+      "analysis": {
+        "state": "in_triage",
+        "detail": "Inventory risk finding; exploitability and deployment impact are unverified. Document whether this reference is used by the deployment.",
+        "lastUpdated": "2023-11-14T22:13:20+00:00"
+      },
+      "affects": [
+        {
+          "ref": "rag:import-chroma"
+        }
+      ],
+      "properties": [
+        {
+          "name": "nexus-symbiote:assurance",
+          "value": "declared-inventory-finding"
+        },
+        {
+          "name": "nexus-symbiote:category",
+          "value": "rag_discovery"
+        }
+      ]
+    },
+    {
+      "bom-ref": "vulnerability:NEXUS-aa3252030d2d152a966b1ba19e6a1165dcd61aadfe912665834452c02d9440d9",
+      "id": "NEXUS-aa3252030d2d152a966b1ba19e6a1165dcd61aadfe912665834452c02d9440d9",
+      "source": {
+        "name": "Nexus SymBiote inventory findings"
+      },
+      "description": "Vector store library 'pinecone' imported in Python code.",
+      "ratings": [
+        {
+          "severity": "info"
+        }
+      ],
+      "analysis": {
+        "state": "in_triage",
+        "detail": "Inventory risk finding; exploitability and deployment impact are unverified. Document whether this reference is used by the deployment.",
+        "lastUpdated": "2023-11-14T22:13:20+00:00"
+      },
+      "affects": [
+        {
+          "ref": "rag:import-pinecone"
+        }
+      ],
+      "properties": [
+        {
+          "name": "nexus-symbiote:assurance",
+          "value": "declared-inventory-finding"
+        },
+        {
+          "name": "nexus-symbiote:category",
+          "value": "rag_discovery"
+        }
+      ]
+    },
+    {
+      "bom-ref": "vulnerability:NEXUS-bf0b357f92cb28609f71be0a41a97be80896dd3b1353db8644de722dd4573496",
+      "id": "NEXUS-bf0b357f92cb28609f71be0a41a97be80896dd3b1353db8644de722dd4573496",
+      "source": {
+        "name": "Nexus SymBiote inventory findings"
+      },
+      "description": "Docker image 'ollama/ollama:latest' lacks an immutable digest pin.",
+      "ratings": [
+        {
+          "severity": "high"
+        }
+      ],
+      "analysis": {
+        "state": "in_triage",
+        "detail": "Inventory risk finding; exploitability and deployment impact are unverified. Pin to a SHA256 artifact digest and verify its provenance.",
+        "lastUpdated": "2023-11-14T22:13:20+00:00"
+      },
+      "affects": [
+        {
+          "ref": "registry:docker/ollama/ollama:latest"
+        }
+      ],
+      "properties": [
+        {
+          "name": "nexus-symbiote:assurance",
+          "value": "declared-inventory-finding"
+        },
+        {
+          "name": "nexus-symbiote:category",
+          "value": "version_pinning"
+        }
+      ]
+    },
+    {
+      "bom-ref": "vulnerability:NEXUS-91b6f281f1f03880614d3ae99ede21d0cf7b7dca1143707ea2bdc8caf87aa479",
+      "id": "NEXUS-91b6f281f1f03880614d3ae99ede21d0cf7b7dca1143707ea2bdc8caf87aa479",
+      "source": {
+        "name": "Nexus SymBiote inventory findings"
+      },
+      "description": "Docker image 'qdrant/qdrant:v1.12.1' lacks an immutable digest pin.",
+      "ratings": [
+        {
+          "severity": "medium"
+        }
+      ],
+      "analysis": {
+        "state": "in_triage",
+        "detail": "Inventory risk finding; exploitability and deployment impact are unverified. Pin to a SHA256 artifact digest and verify its provenance.",
+        "lastUpdated": "2023-11-14T22:13:20+00:00"
+      },
+      "affects": [
+        {
+          "ref": "registry:docker/qdrant/qdrant:v1.12.1"
+        }
+      ],
+      "properties": [
+        {
+          "name": "nexus-symbiote:assurance",
+          "value": "declared-inventory-finding"
+        },
+        {
+          "name": "nexus-symbiote:category",
+          "value": "mutable_image_tag"
+        }
+      ]
+    },
+    {
+      "bom-ref": "vulnerability:NEXUS-eea9d4d1946caaa7b0af4bdf9d5b78fab56e13c0c859f0966cbf013bec41c0d0",
+      "id": "NEXUS-eea9d4d1946caaa7b0af4bdf9d5b78fab56e13c0c859f0966cbf013bec41c0d0",
+      "source": {
+        "name": "Nexus SymBiote inventory findings"
+      },
+      "description": "'.claude/skills/refund-approver/SKILL.md' contains bidirectional override characters: RIGHT-TO-LEFT OVERRIDE (U+202E) x1. Bidi overrides can make malicious instructions appear as benign text.",
+      "ratings": [
+        {
+          "severity": "critical"
+        }
+      ],
+      "analysis": {
+        "state": "in_triage",
+        "detail": "Inventory risk finding; exploitability and deployment impact are unverified. Remove all bidirectional override characters immediately.",
+        "lastUpdated": "2023-11-14T22:13:20+00:00"
+      },
+      "affects": [
+        {
+          "ref": "skill:.claude/skills/refund-approver/SKILL.md"
+        }
+      ],
+      "properties": [
+        {
+          "name": "nexus-symbiote:artifactDigest",
+          "value": "sha256:24862b721d4c58054ef45da7766b083f857b003678d9dc7674e2640c99bde6f0"
+        },
+        {
+          "name": "nexus-symbiote:assurance",
+          "value": "declared-inventory-finding"
+        },
+        {
+          "name": "nexus-symbiote:category",
+          "value": "bidi_override"
+        }
+      ]
+    },
+    {
+      "bom-ref": "vulnerability:NEXUS-d214940c317bd8d5489c1a0eecf717a20bf09c318f90efc273fb87a7801b7296",
+      "id": "NEXUS-d214940c317bd8d5489c1a0eecf717a20bf09c318f90efc273fb87a7801b7296",
+      "source": {
+        "name": "Nexus SymBiote inventory findings"
+      },
+      "description": "'.claude/skills/refund-approver/SKILL.md' contains 1 HTML or Markdown comment(s) (173 characters of HTML comments) that rendered views hide and agents read. At least one comment contains an instruction, a URL or a home-directory path.",
+      "ratings": [
+        {
+          "severity": "high"
+        }
+      ],
+      "analysis": {
+        "state": "in_triage",
+        "detail": "Inventory risk finding; exploitability and deployment impact are unverified. Review comment text in the raw file; move notes out of agent instructions.",
+        "lastUpdated": "2023-11-14T22:13:20+00:00"
+      },
+      "affects": [
+        {
+          "ref": "skill:.claude/skills/refund-approver/SKILL.md"
+        }
+      ],
+      "properties": [
+        {
+          "name": "nexus-symbiote:artifactDigest",
+          "value": "sha256:24862b721d4c58054ef45da7766b083f857b003678d9dc7674e2640c99bde6f0"
+        },
+        {
+          "name": "nexus-symbiote:assurance",
+          "value": "declared-inventory-finding"
+        },
+        {
+          "name": "nexus-symbiote:category",
+          "value": "hidden_markup"
+        }
+      ]
+    },
+    {
+      "bom-ref": "vulnerability:NEXUS-d752f729d8a6d08527dd9622daf0e3cb1364317e33458a2189f0cab8809789ed",
+      "id": "NEXUS-d752f729d8a6d08527dd9622daf0e3cb1364317e33458a2189f0cab8809789ed",
+      "source": {
+        "name": "Nexus SymBiote inventory findings"
+      },
+      "description": "'.claude/skills/refund-approver/SKILL.md' contains invisible Unicode characters: ZERO WIDTH SPACE (U+200B) x1. These are invisible in most editors and may alter LLM behavior.",
+      "ratings": [
+        {
+          "severity": "high"
+        }
+      ],
+      "analysis": {
+        "state": "in_triage",
+        "detail": "Inventory risk finding; exploitability and deployment impact are unverified. Remove all zero-width characters or document their purpose.",
+        "lastUpdated": "2023-11-14T22:13:20+00:00"
+      },
+      "affects": [
+        {
+          "ref": "skill:.claude/skills/refund-approver/SKILL.md"
+        }
+      ],
+      "properties": [
+        {
+          "name": "nexus-symbiote:artifactDigest",
+          "value": "sha256:24862b721d4c58054ef45da7766b083f857b003678d9dc7674e2640c99bde6f0"
+        },
+        {
+          "name": "nexus-symbiote:assurance",
+          "value": "declared-inventory-finding"
+        },
+        {
+          "name": "nexus-symbiote:category",
+          "value": "invisible_characters"
+        }
+      ]
+    }
+  ],
+  "externalReferences": [
+    {
+      "type": "bom",
+      "url": "urn:cdx:6c24f306-8449-526f-b122-4773d24276a4/1",
+      "comment": "The inventory whose findings this document lists"
+    }
+  ]
+}

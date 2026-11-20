@@ -319,6 +319,78 @@ def test_each_path_is_a_shortest_one_whichever_route_is_found_first():
     ]
 
 
+def _routes(view) -> list[list[str]]:
+    return sorted([view.nodes[index].ref for index in path.nodes] for path in view.paths)
+
+
+def test_a_source_that_reaches_no_sink_is_the_first_left_unsearched():
+    # An imported discovery report can add hundreds of agents. A rating below high gives
+    # each a finding and makes none a sink.
+    alone = [
+        AgentComponent(
+            bom_ref=f"a{index:04d}", name=f"a{index:04d}", risks=[finding(RiskSeverity.MEDIUM)]
+        )
+        for index in range(MAX_SOURCES + 50)
+    ]
+    wired = AgentComponent(bom_ref="y", name="y", tool_refs=["t0000"])
+    rated = AgentComponent(bom_ref="z", name="z", risks=[finding(RiskSeverity.HIGH)])
+    capped = view_of(AIBOM(components=[*alone, wired, rated, *sink_tools(1)]))
+    assert (capped.sources, capped.sources_omitted) == (MAX_SOURCES + 52, 52)
+    assert _routes(capped) == [["y", "t0000"], ["z"]]
+
+
+def test_an_edge_that_leads_to_no_sink_does_not_keep_a_source_ahead_of_one_with_a_path():
+    # A report whose entries depend on one another, on an unrated entry or on themselves.
+    quiet = ToolComponent(bom_ref="quiet", name="quiet")
+    ring = [
+        AgentComponent(bom_ref=f"a{index:04d}", name=f"a{index:04d}", tool_refs=["quiet"])
+        for index in range(MAX_SOURCES + 50)
+    ]
+    edges = [
+        DependencyEdge(
+            source_ref=f"a{index:04d}",
+            target_ref=f"a{(index + 1) % len(ring):04d}",
+            relationship="depends-on",
+        )
+        for index in range(len(ring))
+    ]
+    wired = AgentComponent(bom_ref="y", name="y", tool_refs=["t0000"])
+    view = view_of(AIBOM(components=[*ring, wired, quiet, *sink_tools(1)], dependencies=edges))
+    assert (view.sources, view.sources_omitted) == (MAX_SOURCES + 51, 51)
+    assert _routes(view) == [["y", "t0000"]]
+
+
+def test_an_ide_agent_that_is_a_sink_by_its_class_is_searched_before_idle_ones():
+    idle = [
+        IDEAgentComponent(bom_ref=f"i{index:04d}", name=f"i{index:04d}", ide_type="claude-code")
+        for index in range(MAX_SOURCES + 50)
+    ]
+    bypass = IDEAgentComponent(
+        bom_ref="z", name="z", ide_type="claude-code", permission_mode="bypassPermissions"
+    )
+    view = view_of(AIBOM(components=[*idle, bypass]))
+    assert (view.sources, view.sources_omitted) == (MAX_SOURCES + 51, 51)
+    assert _routes(view) == [["z"]]
+
+
+def test_sources_with_a_path_keep_their_order_at_the_cut():
+    # Past 200 sources that each have a path, the first 200 in node order are searched,
+    # whether a source is wired to a sink or is one itself.
+    mixed = [
+        AgentComponent(bom_ref=f"a{index:04d}", name=f"a{index:04d}", tool_refs=["t0000"])
+        if index % 2
+        else AgentComponent(
+            bom_ref=f"a{index:04d}", name=f"a{index:04d}", risks=[finding(RiskSeverity.HIGH)]
+        )
+        for index in range(MAX_SOURCES + 50)
+    ]
+    view = view_of(AIBOM(components=[*mixed, *sink_tools(1)]))
+    assert (view.sources, view.sources_omitted) == (MAX_SOURCES + 50, 50)
+    assert {view.nodes[path.nodes[0]].ref for path in view.paths} == {
+        f"a{index:04d}" for index in range(MAX_SOURCES)
+    }
+
+
 def test_a_source_that_is_itself_a_sink_has_a_path_of_length_zero():
     agent = IDEAgentComponent(
         bom_ref="ide",
@@ -476,6 +548,23 @@ def test_coverage_without_a_claim_is_unknown():
     coverage = view_of(AIBOM()).coverage
     assert (coverage.status, coverage.collection) == ("unknown", "unknown")
     assert coverage.gaps == ("AIBOM has no completeness claim — cannot assess coverage.",)
+
+
+def test_a_clipped_gap_keeps_the_record_count_of_a_grouped_failure():
+    failure = "x" * (DETAIL_CHARS + 500)
+    bom = AIBOM(components=[])
+    bom.metadata.completeness = CompletenessClaim(
+        scope="repository", scan_failures=[failure] * 6, surfaces_scanned=["."]
+    )
+    gaps = view_of(bom).coverage.gaps
+    (gap,) = [gap for gap in gaps if gap.endswith(" (recorded 6 times)")]
+    assert len(gap) == DETAIL_CHARS and "…" in gap and gap.startswith("x" * 100)
+    single = AIBOM(components=[])
+    single.metadata.completeness = CompletenessClaim(
+        scope="repository", scan_failures=[failure], surfaces_scanned=["."]
+    )
+    (short,) = [gap for gap in view_of(single).coverage.gaps if gap.startswith("x")]
+    assert len(short) == DETAIL_CHARS and short.endswith("…")
 
 
 def test_scan_failures_make_coverage_incomplete_and_gaps_are_bounded():

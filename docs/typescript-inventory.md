@@ -10,6 +10,34 @@ as `import { "McpServer" as Server }` included) or through a namespace import
 Type-only imports, shadowed constructor parameters and shadowed server variables
 do not establish SDK server bindings.
 
+A server is named by the string literal its constructor declares as `name` in the
+object literal it is given first, as in
+`new McpServer({ name: "analytics-mcp", version: "1.0.0" })`: that is the name
+clients see, and the component reference
+(`mcp-source:<path>:<name>:<line>:<offset>`) carries it too, percent-encoded, so
+`Notes Server 2.0` is `Notes%20Server%202.0` there. The `binding` and
+`declaration_line` properties record the variable the server is bound to and the
+line of its declaration. A later literal `name` entry replaces an earlier one, as
+it does in JavaScript. A name the analysis would have to compute keeps the variable
+as the name and in the reference: a template literal with a substitution, a
+variable, a concatenation, or a `name` entry that a later spread can replace. So
+does an options object with a method, getter, setter, or computed key that is not
+a string literal anywhere in it, under any key, or with an entry keyed `toJSON` or
+`__proto__` in any spelling, because a client that serializes the object calls
+`toJSON`, which such a computed key or a prototype can supply, in place of reading
+the `name` entry. A computed key that is a string literal is that key:
+`{ ['name']: "analytics-mcp" }` is named `analytics-mcp`, and
+`{ name: "analytics-mcp", ['version']: "1" }` too. So does a literal of more than
+128 characters, one with characters other than ASCII letters, digits, `_`, `.`, `-`
+and single spaces between words, one without a letter or digit, one that redaction
+would change, or one that holds a value the scan read from a configuration file and
+does not publish, such as an `env` value
+([MCP servers declared in source](collectors.md#mcp-servers-declared-in-source)).
+A template literal without a substitution is a literal. A store to the name after construction, such as
+`server.name = ...` or `Object.assign(server, ...)`, is not followed; see
+[known limitations](known-limitations.md#mcp-servers-and-tools). Each constructor
+is its own component, so two servers in one file are two, even with the same name.
+
 Each tool record has declared assurance, a digest of its registration call
 (`registration_source_sha256`) and a digest of the whole declaring file
 (`source_sha256`), so editing a handler defined elsewhere in that file changes the
@@ -143,10 +171,16 @@ Collection shares the MCP scanner's pinned filesystem root, path exclusions and
 I/O budgets. It traverses no symbolic links. The text read to find candidate files
 counts toward the MCP collector's [`source-scan-bytes`
 budget](collection-limits.md#limits), 64 MiB by default. Each parsed file is also
-bounded by `syntax-bytes` (256 KiB) and `ts-nodes` (20,000 syntax nodes), by 1,000
-registration calls, and by a 250 ms native parse timeout and a 2 s analysis
-deadline, which grow in proportion when an operator raises `syntax-bytes` or
-`ts-nodes`. Declaration files (`.d.ts`, `.d.mts`, `.d.cts`), test files
+bounded by `syntax-bytes` (256 KiB), `ts-nodes` (20,000 syntax nodes) and 1,000
+registration calls. No deadline applies to the analysis. One parse may take 250 ms
+of processor time, which grows in proportion when an operator raises `syntax-bytes`
+and which a busy machine does not use up; this is the bound of earlier releases, now counted
+as processor time rather than on the clock. It is for a file the grammar cannot
+parse, whose recovery is unbounded by size; a file that parses takes well under a
+second, and ordinary source reaches the node limit first. See
+[the TypeScript parse time limit](collection-limits.md#the-typescript-parse-time-limit).
+
+Declaration files (`.d.ts`, `.d.mts`, `.d.cts`), test files
 (`.test.` or `.spec.` before any of these suffixes), generated build directories and
 directories named `docs`, `benchmarks` or `examples` are outside this collector's
 supported scope. Limits, invalid TypeScript, absent or incompatible parser

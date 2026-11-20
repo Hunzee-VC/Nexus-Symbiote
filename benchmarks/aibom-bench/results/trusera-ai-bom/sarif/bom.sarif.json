@@ -1,0 +1,2692 @@
+{
+  "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/release-2.1/sarif-2.1/schema/sarif-schema-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "ai-bom",
+          "organization": "Trusera",
+          "version": "3.6.0",
+          "informationUri": "https://github.com/trusera/ai-bom",
+          "rules": [
+            {
+              "id": "ai-bom/huggingface-(import:-transformers)",
+              "shortDescription": {
+                "text": "HuggingFace (import: transformers)"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "ai-bom/anthropic-(import:-anthropic)",
+              "shortDescription": {
+                "text": "Anthropic (import: anthropic)"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "ai-bom/aws-(import:-boto3)",
+              "shortDescription": {
+                "text": "AWS (import: boto3)"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "ai-bom/langchain-(import:-langchain-anthropic)",
+              "shortDescription": {
+                "text": "LangChain (import: langchain_anthropic)"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "ai-bom/openai-(import:-openai)",
+              "shortDescription": {
+                "text": "OpenAI (import: openai)"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "ai-bom/huggingface-(import:-sentence-transformers)",
+              "shortDescription": {
+                "text": "HuggingFace (import: sentence_transformers)"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "ai-bom/anthropic-api-call:-messages-api",
+              "shortDescription": {
+                "text": "Anthropic API call: Messages API"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "ai-bom/model-reference:-gpt-4o-mini",
+              "shortDescription": {
+                "text": "Model reference: gpt-4o-mini"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "ai-bom/model-reference:-claude-sonnet-4-5",
+              "shortDescription": {
+                "text": "Model reference: claude-sonnet-4-5"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "ai-bom/model-reference:-gpt-4o-prod",
+              "shortDescription": {
+                "text": "Model reference: gpt-4o-prod"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "ai-bom/model-reference:-claude-haiku-4-5",
+              "shortDescription": {
+                "text": "Model reference: claude-haiku-4-5"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "ai-bom/langgraph-(import:-langgraph)",
+              "shortDescription": {
+                "text": "LangGraph (import: langgraph)"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "ai-bom/langchain-(import:-langchain-core)",
+              "shortDescription": {
+                "text": "LangChain (import: langchain_core)"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "ai-bom/crewai-tool-definition:-lookup-customer",
+              "shortDescription": {
+                "text": "CrewAI tool_definition: lookup_customer"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "ai-bom/crewai-tool-definition:-issue-refund",
+              "shortDescription": {
+                "text": "CrewAI tool_definition: issue_refund"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "ai-bom/crewai-tool-definition:-search-kb",
+              "shortDescription": {
+                "text": "CrewAI tool_definition: search_kb"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "ai-bom/chromadb-(import:-chromadb)",
+              "shortDescription": {
+                "text": "ChromaDB (import: chromadb)"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "ai-bom/pinecone-(import:-pinecone)",
+              "shortDescription": {
+                "text": "Pinecone (import: pinecone)"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "ai-bom/mcp",
+              "shortDescription": {
+                "text": "mcp"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "ai-bom/chromadb",
+              "shortDescription": {
+                "text": "chromadb"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "ai-bom/langgraph",
+              "shortDescription": {
+                "text": "langgraph"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "ai-bom/@anthropic-ai/sdk",
+              "shortDescription": {
+                "text": "@anthropic-ai/sdk"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "ai-bom/anthropic",
+              "shortDescription": {
+                "text": "anthropic"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "ai-bom/boto3",
+              "shortDescription": {
+                "text": "boto3"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "ai-bom/openai",
+              "shortDescription": {
+                "text": "openai"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "ai-bom/langchain",
+              "shortDescription": {
+                "text": "langchain"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "ai-bom/transformers",
+              "shortDescription": {
+                "text": "transformers"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "ai-bom/pinecone",
+              "shortDescription": {
+                "text": "pinecone"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "ai-bom/langchain-core",
+              "shortDescription": {
+                "text": "langchain-core"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "ai-bom/langchain-anthropic",
+              "shortDescription": {
+                "text": "langchain-anthropic"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "ai-bom/sentence-transformers",
+              "shortDescription": {
+                "text": "sentence-transformers"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "ai-bom/huggingface-transformers",
+              "shortDescription": {
+                "text": "HuggingFace Transformers"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "ai-bom/huggingface-transformers-model",
+              "shortDescription": {
+                "text": "HuggingFace Transformers Model"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              },
+              "helpUri": "https://github.com/trusera/ai-bom",
+              "fullDescription": {
+                "text": "Model version not pinned (+5)"
+              }
+            },
+            {
+              "id": "ai-bom/aws-bedrock",
+              "shortDescription": {
+                "text": "AWS Bedrock"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "ai-bom/azure-openai",
+              "shortDescription": {
+                "text": "Azure OpenAI"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "ai-bom/langchain-model",
+              "shortDescription": {
+                "text": "LangChain Model"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              },
+              "helpUri": "https://github.com/trusera/ai-bom",
+              "fullDescription": {
+                "text": "Model version not pinned (+5)"
+              }
+            },
+            {
+              "id": "ai-bom/crewai",
+              "shortDescription": {
+                "text": "CrewAI"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              },
+              "helpUri": "https://github.com/trusera/ai-bom",
+              "fullDescription": {
+                "text": "AI dependency not declared in project files (+25)"
+              }
+            },
+            {
+              "id": "ai-bom/qdrant-(qdrant/qdrant)",
+              "shortDescription": {
+                "text": "qdrant (qdrant/qdrant)"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "ai-bom/ollama-(ollama/ollama)",
+              "shortDescription": {
+                "text": "ollama (ollama/ollama)"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "ai-bom/anthropics/claude-code-action-(github-action)",
+              "shortDescription": {
+                "text": "anthropics/claude-code-action (GitHub Action)"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "ai-bom/filesystem-(mcp-server)",
+              "shortDescription": {
+                "text": "filesystem (MCP Server)"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "ai-bom/github-(mcp-server)",
+              "shortDescription": {
+                "text": "github (MCP Server)"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              },
+              "helpUri": "https://github.com/trusera/ai-bom",
+              "fullDescription": {
+                "text": "MCP client connected to unknown server (+20)"
+              }
+            },
+            {
+              "id": "ai-bom/postgres-(mcp-server)",
+              "shortDescription": {
+                "text": "postgres (MCP Server)"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "ai-bom/browser\u001b[2k\u001b[1;32m[verified]\u001b[0m-(mcp-server)",
+              "shortDescription": {
+                "text": "browser\u001b[2K\u001b[1;32m[verified]\u001b[0m (MCP Server)"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "ai-bom/intent.pt",
+              "shortDescription": {
+                "text": "intent.pt"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "ai-bom/model.safetensors",
+              "shortDescription": {
+                "text": "model.safetensors"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "ai-bom/escape.gguf",
+              "shortDescription": {
+                "text": "escape.gguf"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "ai-bom/acme-intent-tiny.q8-0.gguf",
+              "shortDescription": {
+                "text": "acme-intent-tiny.Q8_0.gguf"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "ai-bom/embeddings.bin",
+              "shortDescription": {
+                "text": "embeddings.bin"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "ai-bom/anthropic-endpoint",
+              "shortDescription": {
+                "text": "Anthropic Endpoint"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              },
+              "helpUri": "https://github.com/trusera/ai-bom",
+              "fullDescription": {
+                "text": "Hardcoded API key detected (+30)"
+              }
+            },
+            {
+              "id": "ai-bom/anthropic-api-key",
+              "shortDescription": {
+                "text": "Anthropic API Key"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              },
+              "helpUri": "https://github.com/trusera/ai-bom",
+              "fullDescription": {
+                "text": "Hardcoded API key detected (+30)"
+              }
+            },
+            {
+              "id": "ai-bom/openai-endpoint",
+              "shortDescription": {
+                "text": "OpenAI Endpoint"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              },
+              "helpUri": "https://github.com/trusera/ai-bom",
+              "fullDescription": {
+                "text": "Hardcoded API key detected (+30)"
+              }
+            },
+            {
+              "id": "ai-bom/openai-api-key",
+              "shortDescription": {
+                "text": "OpenAI API Key"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              },
+              "helpUri": "https://github.com/trusera/ai-bom",
+              "fullDescription": {
+                "text": "Hardcoded API key detected (+30)"
+              }
+            },
+            {
+              "id": "ai-bom/huggingface-endpoint",
+              "shortDescription": {
+                "text": "HuggingFace Endpoint"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              },
+              "helpUri": "https://github.com/trusera/ai-bom",
+              "fullDescription": {
+                "text": "Hardcoded API key detected (+30)"
+              }
+            },
+            {
+              "id": "ai-bom/huggingface-api-key",
+              "shortDescription": {
+                "text": "HuggingFace API Key"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              },
+              "helpUri": "https://github.com/trusera/ai-bom",
+              "fullDescription": {
+                "text": "Hardcoded API key detected (+30)"
+              }
+            },
+            {
+              "id": "ai-bom/mcp-server:-filesystem",
+              "shortDescription": {
+                "text": "MCP Server: filesystem"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "ai-bom/mcp-server:-github",
+              "shortDescription": {
+                "text": "MCP Server: github"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "ai-bom/mcp-server:-postgres",
+              "shortDescription": {
+                "text": "MCP Server: postgres"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "ai-bom/mcp-server:-remote-crm",
+              "shortDescription": {
+                "text": "MCP Server: remote-crm"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              },
+              "helpUri": "https://github.com/trusera/ai-bom",
+              "fullDescription": {
+                "text": "MCP client connected to unknown server (+20)"
+              }
+            },
+            {
+              "id": "ai-bom/mcp-server:-browser\u001b[2k\u001b[1;32m[verified]\u001b[0m",
+              "shortDescription": {
+                "text": "MCP Server: browser\u001b[2K\u001b[1;32m[verified]\u001b[0m"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "ai-bom/mcp-server:-deep-nested",
+              "shortDescription": {
+                "text": "MCP Server: deep-nested"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "ai-bom/huggingface-(import:-transformers)",
+          "ruleIndex": 0,
+          "level": "note",
+          "message": {
+            "text": "HuggingFace (import: transformers) | provider=HuggingFace"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "llm_provider",
+            "usage_type": "completion",
+            "source_scanner": "ast"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/training/finetune.py",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 6
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/anthropic-(import:-anthropic)",
+          "ruleIndex": 1,
+          "level": "note",
+          "message": {
+            "text": "Anthropic (import: anthropic) | provider=Anthropic"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "llm_provider",
+            "usage_type": "completion",
+            "source_scanner": "ast"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/agent/llm.py",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 7
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/aws-(import:-boto3)",
+          "ruleIndex": 2,
+          "level": "note",
+          "message": {
+            "text": "AWS (import: boto3) | provider=AWS"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "llm_provider",
+            "usage_type": "completion",
+            "source_scanner": "ast"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/agent/llm.py",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 8
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/langchain-(import:-langchain-anthropic)",
+          "ruleIndex": 3,
+          "level": "note",
+          "message": {
+            "text": "LangChain (import: langchain_anthropic) | provider=LangChain"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "llm_provider",
+            "usage_type": "orchestration",
+            "source_scanner": "ast"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/agent/llm.py",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 9
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/openai-(import:-openai)",
+          "ruleIndex": 4,
+          "level": "note",
+          "message": {
+            "text": "OpenAI (import: openai) | provider=OpenAI"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "llm_provider",
+            "usage_type": "completion",
+            "source_scanner": "ast"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/agent/llm.py",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 10
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/huggingface-(import:-sentence-transformers)",
+          "ruleIndex": 5,
+          "level": "note",
+          "message": {
+            "text": "HuggingFace (import: sentence_transformers) | provider=HuggingFace"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "llm_provider",
+            "usage_type": "embedding",
+            "source_scanner": "ast"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/agent/llm.py",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 11
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/huggingface-(import:-transformers)",
+          "ruleIndex": 0,
+          "level": "note",
+          "message": {
+            "text": "HuggingFace (import: transformers) | provider=HuggingFace"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "llm_provider",
+            "usage_type": "completion",
+            "source_scanner": "ast"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/agent/llm.py",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 12
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/anthropic-api-call:-messages-api",
+          "ruleIndex": 6,
+          "level": "note",
+          "message": {
+            "text": "Anthropic API call: Messages API | provider=Anthropic"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "llm_provider",
+            "usage_type": "completion",
+            "source_scanner": "ast"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/agent/llm.py",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 53
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/model-reference:-gpt-4o-mini",
+          "ruleIndex": 7,
+          "level": "note",
+          "message": {
+            "text": "Model reference: gpt-4o-mini | provider=OpenAI | model=gpt-4o-mini"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "model",
+            "usage_type": "completion",
+            "source_scanner": "ast"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/agent/llm.py",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 24
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/model-reference:-claude-sonnet-4-5",
+          "ruleIndex": 8,
+          "level": "note",
+          "message": {
+            "text": "Model reference: claude-sonnet-4-5 | provider=Anthropic | model=claude-sonnet-4-5"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "model",
+            "usage_type": "completion",
+            "source_scanner": "ast"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/agent/llm.py",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 20
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/model-reference:-gpt-4o-prod",
+          "ruleIndex": 9,
+          "level": "note",
+          "message": {
+            "text": "Model reference: gpt-4o-prod | provider=OpenAI | model=gpt-4o-prod"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "model",
+            "usage_type": "completion",
+            "source_scanner": "ast"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/agent/llm.py",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 29
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/model-reference:-claude-haiku-4-5",
+          "ruleIndex": 10,
+          "level": "note",
+          "message": {
+            "text": "Model reference: claude-haiku-4-5 | provider=Anthropic | model=claude-haiku-4-5"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "model",
+            "usage_type": "completion",
+            "source_scanner": "ast"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/agent/llm.py",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 54
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/langgraph-(import:-langgraph)",
+          "ruleIndex": 11,
+          "level": "note",
+          "message": {
+            "text": "LangGraph (import: langgraph) | provider=LangGraph"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "llm_provider",
+            "usage_type": "orchestration",
+            "source_scanner": "ast"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/agent/graph.py",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 5
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/langchain-(import:-langchain-core)",
+          "ruleIndex": 12,
+          "level": "note",
+          "message": {
+            "text": "LangChain (import: langchain_core) | provider=LangChain"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "llm_provider",
+            "usage_type": "orchestration",
+            "source_scanner": "ast"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/agent/tools.py",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 5
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/crewai-tool-definition:-lookup-customer",
+          "ruleIndex": 13,
+          "level": "note",
+          "message": {
+            "text": "CrewAI tool_definition: lookup_customer | provider=CrewAI"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "agent_framework",
+            "usage_type": "agent",
+            "source_scanner": "ast"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/agent/tools.py",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 10
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/crewai-tool-definition:-issue-refund",
+          "ruleIndex": 14,
+          "level": "note",
+          "message": {
+            "text": "CrewAI tool_definition: issue_refund | provider=CrewAI"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "agent_framework",
+            "usage_type": "agent",
+            "source_scanner": "ast"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/agent/tools.py",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 16
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/crewai-tool-definition:-search-kb",
+          "ruleIndex": 15,
+          "level": "note",
+          "message": {
+            "text": "CrewAI tool_definition: search_kb | provider=CrewAI"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "agent_framework",
+            "usage_type": "agent",
+            "source_scanner": "ast"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/agent/tools.py",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 22
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/huggingface-(import:-transformers)",
+          "ruleIndex": 0,
+          "level": "note",
+          "message": {
+            "text": "HuggingFace (import: transformers) | provider=HuggingFace"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "llm_provider",
+            "usage_type": "completion",
+            "source_scanner": "ast"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/agent/guardrails.py",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 5
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/chromadb-(import:-chromadb)",
+          "ruleIndex": 16,
+          "level": "note",
+          "message": {
+            "text": "ChromaDB (import: chromadb) | provider=ChromaDB"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "llm_provider",
+            "usage_type": "embedding",
+            "source_scanner": "ast"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/agent/retrieval.py",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 7
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/openai-(import:-openai)",
+          "ruleIndex": 4,
+          "level": "note",
+          "message": {
+            "text": "OpenAI (import: openai) | provider=OpenAI"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "llm_provider",
+            "usage_type": "completion",
+            "source_scanner": "ast"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/agent/retrieval.py",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 8
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/pinecone-(import:-pinecone)",
+          "ruleIndex": 17,
+          "level": "note",
+          "message": {
+            "text": "Pinecone (import: pinecone) | provider=Pinecone"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "llm_provider",
+            "usage_type": "embedding",
+            "source_scanner": "ast"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/agent/retrieval.py",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 9
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/huggingface-(import:-transformers)",
+          "ruleIndex": 0,
+          "level": "note",
+          "message": {
+            "text": "HuggingFace (import: transformers) | provider=HuggingFace"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "llm_provider",
+            "usage_type": "completion",
+            "source_scanner": "ast"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": ".claude/skills/triage-ticket/scripts/classify.py",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 2
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/mcp",
+          "ruleIndex": 18,
+          "level": "note",
+          "message": {
+            "text": "mcp | provider=MCP"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "tool",
+            "usage_type": "tool_use",
+            "source_scanner": "code"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": ".",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/chromadb",
+          "ruleIndex": 19,
+          "level": "note",
+          "message": {
+            "text": "chromadb | provider=ChromaDB"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "llm_provider",
+            "usage_type": "embedding",
+            "source_scanner": "code"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": ".",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/langgraph",
+          "ruleIndex": 20,
+          "level": "note",
+          "message": {
+            "text": "langgraph | provider=LangGraph"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "agent_framework",
+            "usage_type": "orchestration",
+            "source_scanner": "code"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": ".",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/@anthropic-ai/sdk",
+          "ruleIndex": 21,
+          "level": "note",
+          "message": {
+            "text": "@anthropic-ai/sdk | provider=Anthropic"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "llm_provider",
+            "usage_type": "completion",
+            "source_scanner": "code"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": ".",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/anthropic",
+          "ruleIndex": 22,
+          "level": "note",
+          "message": {
+            "text": "anthropic | provider=Anthropic"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "llm_provider",
+            "usage_type": "completion",
+            "source_scanner": "code"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": ".",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/boto3",
+          "ruleIndex": 23,
+          "level": "note",
+          "message": {
+            "text": "boto3 | provider=AWS"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "llm_provider",
+            "usage_type": "completion",
+            "source_scanner": "code"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": ".",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/openai",
+          "ruleIndex": 24,
+          "level": "note",
+          "message": {
+            "text": "openai | provider=OpenAI"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "llm_provider",
+            "usage_type": "completion",
+            "source_scanner": "code"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": ".",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/langchain",
+          "ruleIndex": 25,
+          "level": "note",
+          "message": {
+            "text": "langchain | provider=LangChain"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "agent_framework",
+            "usage_type": "orchestration",
+            "source_scanner": "code"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": ".",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/transformers",
+          "ruleIndex": 26,
+          "level": "note",
+          "message": {
+            "text": "transformers | provider=HuggingFace"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "llm_provider",
+            "usage_type": "completion",
+            "source_scanner": "code"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": ".",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/pinecone",
+          "ruleIndex": 27,
+          "level": "note",
+          "message": {
+            "text": "pinecone | provider=Pinecone"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "llm_provider",
+            "usage_type": "embedding",
+            "source_scanner": "code"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": ".",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/langchain-core",
+          "ruleIndex": 28,
+          "level": "note",
+          "message": {
+            "text": "langchain-core | provider=Unknown"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "llm_provider",
+            "usage_type": "unknown",
+            "source_scanner": "code"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": ".",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/langchain-anthropic",
+          "ruleIndex": 29,
+          "level": "note",
+          "message": {
+            "text": "langchain-anthropic | provider=LangChain"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "agent_framework",
+            "usage_type": "orchestration",
+            "source_scanner": "code"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": ".",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/sentence-transformers",
+          "ruleIndex": 30,
+          "level": "note",
+          "message": {
+            "text": "sentence-transformers | provider=HuggingFace"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "llm_provider",
+            "usage_type": "embedding",
+            "source_scanner": "code"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": ".",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/huggingface-transformers",
+          "ruleIndex": 31,
+          "level": "note",
+          "message": {
+            "text": "HuggingFace Transformers | provider=HuggingFace"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "llm_provider",
+            "usage_type": "completion",
+            "source_scanner": "code"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/training/finetune.py",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 6
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/huggingface-transformers-model",
+          "ruleIndex": 32,
+          "level": "note",
+          "message": {
+            "text": "HuggingFace Transformers Model | provider=HuggingFace | model=distilbert-base-uncased | flags=unpinned_model"
+          },
+          "properties": {
+            "risk_score": 5,
+            "component_type": "model",
+            "usage_type": "completion",
+            "source_scanner": "code",
+            "flags": [
+              "unpinned_model"
+            ]
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/training/finetune.py",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 10
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/anthropic",
+          "ruleIndex": 22,
+          "level": "note",
+          "message": {
+            "text": "Anthropic | provider=Anthropic"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "llm_provider",
+            "usage_type": "completion",
+            "source_scanner": "code"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/agent/llm.py",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 7
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/aws-bedrock",
+          "ruleIndex": 33,
+          "level": "note",
+          "message": {
+            "text": "AWS Bedrock | provider=AWS Bedrock"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "llm_provider",
+            "usage_type": "completion",
+            "source_scanner": "code"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/agent/llm.py",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 8
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/langchain",
+          "ruleIndex": 25,
+          "level": "note",
+          "message": {
+            "text": "LangChain | provider=LangChain"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "agent_framework",
+            "usage_type": "orchestration",
+            "source_scanner": "code"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/agent/llm.py",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 9
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/openai",
+          "ruleIndex": 24,
+          "level": "note",
+          "message": {
+            "text": "OpenAI | provider=OpenAI"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "llm_provider",
+            "usage_type": "completion",
+            "source_scanner": "code"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/agent/llm.py",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 10
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/azure-openai",
+          "ruleIndex": 34,
+          "level": "note",
+          "message": {
+            "text": "Azure OpenAI | provider=Azure OpenAI"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "llm_provider",
+            "usage_type": "completion",
+            "source_scanner": "code"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/agent/llm.py",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 10
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/huggingface-transformers",
+          "ruleIndex": 31,
+          "level": "note",
+          "message": {
+            "text": "HuggingFace Transformers | provider=HuggingFace"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "llm_provider",
+            "usage_type": "completion",
+            "source_scanner": "code"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/agent/llm.py",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 12
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/langchain-model",
+          "ruleIndex": 35,
+          "level": "note",
+          "message": {
+            "text": "LangChain Model | provider=LangChain | model=claude-sonnet-4-5 | flags=unpinned_model"
+          },
+          "properties": {
+            "risk_score": 5,
+            "component_type": "model",
+            "usage_type": "orchestration",
+            "source_scanner": "code",
+            "flags": [
+              "unpinned_model"
+            ]
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/agent/llm.py",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 20
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/huggingface-transformers-model",
+          "ruleIndex": 32,
+          "level": "note",
+          "message": {
+            "text": "HuggingFace Transformers Model | provider=HuggingFace | model=distilbert-base-uncased | flags=unpinned_model"
+          },
+          "properties": {
+            "risk_score": 5,
+            "component_type": "model",
+            "usage_type": "completion",
+            "source_scanner": "code",
+            "flags": [
+              "unpinned_model"
+            ]
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/agent/llm.py",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 43
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/huggingface-transformers-model",
+          "ruleIndex": 32,
+          "level": "note",
+          "message": {
+            "text": "HuggingFace Transformers Model | provider=HuggingFace | model=models/classifier | flags=unpinned_model"
+          },
+          "properties": {
+            "risk_score": 5,
+            "component_type": "model",
+            "usage_type": "completion",
+            "source_scanner": "code",
+            "flags": [
+              "unpinned_model"
+            ]
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/agent/llm.py",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 49
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/langgraph",
+          "ruleIndex": 20,
+          "level": "note",
+          "message": {
+            "text": "LangGraph | provider=LangChain"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "agent_framework",
+            "usage_type": "orchestration",
+            "source_scanner": "code"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/agent/graph.py",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 5
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/langchain",
+          "ruleIndex": 25,
+          "level": "note",
+          "message": {
+            "text": "LangChain | provider=LangChain"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "agent_framework",
+            "usage_type": "orchestration",
+            "source_scanner": "code"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/agent/tools.py",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 5
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/crewai",
+          "ruleIndex": 36,
+          "level": "note",
+          "message": {
+            "text": "CrewAI | provider=CrewAI | flags=shadow_ai"
+          },
+          "properties": {
+            "risk_score": 25,
+            "component_type": "agent_framework",
+            "usage_type": "agent",
+            "source_scanner": "code",
+            "flags": [
+              "shadow_ai"
+            ]
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/agent/tools.py",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 10
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/huggingface-transformers",
+          "ruleIndex": 31,
+          "level": "note",
+          "message": {
+            "text": "HuggingFace Transformers | provider=HuggingFace"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "llm_provider",
+            "usage_type": "completion",
+            "source_scanner": "code"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/agent/guardrails.py",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 5
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/openai",
+          "ruleIndex": 24,
+          "level": "note",
+          "message": {
+            "text": "OpenAI | provider=OpenAI"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "llm_provider",
+            "usage_type": "completion",
+            "source_scanner": "code"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/agent/retrieval.py",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 8
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/huggingface-transformers",
+          "ruleIndex": 31,
+          "level": "note",
+          "message": {
+            "text": "HuggingFace Transformers | provider=HuggingFace"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "llm_provider",
+            "usage_type": "completion",
+            "source_scanner": "code"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": ".claude/skills/triage-ticket/scripts/classify.py",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 2
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/qdrant-(qdrant/qdrant)",
+          "ruleIndex": 37,
+          "level": "note",
+          "message": {
+            "text": "qdrant (qdrant/qdrant) | provider=Qdrant"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "container",
+            "usage_type": "unknown",
+            "source_scanner": "docker"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "docker-compose.yml",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/ollama-(ollama/ollama)",
+          "ruleIndex": 38,
+          "level": "note",
+          "message": {
+            "text": "ollama (ollama/ollama) | provider=Ollama"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "container",
+            "usage_type": "unknown",
+            "source_scanner": "docker"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "docker-compose.yml",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/anthropics/claude-code-action-(github-action)",
+          "ruleIndex": 39,
+          "level": "note",
+          "message": {
+            "text": "anthropics/claude-code-action (GitHub Action) | provider=GitHub Actions"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "workflow",
+            "usage_type": "orchestration",
+            "source_scanner": "github-actions"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": ".github/workflows/agent-review.yml",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/filesystem-(mcp-server)",
+          "ruleIndex": 40,
+          "level": "note",
+          "message": {
+            "text": "filesystem (MCP Server) | provider=MCP Filesystem"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "mcp_server",
+            "usage_type": "tool_use",
+            "source_scanner": "mcp-config"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": ".mcp.json",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/github-(mcp-server)",
+          "ruleIndex": 41,
+          "level": "note",
+          "message": {
+            "text": "github (MCP Server) | provider=GitHub | flags=mcp_unknown_server"
+          },
+          "properties": {
+            "risk_score": 20,
+            "component_type": "mcp_server",
+            "usage_type": "tool_use",
+            "source_scanner": "mcp-config",
+            "flags": [
+              "mcp_unknown_server"
+            ]
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": ".mcp.json",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/postgres-(mcp-server)",
+          "ruleIndex": 42,
+          "level": "note",
+          "message": {
+            "text": "postgres (MCP Server) | provider=MCP Database"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "mcp_server",
+            "usage_type": "tool_use",
+            "source_scanner": "mcp-config"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": ".mcp.json",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/browser\u001b[2k\u001b[1;32m[verified]\u001b[0m-(mcp-server)",
+          "ruleIndex": 43,
+          "level": "note",
+          "message": {
+            "text": "browser\u001b[2K\u001b[1;32m[verified]\u001b[0m (MCP Server) | provider=MCP Browser"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "mcp_server",
+            "usage_type": "tool_use",
+            "source_scanner": "mcp-config"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": ".cursor/mcp.json",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/intent.pt",
+          "ruleIndex": 44,
+          "level": "note",
+          "message": {
+            "text": "intent.pt | provider=PyTorch"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "model",
+            "usage_type": "unknown",
+            "source_scanner": "model-file"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "models/legacy/intent.pt",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/model.safetensors",
+          "ruleIndex": 45,
+          "level": "note",
+          "message": {
+            "text": "model.safetensors | provider=HuggingFace"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "model",
+            "usage_type": "unknown",
+            "source_scanner": "model-file"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "models/classifier/model.safetensors",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/escape.gguf",
+          "ruleIndex": 46,
+          "level": "note",
+          "message": {
+            "text": "escape.gguf | provider=llama.cpp"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "model",
+            "usage_type": "unknown",
+            "source_scanner": "model-file"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "/etc/passwd",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/acme-intent-tiny.q8-0.gguf",
+          "ruleIndex": 47,
+          "level": "note",
+          "message": {
+            "text": "acme-intent-tiny.Q8_0.gguf | provider=llama.cpp"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "model",
+            "usage_type": "unknown",
+            "source_scanner": "model-file"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "models/llm/acme-intent-tiny.Q8_0.gguf",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/embeddings.bin",
+          "ruleIndex": 48,
+          "level": "note",
+          "message": {
+            "text": "embeddings.bin | provider=Anthropic"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "model",
+            "usage_type": "unknown",
+            "source_scanner": "model-file"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "data/raw/embeddings.bin",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/anthropic-endpoint",
+          "ruleIndex": 49,
+          "level": "note",
+          "message": {
+            "text": "Anthropic Endpoint | provider=Anthropic | flags=hardcoded_api_key"
+          },
+          "properties": {
+            "risk_score": 30,
+            "component_type": "endpoint",
+            "usage_type": "completion",
+            "source_scanner": "network",
+            "flags": [
+              "hardcoded_api_key"
+            ]
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": ".env",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/anthropic-api-key",
+          "ruleIndex": 50,
+          "level": "note",
+          "message": {
+            "text": "Anthropic API Key | provider=Anthropic | flags=hardcoded_api_key"
+          },
+          "properties": {
+            "risk_score": 30,
+            "component_type": "endpoint",
+            "usage_type": "completion",
+            "source_scanner": "network",
+            "flags": [
+              "hardcoded_api_key"
+            ]
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": ".env",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/openai-endpoint",
+          "ruleIndex": 51,
+          "level": "note",
+          "message": {
+            "text": "OpenAI Endpoint | provider=OpenAI | flags=hardcoded_api_key"
+          },
+          "properties": {
+            "risk_score": 30,
+            "component_type": "endpoint",
+            "usage_type": "completion",
+            "source_scanner": "network",
+            "flags": [
+              "hardcoded_api_key"
+            ]
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": ".env",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 2
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/openai-api-key",
+          "ruleIndex": 52,
+          "level": "note",
+          "message": {
+            "text": "OpenAI API Key | provider=OpenAI | flags=hardcoded_api_key"
+          },
+          "properties": {
+            "risk_score": 30,
+            "component_type": "endpoint",
+            "usage_type": "completion",
+            "source_scanner": "network",
+            "flags": [
+              "hardcoded_api_key"
+            ]
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": ".env",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 2
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/huggingface-endpoint",
+          "ruleIndex": 53,
+          "level": "note",
+          "message": {
+            "text": "HuggingFace Endpoint | provider=HuggingFace | flags=hardcoded_api_key"
+          },
+          "properties": {
+            "risk_score": 30,
+            "component_type": "endpoint",
+            "usage_type": "completion",
+            "source_scanner": "network",
+            "flags": [
+              "hardcoded_api_key"
+            ]
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": ".env",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 3
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/huggingface-api-key",
+          "ruleIndex": 54,
+          "level": "note",
+          "message": {
+            "text": "HuggingFace API Key | provider=HuggingFace | flags=hardcoded_api_key"
+          },
+          "properties": {
+            "risk_score": 30,
+            "component_type": "endpoint",
+            "usage_type": "completion",
+            "source_scanner": "network",
+            "flags": [
+              "hardcoded_api_key"
+            ]
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": ".env",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 3
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/anthropic-endpoint",
+          "ruleIndex": 49,
+          "level": "note",
+          "message": {
+            "text": "Anthropic Endpoint | provider=Anthropic"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "endpoint",
+            "usage_type": "completion",
+            "source_scanner": "network"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": ".env.example",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/openai-endpoint",
+          "ruleIndex": 51,
+          "level": "note",
+          "message": {
+            "text": "OpenAI Endpoint | provider=OpenAI"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "endpoint",
+            "usage_type": "completion",
+            "source_scanner": "network"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": ".env.example",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 2
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/huggingface-endpoint",
+          "ruleIndex": 53,
+          "level": "note",
+          "message": {
+            "text": "HuggingFace Endpoint | provider=HuggingFace"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "endpoint",
+            "usage_type": "completion",
+            "source_scanner": "network"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": ".env.example",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 3
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/mcp-server:-filesystem",
+          "ruleIndex": 55,
+          "level": "note",
+          "message": {
+            "text": "MCP Server: filesystem | provider=MCP"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "mcp_server",
+            "usage_type": "tool_use",
+            "source_scanner": "network"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": ".mcp.json",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/mcp-server:-github",
+          "ruleIndex": 56,
+          "level": "note",
+          "message": {
+            "text": "MCP Server: github | provider=MCP"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "mcp_server",
+            "usage_type": "tool_use",
+            "source_scanner": "network"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": ".mcp.json",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/mcp-server:-postgres",
+          "ruleIndex": 57,
+          "level": "note",
+          "message": {
+            "text": "MCP Server: postgres | provider=MCP"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "mcp_server",
+            "usage_type": "tool_use",
+            "source_scanner": "network"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": ".mcp.json",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/mcp-server:-remote-crm",
+          "ruleIndex": 58,
+          "level": "note",
+          "message": {
+            "text": "MCP Server: remote-crm | provider=MCP | flags=mcp_unknown_server"
+          },
+          "properties": {
+            "risk_score": 20,
+            "component_type": "mcp_server",
+            "usage_type": "tool_use",
+            "source_scanner": "network",
+            "flags": [
+              "mcp_unknown_server"
+            ]
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": ".mcp.json",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/mcp-server:-browser\u001b[2k\u001b[1;32m[verified]\u001b[0m",
+          "ruleIndex": 59,
+          "level": "note",
+          "message": {
+            "text": "MCP Server: browser\u001b[2K\u001b[1;32m[verified]\u001b[0m | provider=MCP"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "mcp_server",
+            "usage_type": "tool_use",
+            "source_scanner": "network"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": ".cursor/mcp.json",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/mcp-server:-deep-nested",
+          "ruleIndex": 60,
+          "level": "note",
+          "message": {
+            "text": "MCP Server: deep-nested | provider=MCP"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "mcp_server",
+            "usage_type": "tool_use",
+            "source_scanner": "network"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "deep/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/.mcp.json",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

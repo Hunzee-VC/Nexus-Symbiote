@@ -1,0 +1,2 @@
+./.config/producttelemetry/ai-finder/client_id
+./.config/producttelemetry/ai-finder/pending_events.json
