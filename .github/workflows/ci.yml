@@ -500,7 +500,8 @@ jobs:
   offline-invariant:
     name: Offline invariant (OS network denied)
     runs-on: ubuntu-24.04
-    timeout-minutes: 35
+    # The same budget as the Tests jobs: slow runners took the suite to 29 minutes.
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -551,7 +552,7 @@ jobs:
                       raise SystemExit(f"Expected kernel egress denial for {addr}")
           PY
               exec setpriv --reuid="$HOST_UID" --regid="$HOST_GID" --clear-groups \
-                timeout --signal=INT --kill-after=30s 30m \
+                timeout --signal=INT --kill-after=30s 45m \
                 "$OFFLINE_PYTHON" -m pytest -vv --strict-skips -o test_timeout=120 2>&1 \
                 | tee "$PYTEST_LOG"
             '

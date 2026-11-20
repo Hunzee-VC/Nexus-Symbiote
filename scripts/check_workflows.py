@@ -325,7 +325,7 @@ REVIEWED_GATE_STEPS: dict[str, dict[str, dict[str, tuple[str, dict[str, str]]]]]
                     '            raise SystemExit(f"Expected kernel egress denial for {addr}")\n'
                     "PY\n"
                     '    exec setpriv --reuid="$HOST_UID" --regid="$HOST_GID" --clear-groups \\\n'
-                    "      timeout --signal=INT --kill-after=30s 30m \\\n"
+                    "      timeout --signal=INT --kill-after=30s 45m \\\n"
                     '      "$OFFLINE_PYTHON" -m pytest -vv --strict-skips -o '
                     "test_timeout=120 2>&1 \\\n"
                     '      | tee "$PYTEST_LOG"\n'
