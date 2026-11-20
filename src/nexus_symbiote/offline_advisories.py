@@ -46,6 +46,7 @@ MAX_DB_FILES = 10_000
 MAX_DB_RECORDS = 100_000
 MAX_CATALOG_BYTES = 16 * 1024 * 1024
 MAX_OFFLINE_COMPONENTS = 50_000
+MAX_OFFLINE_ERRORS = 100
 DEFAULT_MAX_FEED_AGE_DAYS = 30
 MAX_FEED_AGE_DAYS = 36_500
 _FUTURE_TOLERANCE = timedelta(days=1)
@@ -341,13 +342,20 @@ def load_epss_catalog(path: Path) -> tuple[dict[str, _EPSSEntry], str, datetime 
     return index, hash_bytes(data), scored
 
 
-def _range_matches(ecosystem: str, version: str, rng: dict[str, Any]) -> tuple[bool, list[str]]:
-    """Evaluate one OSV range by version intervals (order-independent per OSV spec)."""
+def _range_matches(
+    ecosystem: str, version: str, rng: dict[str, Any]
+) -> tuple[bool, list[str], list[str]]:
+    """Evaluate one OSV range: (in range, fixed versions above it, unparsable upper bounds).
+
+    The queried version and every ``introduced`` must parse. A ``fixed``, ``last_affected``
+    or ``limit`` that does not leaves the version possibly affected: the range matches with
+    that bound reported, unless the lower bound or a parsable upper bound excludes it.
+    """
     raw_type = rng.get("type")
     if raw_type is not None and (
         not isinstance(raw_type, str) or raw_type.upper() not in _SUPPORTED_RANGE_TYPES
     ):
-        return False, []
+        return False, [], []
     events = rng.get("events")
     if not isinstance(events, list):
         raise ValueError("OSV range events are not a list")
@@ -369,9 +377,7 @@ def _range_matches(ecosystem: str, version: str, rng: dict[str, Any]) -> tuple[b
             raise ValueError("OSV range event cannot be parsed")
     intros, fixed_versions, last_affected, limits = found.values()
 
-    if any(lim != "*" and cmp(version, lim) >= 0 for lim in limits):
-        return False, []
-
+    cmp(version, version)
     best_intro: str | None = None
     found_intro = has_zero_intro
     for intro in intros:
@@ -381,37 +387,46 @@ def _range_matches(ecosystem: str, version: str, rng: dict[str, Any]) -> tuple[b
         if best_intro is None or cmp(intro, best_intro) > 0:
             best_intro = intro
     if not found_intro:
-        return False, []
+        return False, [], []
 
-    for fix in fixed_versions:
-        if cmp(fix, version) <= 0 and (best_intro is None or cmp(best_intro, fix) <= 0):
-            return False, []
-    for last in last_affected:
-        if cmp(last, version) < 0 and (best_intro is None or cmp(best_intro, last) <= 0):
-            return False, []
-    return True, [fix for fix in fixed_versions if cmp(fix, version) > 0]
+    bounds = (*fixed_versions, *last_affected, *(lim for lim in limits if lim != "*"))
+    unparsed = [b for b in bounds if _compare_versions(ecosystem, b, b) is None]
+
+    def ends_after_intro(bound: str) -> bool:
+        return bound not in unparsed and (best_intro is None or cmp(best_intro, bound) <= 0)
+
+    if (
+        any(lim != "*" and lim not in unparsed and cmp(version, lim) >= 0 for lim in limits)
+        or any(ends_after_intro(fix) and cmp(fix, version) <= 0 for fix in fixed_versions)
+        or any(ends_after_intro(last) and cmp(last, version) < 0 for last in last_affected)
+    ):
+        return False, [], []
+    fixed_above = [fix for fix in fixed_versions if fix not in unparsed and cmp(fix, version) > 0]
+    return True, fixed_above, [bound[:64] for bound in unparsed]
 
 
 def _matches_affected_version(
     affected: dict[str, Any], ecosystem: str, version: str
-) -> tuple[bool, list[str]]:
-    """Evaluate a package-matched affected block; raise ``ValueError`` when it cannot decide."""
+) -> tuple[bool, list[str], list[str]]:
+    """(matched, fixed, undecided bounds), empty bounds once a listing or range decides."""
     fixed_versions: list[str] = []
     raw_versions, raw_ranges = affected.get("versions", []), affected.get("ranges", [])
     if not isinstance(raw_versions, list) or not isinstance(raw_ranges, list):
         raise ValueError("OSV affected versions or ranges are not a list")
-    matched = any(
-        isinstance(ver, str) and _compare_versions(ecosystem, version, ver) == 0
+    matched = decided = any(
+        isinstance(ver, str) and (ver == version or _compare_versions(ecosystem, version, ver) == 0)
         for ver in raw_versions
     )
+    undecided: list[str] = []
     for rng in raw_ranges:
-        in_range, rng_fixed = _range_matches(
+        in_range, rng_fixed, rng_unparsed = _range_matches(
             ecosystem, version, rng if isinstance(rng, dict) else {}
         )
         if in_range:
-            matched = True
+            matched, decided = True, decided or not rng_unparsed
             fixed_versions.extend(rng_fixed)
-    return matched, sorted(set(fixed_versions))
+            undecided.extend(rng_unparsed)
+    return matched, sorted(set(fixed_versions)), [] if decided else sorted(set(undecided))
 
 
 def _build_package_index(
@@ -436,7 +451,7 @@ def _build_package_index(
 
 
 def _deduplicate_matches(
-    matches: list[tuple[_ParsedAdvisory, list[str]]],
+    matches: list[tuple[_ParsedAdvisory, list[str], list[str]]],
 ) -> list[dict[str, Any]]:
     """Collapse alias pairs into one canonical advisory entry via union-find."""
     parent: dict[str, str] = {}
@@ -447,7 +462,7 @@ def _deduplicate_matches(
             node = parent[node]
         return node
 
-    for adv, _ in matches:
+    for adv, *_ in matches:
         ids = [adv.record_id, *adv.aliases]
         for ident in ids:
             parent.setdefault(ident, ident)
@@ -456,9 +471,9 @@ def _deduplicate_matches(
             if ra != rb:
                 parent[max(ra, rb)] = min(ra, rb)
 
-    grouped: dict[str, list[tuple[_ParsedAdvisory, list[str]]]] = {}
-    for adv, fixed in matches:
-        grouped.setdefault(find(adv.record_id), []).append((adv, fixed))
+    grouped: dict[str, list[tuple[_ParsedAdvisory, list[str], list[str]]]] = {}
+    for match in matches:
+        grouped.setdefault(find(match[0].record_id), []).append(match)
 
     merged: list[dict[str, Any]] = []
     for items in grouped.values():
@@ -467,7 +482,7 @@ def _deduplicate_matches(
         fixed_all: set[str] = set()
         summaries: list[str] = []
         best_severity = "unknown"
-        for adv, fixed in items:
+        for adv, fixed, _ in items:
             matched_ids.add(adv.record_id)
             all_ids.add(adv.record_id)
             all_ids.update(adv.aliases)
@@ -476,6 +491,9 @@ def _deduplicate_matches(
                 summaries.append(adv.summary)
             if _SEVERITY_ORDER[adv.severity] < _SEVERITY_ORDER[best_severity]:
                 best_severity = adv.severity
+        bounds = (
+            sorted({b for *_, bs in items for b in bs})[:16] if all(i[2] for i in items) else []
+        )
         cves = sorted(i for i in all_ids if i.upper().startswith("CVE-"))
         primary_id = cves[0] if cves else sorted(all_ids)[0]
         merged.append(
@@ -488,6 +506,7 @@ def _deduplicate_matches(
                 "base_severity": best_severity,
                 "summary": sorted(set(summaries))[0] if summaries else "",
                 "fixed_versions": sorted(fixed_all),
+                **({"range_undecidable": True, "undecidable_bounds": bounds} if bounds else {}),
             }
         )
     merged.sort(key=lambda entry: entry["id"])
@@ -625,25 +644,26 @@ def match_offline_advisories(
         )
         return report, provenance
 
+    unlisted_errors = 0
     for bom_ref, eco, name, version in targets:
         report.components_checked += 1
         report.queries.append(
             {"component_ref": bom_ref, "ecosystem": eco, "name": name, "version": version}
         )
-        matched_by_adv: dict[str, tuple[_ParsedAdvisory, list[str]]] = {}
+        matched_by_adv: dict[str, tuple[_ParsedAdvisory, list[str], list[str]]] = {}
         for adv, aff in pkg_index.get((eco.lower(), name), ()):
             try:
-                is_match, fixed = _matches_affected_version(aff, eco, version)
+                is_match, fixed, undecided = _matches_affected_version(aff, eco, version)
             except ValueError as exc:
-                report.errors.append(f"{bom_ref}: offline advisory {adv.record_id}: {exc}")
+                unlisted_errors += len(report.errors) >= MAX_OFFLINE_ERRORS
+                if len(report.errors) < MAX_OFFLINE_ERRORS:
+                    report.errors.append(f"{bom_ref}: offline advisory {adv.record_id}: {exc}")
                 continue
             if is_match:
-                existing = matched_by_adv.get(adv.record_id)
-                if existing is None:
-                    matched_by_adv[adv.record_id] = (adv, list(fixed))
-                else:
-                    existing[1].extend(fixed)
-        raw_matches = [(adv, sorted(set(fx))) for adv, fx in matched_by_adv.values()]
+                hit = matched_by_adv.setdefault(adv.record_id, (adv, [], list(undecided)))
+                hit[1].extend(fixed)
+                hit[2][:] = [*hit[2], *undecided] if hit[2] and undecided else []
+        raw_matches = [(a, sorted(set(f)), sorted(set(u))) for a, f, u in matched_by_adv.values()]
         for entry in _deduplicate_matches(raw_matches):
             if len(report.advisories) >= MAX_ADVISORIES:
                 report.errors.append(f"Advisory report limit reached ({MAX_ADVISORIES})")
@@ -678,4 +698,6 @@ def match_offline_advisories(
                 }
             )
             report.advisories.append(entry)
+    if unlisted_errors:
+        report.errors.append(f"{unlisted_errors} more offline advisory errors are not listed")
     return report, provenance

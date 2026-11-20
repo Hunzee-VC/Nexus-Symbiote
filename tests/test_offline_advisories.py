@@ -795,11 +795,12 @@ _FIXED_BEFORE_4 = _transformers_record(
         ),
         _transformers_record(ranges=[{"type": "ECOSYSTEM", "events": [{"introduced": False}]}]),
         _transformers_record(
-            ranges=[{"type": "ECOSYSTEM", "events": [{"introduced": "0"}, {"fixed": "nope!"}]}]
+            ranges=[{"type": "ECOSYSTEM", "events": [{"introduced": "0"}, {"fixed": 5}]}]
         ),
         _transformers_record(
             ranges=[{"type": "ECOSYSTEM", "events": [{"introduced": "0", "fixed": "5"}]}]
         ),
+        _transformers_record(ranges=[{"type": "ECOSYSTEM", "events": [{"introduced": "0"}, {}]}]),
     ],
     ids=[
         "ranges-not-list",
@@ -808,8 +809,9 @@ _FIXED_BEFORE_4 = _transformers_record(
         "events-not-list",
         "introduced-not-version",
         "introduced-bool",
-        "fixed-not-version",
+        "fixed-not-string",
         "two-keys-in-event",
+        "event-without-key",
     ],
 )
 def test_offline_advisories_unevaluable_record_for_the_package_is_incomplete(tmp_path, bad):
@@ -868,3 +870,94 @@ def test_offline_advisories_unevaluable_record_elsewhere_keeps_other_matches_com
         "pkg:pypi:torch@2.0.0: offline advisory GHSA-bad0-bad0-bad0: "
         "OSV affected versions or ranges are not a list"
     ]
+
+
+def _torch_record(*last_affected: str, versions: list[str] | None = None) -> dict:
+    """The PYSEC-2025-193 shape: from 0 to a ``last_affected`` PEP 440 cannot parse."""
+    ranges = [
+        {"type": "ECOSYSTEM", "events": [{"introduced": "0"}, {"last_affected": last}]}
+        for last in last_affected
+    ]
+    affected = {"package": {"ecosystem": "PyPI", "name": "torch"}, "ranges": ranges}
+    return {
+        "id": "PYSEC-2025-193",
+        "modified": MODIFIED,
+        "affected": [{**affected, "versions": versions or []}],
+    }
+
+
+@pytest.mark.parametrize("version", ["2.5.1", "2.7.0"])
+def test_offline_advisories_unparsable_upper_bound_is_a_flagged_match(tmp_path, version):
+    bom = _bom_with_package(name="torch", version=version)
+    bom_path = tmp_path / "aibom.json"
+    bom.save(bom_path)
+    db_file = tmp_path / "osv.json"
+    db_file.write_text(json.dumps([_torch_record("2.6.0-NA", "2.6.0-cu124")]), encoding="utf-8")
+
+    report, _ = match_offline_advisories(bom, db_path=db_file)
+    assert report.complete is True
+    assert report.errors == []
+    assert [
+        (a["id"], a["range_undecidable"], a["undecidable_bounds"]) for a in report.advisories
+    ] == [("PYSEC-2025-193", True, ["2.6.0-NA", "2.6.0-cu124"])]
+
+    # The fixture's fixed date must not age out of the CLI's real-clock feed limit.
+    arguments = ["advisories", str(bom_path), "--offline-db", str(db_file)]
+    res = CliRunner().invoke(main, [*arguments, "--max-feed-age-days", "36500"])
+    assert res.exit_code == 1
+    assert json.loads(res.output)["complete"] is True
+
+
+def test_offline_advisories_exact_listing_decides_before_unparsable_bounds(tmp_path):
+    db_file = tmp_path / "osv.json"
+    db_file.write_text(json.dumps([_torch_record("2.6.0-NA", versions=["2.5.1"])]), "utf-8")
+    listed, _ = match_offline_advisories(
+        _bom_with_package(name="torch", version="2.5.1"), db_path=db_file
+    )
+    assert [a["id"] for a in listed.advisories] == ["PYSEC-2025-193"]
+    assert "range_undecidable" not in listed.advisories[0]
+    unlisted, _ = match_offline_advisories(
+        _bom_with_package(name="torch", version="2.7.0"), db_path=db_file
+    )
+    assert unlisted.advisories[0]["undecidable_bounds"] == ["2.6.0-NA"]
+
+
+@pytest.mark.parametrize(
+    ("events", "version", "bounds"),
+    [
+        ([{"introduced": "0"}, {"fixed": "2.0"}, {"last_affected": "junk!"}], "2.5", None),
+        ([{"introduced": "0"}, {"limit": "2.0"}, {"fixed": "junk!"}], "2.5", None),
+        ([{"introduced": "3.0"}, {"last_affected": "junk!"}], "2.5", None),
+        ([{"introduced": "0"}, {"fixed": "2.0"}, {"last_affected": "junk!"}], "1.5", ["junk!"]),
+        ([{"introduced": "1.0"}, {"limit": "junk!"}], "2.5", ["junk!"]),
+        ([{"introduced": "0"}, {"fixed": "x" * 100}], "2.5", ["x" * 64]),
+    ],
+    ids=["fixed-excludes", "limit-excludes", "below-introduced", "fixed-above", "limit", "long"],
+)
+def test_offline_advisories_parsable_bounds_decide_before_unparsable_ones(
+    tmp_path, events, version, bounds
+):
+    db_file = tmp_path / "osv.json"
+    record = _transformers_record(ranges=[{"type": "ECOSYSTEM", "events": events}])
+    db_file.write_text(json.dumps([record]), encoding="utf-8")
+    report, _ = match_offline_advisories(_bom_with_package(version=version), db_path=db_file)
+    assert report.complete is True
+    assert [a["undecidable_bounds"] for a in report.advisories] == ([bounds] if bounds else [])
+
+
+def test_offline_advisories_bound_the_errors_from_malformed_records(tmp_path):
+    bad = [_transformers_record(f"GHSA-bad0-bad0-{i:04d}", ranges="bad") for i in range(1000)]
+    db_file = tmp_path / "osv.json"
+    db_file.write_text(json.dumps(bad), encoding="utf-8")
+    pins = [_bom_with_package(version=f"4.{minor}.0").components[0] for minor in range(100)]
+
+    report, _ = match_offline_advisories(AIBOM(components=pins), db_path=db_file)
+    assert report.components_checked == 100
+    assert report.complete is False
+    assert len(report.errors) == 101
+    assert report.errors[-1] == "99900 more offline advisory errors are not listed"
+
+    AIBOM(components=pins).save(bom_path := tmp_path / "aibom.json")
+    res = CliRunner().invoke(main, ["advisories", str(bom_path), "--offline-db", str(db_file)])
+    assert res.exit_code == 1
+    assert len(json.loads(res.output)["errors"]) == 101
