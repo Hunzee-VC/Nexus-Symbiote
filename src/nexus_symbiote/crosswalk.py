@@ -605,6 +605,45 @@ CROSSWALK: dict[str, tuple[Reference, ...]] = {
         ),
         _ref(NIST_AI_RMF, "MEASURE-2.7", _EVALUATION),
     ),
+    "identifier_characters": (
+        _ref(
+            CWE,
+            "CWE-451",
+            "A name with control, format or lookalike characters displays differently from "
+            "what the agent and the inventory compare.",
+        ),
+        _ref(
+            CWE,
+            "CWE-1427",
+            "A tool name reaches the model's context with characters that are not neutralized.",
+        ),
+        _ref(
+            OWASP_LLM_2025,
+            "LLM01:2025",
+            "A tool or server name that reads differently to a reviewer than to the model can "
+            "carry injected text.",
+        ),
+        _ref(OWASP_ASI_2026, "ASI01", _HIDDEN_GOAL),
+        _ref(
+            OWASP_LLM_2026,
+            "LLM01:2026",
+            "A tool or server name that reads differently to a reviewer than to the model can "
+            "carry injected text.",
+        ),
+        _ref(
+            MITRE_ATLAS,
+            "AML.T0010.005",
+            "A tool whose name is disguised can stand in for a trusted agent tool.",
+        ),
+        _ref(MITRE_ATLAS, "AML.T0068", _HIDDEN_REVIEW),
+        _ref(
+            MITRE_ATLAS,
+            "AML.T0074",
+            "A lookalike or hidden-character name is a form of name manipulation.",
+        ),
+        _ref(NIST_AI_RMF, "MEASURE-2.7", _EVALUATION),
+        _ref(EU_AI_ACT, "Art. 15", _RESILIENCE),
+    ),
     "hook_commands": (
         _ref(OWASP_ASI_2026, "ASI05", "Commands run automatically on agent events."),
         _ref(

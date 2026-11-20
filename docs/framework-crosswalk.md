@@ -525,6 +525,21 @@ every rule.
 | `nist-ai-rmf-1.0` | MEASURE-2.7 Security and resilience are evaluated | all | Records a security-relevant property of the configuration, an input to evaluating its security. |
 | `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | all | Records a property of the system that bears on its robustness and cybersecurity. |
 
+### `identifier_characters`
+
+| Framework | Entry | Severities | Rationale |
+| --- | --- | --- | --- |
+| `owasp-llm-2025` | LLM01:2025 Prompt Injection | all | A tool or server name that reads differently to a reviewer than to the model can carry injected text. |
+| `owasp-llm-2026` | LLM01:2026 Prompt Injection | all | A tool or server name that reads differently to a reviewer than to the model can carry injected text. |
+| `owasp-asi-2026` | ASI01 Agent Goal Hijack | all | Such text can redirect the agent's goal without a reviewer noticing. |
+| `mitre-atlas-2026.10` | AML.T0010.005 Supply Chain Compromise: AI Agent Tool | all | A tool whose name is disguised can stand in for a trusted agent tool. |
+| `mitre-atlas-2026.10` | AML.T0068 LLM Prompt Obfuscation | all | Hiding or disguising instruction text from human review is what this technique describes. |
+| `mitre-atlas-2026.10` | AML.T0074 Masquerading | all | A lookalike or hidden-character name is a form of name manipulation. |
+| `nist-ai-rmf-1.0` | MEASURE-2.7 Security and resilience are evaluated | all | Records a security-relevant property of the configuration, an input to evaluating its security. |
+| `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | all | Records a property of the system that bears on its robustness and cybersecurity. |
+| `cwe` | CWE-451 User Interface (UI) Misrepresentation of Critical Information | all | A name with control, format or lookalike characters displays differently from what the agent and the inventory compare. |
+| `cwe` | CWE-1427 Improper Neutralization of Input Used for LLM Prompting | all | A tool name reaches the model's context with characters that are not neutralized. |
+
 ### `instruction_layering`
 
 | Framework | Entry | Severities | Rationale |
