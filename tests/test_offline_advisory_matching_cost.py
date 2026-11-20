@@ -648,6 +648,24 @@ def test_the_budget_is_an_operator_limit_and_the_command_exits_1(tmp_path):
     assert limits.DEFAULTS.advisory_matches == 2_000_000
 
 
+def test_an_undated_feed_still_fails_the_indexed_command(tmp_path):
+    bom, db_file = _matching_inputs(tmp_path, components=5, advisories=4)
+    records = json.loads(db_file.read_text(encoding="utf-8"))
+    db_file.write_text(
+        json.dumps([{k: v for k, v in r.items() if k != "modified"} for r in records]),
+        encoding="utf-8",
+    )
+    bom_path = tmp_path / "aibom.json"
+    bom.save(bom_path)
+
+    result = CliRunner().invoke(main, ["advisories", str(bom_path), "--offline-db", str(db_file)])
+    assert result.exit_code == 1
+    payload = json.loads(result.output)
+    assert payload["complete"] is False
+    assert len(payload["advisories"]) == 5
+    assert any("carries no record 'modified' or 'published' date" in e for e in payload["errors"])
+
+
 def test_errors_past_the_report_cap_spend_no_budget(tmp_path):
     db_file = tmp_path / "osv.json"
     db_file.write_text(
