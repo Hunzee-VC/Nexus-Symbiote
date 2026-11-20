@@ -35,6 +35,7 @@ from nexus_symbiote.core.aibom import (
 )
 from nexus_symbiote.core.content_digest import NESTED_TOO_DEEPLY, inventory_content_digest
 from nexus_symbiote.core.hashing import hash_bytes
+from nexus_symbiote.core.identifiers import RAW_DIGESTS
 from nexus_symbiote.core.models import AgentComponent
 from nexus_symbiote.generators._common import imported_discovery_component
 from nexus_symbiote.graph import INFERRED_AGENT_REF, MANIFEST
@@ -125,13 +126,17 @@ def literal_resource_pattern(resource: str) -> str:
     return resource.translate(_GLOB_LITERALS)
 
 
-def checked_text(label: str, value: str) -> str:
-    """``value`` unchanged when ShadowScan reads it back exactly, else a refusal naming ``label``."""
+def checked_text(label: str, value: str, *, rewritten: bool = False) -> str:
+    """``value`` unchanged when ShadowScan reads it back exactly, else a refusal naming ``label``.
+
+    ``rewritten`` says the inventory records that collection neutralized the value: the
+    raw text held such a character, so the value is refused as the raw text would be.
+    """
     if not value:
         raise InventoryExportError(f"The {label} is empty; ShadowScan requires a nonempty value.")
     if len(value) > MAX_TEXT_CHARS:
         raise InventoryExportError(f"The {label} is longer than {MAX_TEXT_CHARS:,} characters.")
-    if UNSAFE_TEXT.search(value) or "\t" in value or _UNENCODABLE.search(value):
+    if rewritten or UNSAFE_TEXT.search(value) or "\t" in value or _UNENCODABLE.search(value):
         raise InventoryExportError(
             f"The {label} contains a control, format, line-separator or unencodable character, "
             "which ShadowScan would reject or misread."
@@ -213,10 +218,14 @@ def shadowscan_simple_inventory(
         digest = inventory.content_digest
         identity = UNNAMED_AGENT_PREFIX + digest.removeprefix("sha256:")[:24]
         names = (f"unnamed repository agent; id from inventory content digest {digest}",)
+    recorded = agent.properties.get(RAW_DIGESTS)
+    rewritten = recorded if isinstance(recorded, dict) else {}
     entry = SimpleEntry(
         id=identity,
-        name=checked_text("agent name", agent.name) if manifest else None,
-        owner=checked_text("agent owner", agent.supplier)
+        name=checked_text("agent name", agent.name, rewritten="name" in rewritten)
+        if manifest
+        else None,
+        owner=checked_text("agent owner", agent.supplier, rewritten="supplier" in rewritten)
         if manifest and agent.supplier is not None
         else None,
         names=names,
