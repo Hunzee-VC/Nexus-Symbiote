@@ -186,6 +186,30 @@ def test_offline_advisories_kev_elevates_severity_and_epss_enriches(tmp_path):
     assert provenance["epss_catalog"] is not None
 
 
+def test_offline_advisories_refuse_two_different_records_with_one_id(tmp_path):
+    kev_file = tmp_path / "kev.json"
+    kev_file.write_text(json.dumps({"vulnerabilities": [{"cveID": "CVE-2024-99999"}]}), "utf-8")
+    record = {
+        "id": "GHSA-aaaa-bbbb-cccc",
+        "aliases": ["CVE-2024-99999"],
+        "affected": [
+            {"package": {"ecosystem": "PyPI", "name": "transformers"}, "versions": ["4.35.0"]}
+        ],
+    }
+    db_dir = tmp_path / "osv"
+    db_dir.mkdir()
+    (db_dir / "b.json").write_text(json.dumps(record), encoding="utf-8")
+    # An identical copy, as two ecosystem exports hold, is one record.
+    (db_dir / "c.json").write_text(json.dumps(record), encoding="utf-8")
+    report, _ = match_offline_advisories(_bom_with_package(), db_path=db_dir, kev_paths=(kev_file,))
+    assert [(a["id"], a["severity"]) for a in report.advisories] == [("CVE-2024-99999", "critical")]
+
+    # A copy without the alias, read first, would otherwise drop the KEV elevation.
+    (db_dir / "a.json").write_text(json.dumps({**record, "aliases": []}), encoding="utf-8")
+    with pytest.raises(ValueError, match="two different records GHSA-aaaa-bbbb-cccc"):
+        match_offline_advisories(_bom_with_package(), db_path=db_dir, kev_paths=(kev_file,))
+
+
 def test_offline_advisories_order_independent_range_events_and_bounds(tmp_path):
     """Out-of-order OSV events [introduced 0, introduced 4.0, fixed 3.0, fixed 5.0] match 4.35.0."""
     db_file = tmp_path / "osv-unordered.json"
@@ -912,14 +936,32 @@ def test_offline_advisories_exact_listing_decides_before_unparsable_bounds(tmp_p
 @pytest.mark.parametrize(
     ("events", "version", "bounds"),
     [
-        ([{"introduced": "0"}, {"fixed": "2.0"}, {"last_affected": "junk!"}], "2.5", None),
+        # The unparsable bound may close the interval after 2.0, so the fix decides nothing.
+        ([{"introduced": "0"}, {"fixed": "2.0"}, {"last_affected": "junk!"}], "2.5", ["junk!"]),
+        ([{"fixed": "junk!"}, {"introduced": "0"}, {"fixed": "2.0"}], "2.5", ["junk!"]),
+        # Event order puts the unparsable bound in the interval before 2.0's.
+        (
+            [{"introduced": "0"}, {"last_affected": "junk!"}, {"introduced": "2.0"}]
+            + [{"fixed": "3.0"}],
+            "3.5",
+            None,
+        ),
         ([{"introduced": "0"}, {"limit": "2.0"}, {"fixed": "junk!"}], "2.5", None),
         ([{"introduced": "3.0"}, {"last_affected": "junk!"}], "2.5", None),
         ([{"introduced": "0"}, {"fixed": "2.0"}, {"last_affected": "junk!"}], "1.5", ["junk!"]),
         ([{"introduced": "1.0"}, {"limit": "junk!"}], "2.5", ["junk!"]),
         ([{"introduced": "0"}, {"fixed": "x" * 100}], "2.5", ["x" * 64]),
     ],
-    ids=["fixed-excludes", "limit-excludes", "below-introduced", "fixed-above", "limit", "long"],
+    ids=[
+        "fixed-in-undecidable-interval",
+        "unordered-bound",
+        "other-interval",
+        "limit-excludes",
+        "below-introduced",
+        "fixed-above",
+        "limit",
+        "long",
+    ],
 )
 def test_offline_advisories_parsable_bounds_decide_before_unparsable_ones(
     tmp_path, events, version, bounds
@@ -930,6 +972,26 @@ def test_offline_advisories_parsable_bounds_decide_before_unparsable_ones(
     report, _ = match_offline_advisories(_bom_with_package(version=version), db_path=db_file)
     assert report.complete is True
     assert [a["undecidable_bounds"] for a in report.advisories] == ([bounds] if bounds else [])
+
+
+@pytest.mark.parametrize("version", ["2.8.4", "2.9.0"])
+def test_offline_advisories_unparsable_last_affected_beside_parsable_ones_flags(tmp_path, version):
+    """The PYSEC-2024-264 shape: 2.9.0-NA may be the last affected, so 2.9.0rc3 ends nothing."""
+    last = ["2.9.0-NA", "2.9.0-beta1", "2.9.0-beta2", "2.9.0-rc1", "2.9.0-rc2", "2.9.0-rc3"]
+    events = [{"introduced": "0"}, *({"last_affected": v} for v in last)]
+    record = _transformers_record(
+        "PYSEC-2024-264", ranges=[{"type": "ECOSYSTEM", "events": events}]
+    )
+    record["affected"][0]["package"]["name"] = "apache-airflow"
+    db_file = tmp_path / "osv.json"
+    db_file.write_text(json.dumps([record]), encoding="utf-8")
+    bom = _bom_with_package(name="apache-airflow", version=version)
+
+    report, _ = match_offline_advisories(bom, db_path=db_file)
+    assert report.complete is True
+    assert [
+        (a["id"], a["range_undecidable"], a["undecidable_bounds"]) for a in report.advisories
+    ] == [("PYSEC-2024-264", True, ["2.9.0-NA"])]
 
 
 def test_offline_advisories_bound_the_errors_from_malformed_records(tmp_path):

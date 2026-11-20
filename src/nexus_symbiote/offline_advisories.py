@@ -89,11 +89,9 @@ def _semver_key(raw: str) -> tuple[int, int, int, int, tuple[tuple[int, int | st
     if match is None:
         return None
     major, minor, patch = int(match[1]), int(match[2] or 0), int(match[3] or 0)
-    pre = match[4]
-    if not pre:
-        return (major, minor, patch, 1, ())
-    parts = tuple((0, int(tok)) if tok.isdigit() else (1, tok) for tok in pre.split("."))
-    return (major, minor, patch, 0, parts)
+    pre = match[4].split(".") if match[4] else []
+    parts = tuple((0, int(tok)) if tok.isdigit() else (1, tok) for tok in pre)
+    return (major, minor, patch, 0 if parts else 1, parts)
 
 
 def _version_key(ecosystem: str, raw: str) -> Any | None:
@@ -108,11 +106,11 @@ def _version_key(ecosystem: str, raw: str) -> Any | None:
 def _parse_epss_unit(raw: object, field_name: str) -> float:
     """Validate that an EPSS score or percentile is a finite float in [0.0, 1.0]."""
     if isinstance(raw, bool) or not isinstance(raw, (int, float, str)):
-        raise ValueError(f"EPSS {field_name} must be a finite number in [0, 1]")
+        raw = "nan"
     try:
         value = float(raw)
-    except ValueError as exc:
-        raise ValueError(f"EPSS {field_name} must be a finite number in [0, 1]") from exc
+    except ValueError:
+        value = math.nan
     if not math.isfinite(value) or not (0.0 <= value <= 1.0):
         raise ValueError(f"EPSS {field_name} must be a finite number in [0, 1]")
     return value
@@ -203,7 +201,11 @@ def load_offline_advisory_db(path: Path) -> tuple[list[_ParsedAdvisory], str]:
         raise ValueError("Offline advisory DB holds no advisory records")
     if len(records) > MAX_DB_RECORDS:
         raise ValueError(f"Offline advisory DB exceeds {MAX_DB_RECORDS} records")
-    return records, digest
+    # Matches merge by id, so a different record could drop another's aliases and KEV status.
+    by_id: dict[str, _ParsedAdvisory] = {}
+    if dup := next((r.record_id for r in records if by_id.setdefault(r.record_id, r) != r), ""):
+        raise ValueError(f"Offline advisory DB holds two different records {dup}")
+    return list(by_id.values()), digest
 
 
 def load_kev_catalog(path: Path) -> tuple[dict[str, list[_KEVEntry]], str]:
@@ -296,6 +298,9 @@ class _Range:
 
     A ranked bound the ecosystem cannot parse is None, and ``unparsed`` holds the reported
     form (cut to 64 characters) of each such ``fixed``, ``last_affected`` or ``limit``.
+    ``owners`` holds, per ``fixed`` or ``last_affected``, the ``introduced`` that event order
+    puts it after ("0" for the zero one, None before the first) with the bound; once ranked,
+    only the owner positions of the unparsable ones, and ``origin`` is the position of "0".
     """
 
     zero_intro: bool
@@ -303,7 +308,9 @@ class _Range:
     fixes: tuple[tuple[Any, str], ...]
     last_affected: tuple[Any, ...]
     limits: tuple[Any, ...]
+    owners: tuple[Any, ...] = ()
     unparsed: tuple[str, ...] = ()
+    origin: Any = None
 
     def versions(self) -> tuple[Any, ...]:
         return (*self.intros, *(fix for fix, _ in self.fixes), *self.last_affected, *self.limits)
@@ -322,12 +329,18 @@ def _read_range(rng: dict[str, Any]) -> _Range | None:
 
     has_zero_intro = False
     found: dict[str, list[str]] = {"introduced": [], "fixed": [], "last_affected": [], "limit": []}
+    owner: str | None = None
+    owners: list[tuple[str | None, str]] = []
     for ev in events:
         kind, raw = next(iter(ev.items())) if isinstance(ev, dict) and len(ev) == 1 else ("", "")
         if kind == "introduced" and raw in ("0", 0) and not isinstance(raw, bool):
-            has_zero_intro = True
+            has_zero_intro, owner = True, "0"
         elif kind in found and isinstance(raw, str) and raw.strip():
             found[kind].append(raw.strip())
+            if kind == "introduced":
+                owner = raw.strip()
+            elif kind != "limit":
+                owners.append((owner, raw.strip()))
         else:
             raise ValueError("OSV range event cannot be parsed")
     intros, fixed_versions, last_affected, limits = found.values()
@@ -338,6 +351,7 @@ def _read_range(rng: dict[str, Any]) -> _Range | None:
         tuple((fix, fix) for fix in fixed_versions),
         tuple(last_affected),
         tuple(lim for lim in limits if lim != "*"),
+        tuple(owners),
     )
 
 
@@ -346,7 +360,9 @@ def _in_range(version: int, rng: _Range) -> bool:
 
     Every ``introduced`` parses here; a block naming one that does not is an error before
     any range of it is evaluated. An upper bound that does not parse (None) excludes no
-    version, so a range that only it could have ended still matches, reported undecided.
+    version, so a range that only it could have ended still matches, reported undecided;
+    while one lies in the interval of the version's ``introduced`` (by event order), no
+    ``fixed`` or ``last_affected`` excludes the version either. A parsable limit still does.
     """
     best_intro: int | None = None
     found_intro = rng.zero_intro
@@ -358,9 +374,13 @@ def _in_range(version: int, rng: _Range) -> bool:
             best_intro = intro
     if not found_intro:
         return False
+    start = rng.origin if best_intro is None else best_intro
+    open_interval = any(owner is None or owner == start for owner in rng.owners)
 
     def ends_after_intro(bound: int | None) -> bool:
-        return bound is not None and (best_intro is None or best_intro <= bound)
+        if open_interval or bound is None:
+            return False
+        return best_intro is None or best_intro <= bound
 
     return not (
         any(lim is not None and version >= lim for lim in rng.limits)
@@ -454,7 +474,10 @@ class _PackageMatcher:
             for parses, failed in ((True, failed_parsed), (False, failed_unparsed_blocks))
         }
 
-        keys = {text: _version_key(ecosystem, text) for _, rng in ranges for text in rng.versions()}
+        texts = {text for _, rng in ranges for text in rng.versions()}
+        if any(rng.owners for _, rng in ranges):
+            texts.add("0")  # the version a zero introduced, which owns bounds, starts at
+        keys = {text: _version_key(ecosystem, text) for text in texts}
         self._keys = sorted({key for key in keys.values() if key is not None})
         position = {key: 2 * rank + 1 for rank, key in enumerate(self._keys)}
         self._leaves = 2 * len(self._keys) + 1
@@ -470,7 +493,13 @@ class _PackageMatcher:
                 tuple((at(text), text) for text, _ in raw.fixes),
                 tuple(at(text) for text in raw.last_affected),
                 tuple(at(text) for text in raw.limits),
-                tuple(text[:64] for text in bounds if keys[text] is None),
+                owners=tuple(
+                    None if owner is None else at(owner)
+                    for owner, bound in raw.owners
+                    if keys[bound] is None
+                ),
+                unparsed=tuple(text[:64] for text in bounds if keys[text] is None),
+                origin=at("0") if raw.owners else None,
             )
             start: int | None = None
             low = 0
@@ -559,9 +588,8 @@ def _build_package_index(
                 continue
             eco_lower = pkg_eco.strip().lower()
             if eco_lower in {"pypi", "npm"}:
-                index.setdefault((eco_lower, _normalize(eco_lower, pkg_name.strip())), []).append(
-                    (adv, aff)
-                )
+                key = (eco_lower, _normalize(eco_lower, pkg_name.strip()))
+                index.setdefault(key, []).append((adv, aff))
     return index
 
 
@@ -592,23 +620,11 @@ def _deduplicate_matches(
 
     merged: list[dict[str, Any]] = []
     for items in grouped.values():
-        all_ids: set[str] = set()
-        matched_ids: set[str] = set()
-        fixed_all: set[str] = set()
-        summaries: list[str] = []
-        best_severity = "unknown"
-        for adv, fixed, _ in items:
-            matched_ids.add(adv.record_id)
-            all_ids.add(adv.record_id)
-            all_ids.update(adv.aliases)
-            fixed_all.update(fixed)
-            if adv.summary:
-                summaries.append(adv.summary)
-            if _SEVERITY_ORDER[adv.severity] < _SEVERITY_ORDER[best_severity]:
-                best_severity = adv.severity
-        bounds = (
-            sorted({b for *_, bs in items for b in bs})[:16] if all(i[2] for i in items) else []
-        )
+        advs = [adv for adv, *_ in items]
+        all_ids = {ident for adv in advs for ident in (adv.record_id, *adv.aliases)}
+        summaries = sorted({adv.summary for adv in advs if adv.summary})
+        best_severity = min((adv.severity for adv in advs), key=_SEVERITY_ORDER.__getitem__)
+        bounds = sorted({b for *_, u in items for b in u})[:16] if all(u for *_, u in items) else []
         cves = sorted(i for i in all_ids if i.upper().startswith("CVE-"))
         primary_id = cves[0] if cves else sorted(all_ids)[0]
         merged.append(
@@ -616,11 +632,11 @@ def _deduplicate_matches(
                 "id": primary_id,
                 "advisory_id": primary_id,
                 "aliases": sorted(i for i in all_ids if i != primary_id),
-                "matched_ids": sorted(matched_ids),
+                "matched_ids": sorted({adv.record_id for adv in advs}),
                 "severity": best_severity,
                 "base_severity": best_severity,
-                "summary": sorted(set(summaries))[0] if summaries else "",
-                "fixed_versions": sorted(fixed_all),
+                "summary": summaries[0] if summaries else "",
+                "fixed_versions": sorted({fix for _, fixed, _ in items for fix in fixed}),
                 **({"range_undecidable": True, "undecidable_bounds": bounds} if bounds else {}),
             }
         )

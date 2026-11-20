@@ -3,9 +3,10 @@
 The indexed matcher must report exactly what pairwise matching reported: the same matches,
 fixed versions and undecidable bounds for every block, and the same error for every block
 it cannot decide. The reference below is the pairwise matcher this module replaced, as of
-8af50423 (unparsable upper bounds flag a match; malformed blocks, an unparsable
-``introduced`` and an unparsable queried version are errors), kept word for word apart from
-its names as the oracle.
+564d4039 (unparsable upper bounds flag a match, and stop parsable ones excluding a version
+in the interval event order puts them in; malformed blocks, an unparsable ``introduced``
+and an unparsable queried version are errors), kept word for word apart from its names as
+the oracle.
 """
 
 from __future__ import annotations
@@ -53,7 +54,8 @@ def _reference_range_matches(
 
     The queried version and every ``introduced`` must parse. A ``fixed``, ``last_affected``
     or ``limit`` that does not leaves the version possibly affected: the range matches with
-    that bound reported, unless the lower bound or a parsable upper bound excludes it.
+    that bound reported unless the lower bound or a parsable limit excludes it, or a parsable
+    bound does in an interval (by event order) that holds no unparsable one.
     """
     raw_type = rng.get("type")
     if raw_type is not None and (
@@ -71,12 +73,15 @@ def _reference_range_matches(
 
     has_zero_intro = False
     found: dict[str, list[str]] = {"introduced": [], "fixed": [], "last_affected": [], "limit": []}
+    ordered: list[tuple[str, str]] = []
     for ev in events:
         kind, raw = next(iter(ev.items())) if isinstance(ev, dict) and len(ev) == 1 else ("", "")
         if kind == "introduced" and raw in ("0", 0) and not isinstance(raw, bool):
             has_zero_intro = True
+            ordered.append((kind, "0"))
         elif kind in found and isinstance(raw, str) and raw.strip():
             found[kind].append(raw.strip())
+            ordered.append((kind, raw.strip()))
         else:
             raise ValueError("OSV range event cannot be parsed")
     intros, fixed_versions, last_affected, limits = found.values()
@@ -97,8 +102,15 @@ def _reference_range_matches(
     unparsed = [b for b in bounds if _reference_compare(ecosystem, b, b) is None]
 
     def ends_after_intro(bound: str) -> bool:
-        return bound not in unparsed and (best_intro is None or cmp(best_intro, bound) <= 0)
+        decided = not open_interval and bound not in unparsed
+        return decided and (best_intro is None or cmp(best_intro, bound) <= 0)
 
+    owner: str | None = None  # the introduced an event follows; None before the first
+    open_interval = False  # an unparsable bound may close the version's interval
+    for kind, value in ordered:
+        owner = value if kind == "introduced" else owner
+        held = owner is None or cmp(owner, best_intro or "0") == 0
+        open_interval |= held and kind in ("fixed", "last_affected") and value in unparsed
     if (
         any(lim != "*" and lim not in unparsed and cmp(version, lim) >= 0 for lim in limits)
         or any(ends_after_intro(fix) and cmp(fix, version) <= 0 for fix in fixed_versions)
@@ -352,8 +364,8 @@ def test_flags_and_errors_follow_the_pairwise_rules_on_a_worked_example():
                 ]
             },
         ),
-        # A parsable fix excludes 2.5 before the unparsable bound is considered, and the
-        # listing decides 2.5 anyway; below the fix the match is flagged.
+        # The unparsable bound shares the fix's interval, so the fix excludes nothing and
+        # the match is flagged; the listing decides 2.5, so that match is not.
         (
             "GHSA-3",
             {
@@ -379,7 +391,10 @@ def test_flags_and_errors_follow_the_pairwise_rules_on_a_worked_example():
         "2.5": ([("GHSA-1", [], ["nope!"]), ("GHSA-3", [], [])], always),
         "not-a-version": (
             [("GHSA-4", [], [])],
-            [("GHSA-1", compared), ("GHSA-2", compared), ("GHSA-3", compared), *always[1:]],
+            [
+                *(("GHSA-1", compared), ("GHSA-2", compared), ("GHSA-3", compared)),
+                ("GHSA-5", compared),
+            ],
         ),
     }
     for version, (found, undecided) in expected.items():
@@ -421,7 +436,7 @@ def test_a_random_bundle_gives_the_report_pairwise_matching_gave(tmp_path, monke
             affected.append(block)
         records.append(
             {
-                "id": f"GHSA-{rng.randint(0, 250):04d}",
+                "id": f"GHSA-{index:04d}",
                 "aliases": [f"CVE-2026-{rng.randint(0, 150):04d}"] if rng.random() < 0.5 else [],
                 "summary": f"summary {index}",
                 "affected": affected,
@@ -446,7 +461,7 @@ def test_a_random_bundle_gives_the_report_pairwise_matching_gave(tmp_path, monke
     parsed = offline._parse_osv_records(records)
     expected = []
     errors = []
-    # The record merge, alias deduplication and error cap of pairwise matching at 8af50423.
+    # The record merge, alias deduplication and error cap of pairwise matching at 564d4039.
     unlisted_errors = 0
     for component in sorted(components, key=lambda item: item.bom_ref):
         ecosystem = "PyPI" if component.registry_type == "pypi" else "npm"
