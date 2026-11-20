@@ -1,9 +1,11 @@
 """Offline advisory matching: indexed cost, the advisory-matches budget, and equivalence.
 
 The indexed matcher must report exactly what pairwise matching reported: the same matches,
-and the same error for every block it cannot decide. The reference below is the pairwise
-matcher this module replaced, as of fd259a7f (which made it fail closed), kept word for word
-apart from its names as the oracle.
+fixed versions and undecidable bounds for every block, and the same error for every block
+it cannot decide. The reference below is the pairwise matcher this module replaced, as of
+8af50423 (unparsable upper bounds flag a match; malformed blocks, an unparsable
+``introduced`` and an unparsable queried version are errors), kept word for word apart from
+its names as the oracle.
 """
 
 from __future__ import annotations
@@ -46,13 +48,18 @@ def _reference_compare(ecosystem: str, left: str, right: str) -> int | None:
 
 def _reference_range_matches(
     ecosystem: str, version: str, rng: dict[str, Any]
-) -> tuple[bool, list[str]]:
-    """Evaluate one OSV range by version intervals (order-independent per OSV spec)."""
+) -> tuple[bool, list[str], list[str]]:
+    """Evaluate one OSV range: (in range, fixed versions above it, unparsable upper bounds).
+
+    The queried version and every ``introduced`` must parse. A ``fixed``, ``last_affected``
+    or ``limit`` that does not leaves the version possibly affected: the range matches with
+    that bound reported, unless the lower bound or a parsable upper bound excludes it.
+    """
     raw_type = rng.get("type")
     if raw_type is not None and (
         not isinstance(raw_type, str) or raw_type.upper() not in _SUPPORTED_RANGE_TYPES
     ):
-        return False, []
+        return False, [], []
     events = rng.get("events")
     if not isinstance(events, list):
         raise ValueError("OSV range events are not a list")
@@ -74,9 +81,7 @@ def _reference_range_matches(
             raise ValueError("OSV range event cannot be parsed")
     intros, fixed_versions, last_affected, limits = found.values()
 
-    if any(lim != "*" and cmp(version, lim) >= 0 for lim in limits):
-        return False, []
-
+    cmp(version, version)
     best_intro: str | None = None
     found_intro = has_zero_intro
     for intro in intros:
@@ -86,67 +91,83 @@ def _reference_range_matches(
         if best_intro is None or cmp(intro, best_intro) > 0:
             best_intro = intro
     if not found_intro:
-        return False, []
+        return False, [], []
 
-    for fix in fixed_versions:
-        if cmp(fix, version) <= 0 and (best_intro is None or cmp(best_intro, fix) <= 0):
-            return False, []
-    for last in last_affected:
-        if cmp(last, version) < 0 and (best_intro is None or cmp(best_intro, last) <= 0):
-            return False, []
-    return True, [fix for fix in fixed_versions if cmp(fix, version) > 0]
+    bounds = (*fixed_versions, *last_affected, *(lim for lim in limits if lim != "*"))
+    unparsed = [b for b in bounds if _reference_compare(ecosystem, b, b) is None]
+
+    def ends_after_intro(bound: str) -> bool:
+        return bound not in unparsed and (best_intro is None or cmp(best_intro, bound) <= 0)
+
+    if (
+        any(lim != "*" and lim not in unparsed and cmp(version, lim) >= 0 for lim in limits)
+        or any(ends_after_intro(fix) and cmp(fix, version) <= 0 for fix in fixed_versions)
+        or any(ends_after_intro(last) and cmp(last, version) < 0 for last in last_affected)
+    ):
+        return False, [], []
+    fixed_above = [fix for fix in fixed_versions if fix not in unparsed and cmp(fix, version) > 0]
+    return True, fixed_above, [bound[:64] for bound in unparsed]
 
 
 def _reference_matches_affected_version(
     affected: dict[str, Any], ecosystem: str, version: str
-) -> tuple[bool, list[str]]:
-    """Evaluate a package-matched affected block; raise ``ValueError`` when it cannot decide."""
+) -> tuple[bool, list[str], list[str]]:
+    """(matched, fixed, undecided bounds), empty bounds once a listing or range decides."""
     fixed_versions: list[str] = []
     raw_versions, raw_ranges = affected.get("versions", []), affected.get("ranges", [])
     if not isinstance(raw_versions, list) or not isinstance(raw_ranges, list):
         raise ValueError("OSV affected versions or ranges are not a list")
-    matched = any(
-        isinstance(ver, str) and _reference_compare(ecosystem, version, ver) == 0
+    matched = decided = any(
+        isinstance(ver, str)
+        and (ver == version or _reference_compare(ecosystem, version, ver) == 0)
         for ver in raw_versions
     )
+    undecided: list[str] = []
     for rng in raw_ranges:
-        in_range, rng_fixed = _reference_range_matches(
+        in_range, rng_fixed, rng_unparsed = _reference_range_matches(
             ecosystem, version, rng if isinstance(rng, dict) else {}
         )
         if in_range:
-            matched = True
+            matched, decided = True, decided or not rng_unparsed
             fixed_versions.extend(rng_fixed)
-    return matched, sorted(set(fixed_versions))
+            undecided.extend(rng_unparsed)
+    return matched, sorted(set(fixed_versions)), [] if decided else sorted(set(undecided))
 
 
-def _merged(found: list[tuple[str, list[str]]]) -> list[tuple[str, list[str]]]:
-    """Merge blocks by record id in first-seen order, as the report does before deduplication."""
-    by_id: dict[str, list[str]] = {}
-    for record_id, fixed in found:
-        by_id.setdefault(record_id, []).extend(fixed)
-    return [(record_id, sorted(set(fixed))) for record_id, fixed in by_id.items()]
+_Block = tuple[str, list[str], list[str]]
 
 
 def _reference_blocks(
     blocks: list[tuple[str, dict[str, Any]]], ecosystem: str, version: str
-) -> tuple[list[tuple[str, list[str]]], list[tuple[str, str]], list[str | None]]:
-    """Pairwise matching of one version: merged matches, each undecided block in order, and
-    every block's reason (None when decided).
+) -> tuple[list[_Block], list[tuple[str, str]], list[str | None]]:
+    """Pairwise matching of one version: each matching block's record id, fixed versions and
+    undecidable bounds, each undecided block's reason, both in order, and every block's
+    reason (None when decided).
     """
-    found: list[tuple[str, list[str]]] = []
+    found: list[_Block] = []
     undecided: list[tuple[str, str]] = []
     outcomes: list[str | None] = []
     for record_id, affected in blocks:
         try:
-            hit, fixed = _reference_matches_affected_version(affected, ecosystem, version)
+            hit, fixed, bounds = _reference_matches_affected_version(affected, ecosystem, version)
         except ValueError as exc:
             undecided.append((record_id, str(exc)))
             outcomes.append(str(exc))
             continue
         outcomes.append(None)
         if hit:
-            found.append((record_id, fixed))
-    return _merged(found), undecided, outcomes
+            found.append((record_id, fixed, bounds))
+    return found, undecided, outcomes
+
+
+def _indexed_blocks(
+    matcher: offline._PackageMatcher, version: str, budget: offline._MatchBudget
+) -> tuple[list[_Block], list[tuple[str, str]]]:
+    found, failed = matcher.matches(version, budget)
+    return (
+        [(adv.record_id, fixed, bounds) for adv, fixed, bounds in found],
+        [(adv.record_id, reason) for adv, reason in failed],
+    )
 
 
 _VERSIONS = {
@@ -173,11 +194,16 @@ _PARSEABLE = {
     eco: [v for v in vs if offline._version_key(eco, v) is not None]
     for eco, vs in _VERSIONS.items()
 }
+# Bounds no ecosystem parses, two of them alike in their first 64 characters, so a cut
+# report of both is one bound.
 _UNPARSEABLE = {
-    eco: [v for v in vs if v.strip() and offline._version_key(eco, v) is None]
+    eco: [
+        *(v for v in vs if v.strip() and offline._version_key(eco, v) is None),
+        *("2.6.0-NA!", "z" * 70 + "#", "z" * 70 + "$"),
+    ]
     for eco, vs in _VERSIONS.items()
 }
-# Each event shape fd259a7f refuses: several keys, no key, not an object, an unknown key, a
+# Each event shape pairwise matching refuses: several keys, no key, not an object, an unknown key, a
 # value that is not a non-empty string, and the integers and booleans "0" must not admit.
 _MALFORMED_EVENTS: list[object] = [
     {"introduced": "1.0", "fixed": "2.0"},
@@ -232,8 +258,8 @@ def _random_block(rng: random.Random, ecosystem: str) -> dict[str, Any]:
                 else [_random_event(rng, ecosystem) for _ in range(rng.randint(0, 6))]
             )
             if 0.08 <= roll < 0.2:
-                # One version that cannot be compared, among ones that can: whether a
-                # component reaches it depends on how it compares with the others.
+                # One version that cannot be compared, among ones that can: an error as an
+                # introduced, otherwise a bound that parsable ones may or may not overrule.
                 kind = rng.choice(["introduced", "fixed", "last_affected", "limit"])
                 bad = {kind: rng.choice(_UNPARSEABLE[ecosystem])}
                 events.insert(rng.randint(0, len(events)), bad)
@@ -261,7 +287,7 @@ def test_the_indexed_matcher_reports_what_pairwise_matching_reported(ecosystem):
     rng = random.Random(273)  # noqa: S311 - a reproducible corpus, not a secret
     versions = _VERSIONS[ecosystem]
     budget = offline._MatchBudget(10**9)
-    matched = unmatched = undecidable = with_fixes = mixed = reached_only_by_some = 0
+    counts: Counter[str] = Counter()
     reasons: Counter[str] = Counter()
     for _ in range(600):
         blocks = [
@@ -271,39 +297,37 @@ def test_the_indexed_matcher_reports_what_pairwise_matching_reported(ecosystem):
         matcher = offline._PackageMatcher(
             ecosystem, [(_advisory(record_id), block) for record_id, block in blocks], budget
         )
-        parsed_outcomes: list[set[str | None]] = [set() for _ in blocks]
+        flagged_or_not: list[set[bool]] = [set() for _ in blocks]
         for version in versions:
-            expected, expected_undecided, outcomes = _reference_blocks(blocks, ecosystem, version)
-            if offline._version_key(ecosystem, version) is not None:
-                for seen, outcome in zip(parsed_outcomes, outcomes, strict=True):
-                    seen.add(outcome)
-            found, undecided = matcher.matches(version, budget)
-            assert _merged([(adv.record_id, fixed) for adv, fixed in found]) == expected, (
-                ecosystem,
-                version,
-                blocks,
-            )
-            assert [(adv.record_id, reason) for adv, reason in undecided] == expected_undecided, (
-                ecosystem,
-                version,
-                blocks,
-            )
+            expected, expected_undecided, _ = _reference_blocks(blocks, ecosystem, version)
+            found, undecided = _indexed_blocks(matcher, version, budget)
+            assert found == expected, (ecosystem, version, blocks)
+            assert undecided == expected_undecided, (ecosystem, version, blocks)
             reasons.update(reason for _, reason in expected_undecided)
-            matched += bool(expected)
-            unmatched += not expected
-            mixed += bool(expected) and bool(expected_undecided)
-            with_fixes += any(fixed for _, fixed in expected)
-            undecidable += bool(expected) and offline._version_key(ecosystem, version) is None
-        # Blocks decided for some versions and not comparable for others: the short-circuit
-        # order of the comparisons is what the index has to reproduce there.
-        reached_only_by_some += sum(
-            {None, "OSV range version cannot be compared"} <= seen for seen in parsed_outcomes
-        )
-    assert min(matched, unmatched) > 2_000
-    assert reached_only_by_some > 50
-    assert with_fixes > 500
-    assert undecidable > 50
-    assert mixed > 500
+            parsed = offline._version_key(ecosystem, version) is not None
+            counts["matched" if expected else "unmatched"] += 1
+            counts["matched and undecided"] += bool(expected) and bool(expected_undecided)
+            counts["with fixes"] += any(fixed for _, fixed, _ in expected)
+            counts["flagged blocks"] += sum(bool(bounds) for *_, bounds in expected)
+            counts["long bounds cut"] += any(
+                len(bound) == 64 for *_, bounds in expected for bound in bounds
+            )
+            counts["unparsed version matched"] += bool(expected) and not parsed
+            if parsed:
+                hits = {record: bool(bounds) for record, _, bounds in expected}
+                for seen, (record, _) in zip(flagged_or_not, blocks, strict=True):
+                    if record in hits:
+                        seen.add(hits[record])
+        # A record flagged for some versions and decided for others: the parsable bounds
+        # and listings that overrule an unparsable one are what the index must reproduce.
+        counts["flag varies by version"] += sum(seen == {True, False} for seen in flagged_or_not)
+    assert min(counts["matched"], counts["unmatched"]) > 2_000
+    assert counts["matched and undecided"] > 500
+    assert counts["with fixes"] > 500
+    assert counts["flagged blocks"] > 1_000
+    assert counts["long bounds cut"] > 50
+    assert counts["unparsed version matched"] > 20
+    assert counts["flag varies by version"] > 50
     assert min(reasons.values()) > 300
     assert set(reasons) == {
         "OSV affected versions or ranges are not a list",
@@ -311,38 +335,6 @@ def test_the_indexed_matcher_reports_what_pairwise_matching_reported(ecosystem):
         "OSV range event cannot be parsed",
         "OSV range version cannot be compared",
     }
-
-
-def test_a_block_is_undecided_only_where_its_first_undecidable_range_is_reached():
-    blocks = [
-        ("GHSA-1", {"ranges": [{"events": [{"introduced": "2.0"}, {"fixed": "nope!"}]}]}),
-        (
-            "GHSA-2",
-            {
-                "ranges": [
-                    {"events": [{"introduced": "0"}, {"limit": "1.0"}, {"limit": "x!"}]},
-                    {"events": "bad"},
-                ]
-            },
-        ),
-    ]
-    budget = offline._MatchBudget(10**6)
-    matcher = offline._PackageMatcher(
-        "PyPI", [(_advisory(record_id), block) for record_id, block in blocks], budget
-    )
-    compared, not_a_list = "OSV range version cannot be compared", "OSV range events are not a list"
-    expected = {
-        # Below "2.0" GHSA-1 never reaches its fix; below "1.0" GHSA-2 reaches the bad limit.
-        "0.5": [("GHSA-2", compared)],
-        # The first limit ends GHSA-2's first range, so its second range decides the reason.
-        "1.5": [("GHSA-2", not_a_list)],
-        "2.5": [("GHSA-1", compared), ("GHSA-2", not_a_list)],
-        "not-a-version": [("GHSA-1", compared), ("GHSA-2", compared)],
-    }
-    for version, undecided in expected.items():
-        assert _reference_blocks(blocks, "PyPI", version)[:2] == ([], undecided)
-        found, failed = matcher.matches(version, budget)
-        assert (found, [(adv.record_id, reason) for adv, reason in failed]) == ([], undecided)
 
 
 def _component(name: str, version: str, kind: str = "pypi") -> RegistryEntryComponent:
@@ -355,7 +347,10 @@ def _component(name: str, version: str, kind: str = "pypi") -> RegistryEntryComp
     )
 
 
-def test_a_random_bundle_gives_the_report_pairwise_matching_gave(tmp_path):
+# The default cap lists the first errors; without one, every error must match too.
+@pytest.mark.parametrize("cap", [offline.MAX_OFFLINE_ERRORS, 10**9])
+def test_a_random_bundle_gives_the_report_pairwise_matching_gave(tmp_path, monkeypatch, cap):
+    monkeypatch.setattr(offline, "MAX_OFFLINE_ERRORS", cap)
     rng = random.Random(20)  # noqa: S311 - a reproducible corpus, not a secret
     pinned = {
         "pypi": [v for v in _VERSIONS["PyPI"] if v == v.strip() and v[:1].isdigit()],
@@ -401,9 +396,11 @@ def test_a_random_bundle_gives_the_report_pairwise_matching_gave(tmp_path):
     parsed = offline._parse_osv_records(records)
     expected = []
     errors = []
+    # The record merge, alias deduplication and error cap of pairwise matching at 8af50423.
+    unlisted_errors = 0
     for component in sorted(components, key=lambda item: item.bom_ref):
         ecosystem = "PyPI" if component.registry_type == "pypi" else "npm"
-        raw: dict[str, tuple[offline._ParsedAdvisory, list[str]]] = {}
+        matched_by_adv: dict[str, tuple[offline._ParsedAdvisory, list[str], list[str]]] = {}
         for adv in parsed:
             for block in adv.affected:
                 package = block["package"]
@@ -413,27 +410,37 @@ def test_a_random_bundle_gives_the_report_pairwise_matching_gave(tmp_path):
                 ):
                     continue
                 try:
-                    hit, fixed = _reference_matches_affected_version(
+                    is_match, fixed, undecided = _reference_matches_affected_version(
                         block, ecosystem, component.version
                     )
                 except ValueError as exc:
-                    errors.append(f"{component.bom_ref}: offline advisory {adv.record_id}: {exc}")
+                    unlisted_errors += len(errors) >= offline.MAX_OFFLINE_ERRORS
+                    if len(errors) < offline.MAX_OFFLINE_ERRORS:
+                        errors.append(
+                            f"{component.bom_ref}: offline advisory {adv.record_id}: {exc}"
+                        )
                     continue
-                if hit:
-                    raw.setdefault(adv.record_id, (adv, []))[1].extend(fixed)
-        for entry in offline._deduplicate_matches(
-            [(adv, sorted(set(fixed))) for adv, fixed in raw.values()]
-        ):
+                if is_match:
+                    hit = matched_by_adv.setdefault(adv.record_id, (adv, [], list(undecided)))
+                    hit[1].extend(fixed)
+                    hit[2][:] = [*hit[2], *undecided] if hit[2] and undecided else []
+        raw_matches = [(a, sorted(set(f)), sorted(set(u))) for a, f, u in matched_by_adv.values()]
+        for entry in offline._deduplicate_matches(raw_matches):
             expected.append({**entry, "component_ref": component.bom_ref})
+    if unlisted_errors:
+        errors.append(f"{unlisted_errors} more offline advisory errors are not listed")
     keys = ("component_ref", "id", "aliases", "matched_ids", "summary", "fixed_versions")
-    assert [{key: entry[key] for key in keys} for entry in report.advisories] == [
-        {key: entry[key] for key in keys} for entry in expected
+    flags = ("range_undecidable", "undecidable_bounds")
+    assert [{key: entry.get(key) for key in (*keys, *flags)} for entry in report.advisories] == [
+        {key: entry.get(key) for key in (*keys, *flags)} for entry in expected
     ]
     assert report.errors == errors
     assert report.complete is False
     assert len(expected) > 1_000
-    assert len(errors) > 1_000
+    assert len(errors) + unlisted_errors > 1_000
+    assert bool(unlisted_errors) is (cap < 10**9)
     assert sum(bool(entry["fixed_versions"]) for entry in expected) > 100
+    assert sum("range_undecidable" in entry for entry in expected) > 100
 
 
 def _range_record(index: int, events: list[dict[str, Any]], **extra: Any) -> dict[str, Any]:
