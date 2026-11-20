@@ -177,6 +177,14 @@ RULES: dict[str, RuleInfo] = {
         "Line or paragraph separators",
         "An instruction file contains U+2028 or U+2029, which can split a line in some renderers.",
     ),
+    "identifier_characters": RuleInfo(
+        "Control, format or mixed-script characters in an identifier",
+        "A component's name, description, supplier or nested tool name was collected with "
+        "terminal control, bidirectional or invisible format characters, which the inventory "
+        "replaces, or an MCP server or tool name mixes letters of more than one script within "
+        "a word or beside Latin text has a word whose every letter reads as Latin, which can "
+        "disguise one name as another.",
+    ),
     "hook_commands": RuleInfo(
         "Hook commands",
         "IDE agent settings declare hook commands that run automatically on agent events.",

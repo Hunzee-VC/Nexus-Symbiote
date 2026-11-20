@@ -57,3 +57,66 @@ The maintainer's open actions, which no repository change can do for them: give 
 ## Future governance
 
 Additional maintainers, architectural RFCs and broader decision processes may be introduced as participation grows. Changes to governance should be documented through the same review process, including who owns the decision and which external controls are actually active.
+
+## Supported surface (1.0 contract)
+
+Every built-in collector and CLI command on `main` is classified below (`N8`, converging on schema 1.0). **Supported** interfaces follow documented compatibility, determinism, confinement and offline guarantees; **Experimental** interfaces remain opt-in or pre-freeze report surfaces whose output shapes may evolve faster during alpha.
+
+### Gate reporting contract
+
+Every gate prints each of its failure reasons. How many findings the console lists, and where the complete list is, differs by surface:
+
+| Surface | Console lists | Complete list |
+| --- | --- | --- |
+| `scan`, `baseline` | Every gate reason, then the first 10 findings at or above the severity cutoff (`LISTED`) and a count of the rest; the first 20 collection failures and the first 10 excluded surfaces | No `--json-output`. The inventory that `scan -o FILE` writes holds every finding, and `risk FILE --json-output` lists them; `baseline` writes no inventory when its gate fails |
+| `risk` | The first 15 findings (`TOP_FINDINGS`), under a heading that gives the total; on failure also every gate reason, the first 10 findings at or above the cutoff and the first 10 coverage gaps | `--json-output` |
+| `validate` | Every issue in the report, with no console cap; each check keeps at most 1,000 issues, blocking ones first, and counts the rest | `--json-output`, which holds the same issues and the omitted count |
+| `diff` | Every security alert and every change, with no cap | `--json-output` |
+| GitHub Action | The `scan`, `validate`, `risk` and `diff` reports above, rendered by the same functions, so each keeps its own limit | The inventory at the `aibom-path` output |
+
+### Built-in collectors
+
+| Collector | Status | Notes |
+| --- | --- | --- |
+| `mcp` | Supported | Static MCP client, server config, launcher and source tool extraction; never executes servers |
+| `model` | Supported | Static weight-file hashing, header inspection and signer-policy verification |
+| `prompt` | Supported | Confined reading of instruction files, skills and prompt templates |
+| `rag` | Supported | Declared retrieval configuration and source hint extraction |
+| `registry` | Supported | Root dependency manifests and lockfiles, pinned container digests and index redirects |
+| `a2a` | Supported | Static A2A agent cards, client configurations and SDK references |
+| `ide_agents` | Supported | Coding-agent permissions, settings, hooks and credential helpers read as data |
+| `shadowscan` | Supported | Imports producer-verified Nexus-ShadowScan discovery reports as `declared` claims |
+
+### CLI commands
+
+| Command | Status | Mode | Notes |
+| --- | --- | --- | --- |
+| `scan` | Supported | offline | Repository collection, gating and native/standard export |
+| `validate` | Supported | offline | Completeness, integrity, graph and optional `--project` reconciliation gate |
+| `risk` | Supported | offline | Deterministic risk scoring, policy evaluation and suppression gate |
+| `diff` | Supported | offline | Semantic drift comparison and security-alert gate |
+| `summary` | Supported | offline | Component, dependency and severity summary |
+| `digest` | Supported | offline | File SHA-256, RFC 8785 canonical digest and run-independent content digest |
+| `baseline` | Supported | offline | Writes unsigned snapshot only when the built-in scan gate passes |
+| `vex` | Supported | offline | CycloneDX VEX (`in_triage`) export for inventory findings |
+| `crosswalk` | Supported | offline | Evidence crosswalk across OWASP, MITRE ATLAS, NIST AI RMF, EU AI Act, ISO/IEC 42001 and CWE |
+| `minimum-elements` | Supported | offline | G7 AI SBOM minimum-element coverage check over CycloneDX export |
+| `verify-artifact` | Supported | offline | Artifact SHA-256 and optional offline Sigstore bundle verification |
+| `verify-discovery` | Supported | offline | ShadowScan report digest, projection and Sigstore bundle verification |
+| `import-shadowscan` | Supported | offline | Converts Nexus-ShadowScan report bytes into `declared` native BOM claims |
+| `export-inventory` | Supported | offline | Exports reviewed repository agent inventory for ShadowScan reconciliation |
+| `init` | Supported | offline | Writes default `.nexus-symbiote.yaml` policy template |
+| `attest` | Supported | offline | Signs exact file or inventory bytes in an Ed25519 DSSE/in-toto envelope |
+| `verify-attestation` | Supported | offline | Verifies DSSE/in-toto attestations against out-of-project trusted keys |
+| `blast-radius` | Experimental | offline | Declared repository association traversal (`effective_authority: unknown`) |
+| `graph` | Experimental | offline | Self-contained HTML/JSON risk-class and exposure-path graph view |
+| `trace-diff` | Experimental | offline | OpenTelemetry GenAI/MCP trace-versus-inventory comparison (`reported` evidence) |
+| `runtime keygen` | Supported | offline | Generates Ed25519 key pair for runtime authorization contracts |
+| `runtime sign` | Supported | offline | Signs runtime authorization, approval and revocation contracts |
+| `runtime verify` | Supported | offline | Verifies signed runtime contract purpose, signers and validity window |
+| `runtime digest` | Supported | offline | Prints canonical digest of runtime contract, approval or revocation document |
+| `runtime key-id` | Supported | offline | Prints canonical Ed25519 public key identifier |
+| `runtime register` | Experimental | offline | Registers newly issued runtime snapshot in local gateway state store |
+| `discover-mcp` | Experimental | **live** | Opt-in HTTPS MCP tool listing without calling tools |
+| `advisories` | Experimental | **live** | Opt-in OSV lookup for exact PyPI and npm package versions |
+| `verify-live` | Experimental | **live** | Opt-in namespace-isolated stdio MCP verification against operator launch policy |

@@ -77,7 +77,10 @@ as described below.
    date its heading and `date-released` with the planned publication day; correct
    both afterwards if publication slips. Merge behavior-changing work at least 72
    hours before the planned publication, so that the release pull request itself
-   changes only versions and records.
+   changes only versions and records. Check that `NATIVE_SPEC_VERSION` in
+   `core/models.py` has its schema digest pinned in `tests/test_native_contract.py`:
+   that digest freezes when this release, the first to ship the version, is tagged,
+   and any later schema change needs a new spec version.
 2. Freeze `main`: after the release pull request merges, merge nothing else until
    the `pypi` run is approved. `workflow_dispatch --ref main` builds whatever `main`
    is at dispatch time and the preflight requires that exact head, so a Dependabot
