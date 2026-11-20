@@ -157,14 +157,13 @@ def _parse_osv_records(payload: object) -> list[_ParsedAdvisory]:
         )
         raw_summary = item.get("summary")
         summary = raw_summary.strip() if isinstance(raw_summary, str) else ""
-        raw_affected = item.get("affected")
-        affected = (
-            tuple(a for a in raw_affected if isinstance(a, dict))
-            if isinstance(raw_affected, list)
-            else ()
-        )
+        affected = item.get("affected", [])
+        if not isinstance(affected, list) or not all(isinstance(a, dict) for a in affected):
+            raise ValueError(
+                f"Offline advisory DB record {rec_id.strip()} has malformed 'affected'"
+            )
         parsed.append(
-            _ParsedAdvisory(rec_id.strip(), aliases, summary, _extract_severity(item), affected)
+            _ParsedAdvisory(rec_id.strip(), aliases, summary, _extract_severity(item), (*affected,))
         )
     return parsed
 
@@ -285,101 +284,67 @@ def _range_matches(ecosystem: str, version: str, rng: dict[str, Any]) -> tuple[b
         return False, []
     events = rng.get("events")
     if not isinstance(events, list):
-        return False, []
+        raise ValueError("OSV range events are not a list")
+
+    def cmp(left: str, right: str) -> int:
+        if (result := _compare_versions(ecosystem, left, right)) is None:
+            raise ValueError("OSV range version cannot be compared")
+        return result
 
     has_zero_intro = False
-    intros: list[str] = []
-    fixed_versions: list[str] = []
-    last_affected: list[str] = []
-    limits: list[str] = []
+    found: dict[str, list[str]] = {"introduced": [], "fixed": [], "last_affected": [], "limit": []}
     for ev in events:
-        if not isinstance(ev, dict):
-            continue
-        if "introduced" in ev:
-            raw_intro = ev["introduced"]
-            if raw_intro == "0" or (
-                isinstance(raw_intro, int) and not isinstance(raw_intro, bool) and raw_intro == 0
-            ):
-                has_zero_intro = True
-            elif isinstance(raw_intro, str) and raw_intro.strip():
-                intros.append(raw_intro.strip())
-        elif "fixed" in ev and isinstance(ev["fixed"], str) and ev["fixed"].strip():
-            fixed_versions.append(ev["fixed"].strip())
-        elif (
-            "last_affected" in ev
-            and isinstance(ev["last_affected"], str)
-            and ev["last_affected"].strip()
-        ):
-            last_affected.append(ev["last_affected"].strip())
-        elif "limit" in ev and isinstance(ev["limit"], str) and ev["limit"].strip():
-            limits.append(ev["limit"].strip())
+        kind, raw = next(iter(ev.items())) if isinstance(ev, dict) and len(ev) == 1 else ("", "")
+        if kind == "introduced" and raw in ("0", 0) and not isinstance(raw, bool):
+            has_zero_intro = True
+        elif kind in found and isinstance(raw, str) and raw.strip():
+            found[kind].append(raw.strip())
+        else:
+            raise ValueError("OSV range event cannot be parsed")
+    intros, fixed_versions, last_affected, limits = found.values()
 
-    if any(
-        (c := _compare_versions(ecosystem, version, lim)) is not None and c >= 0 for lim in limits
-    ):
+    if any(lim != "*" and cmp(version, lim) >= 0 for lim in limits):
         return False, []
 
     best_intro: str | None = None
     found_intro = has_zero_intro
     for intro in intros:
-        cmp_v = _compare_versions(ecosystem, intro, version)
-        if cmp_v is None or cmp_v > 0:
+        if cmp(intro, version) > 0:
             continue
         found_intro = True
-        if best_intro is None or (
-            (cb := _compare_versions(ecosystem, intro, best_intro)) is not None and cb > 0
-        ):
+        if best_intro is None or cmp(intro, best_intro) > 0:
             best_intro = intro
     if not found_intro:
         return False, []
 
     for fix in fixed_versions:
-        cmp_v = _compare_versions(ecosystem, fix, version)
-        if cmp_v is None or cmp_v > 0:
-            continue
-        if best_intro is None or (
-            (ci := _compare_versions(ecosystem, best_intro, fix)) is not None and ci <= 0
-        ):
+        if cmp(fix, version) <= 0 and (best_intro is None or cmp(best_intro, fix) <= 0):
             return False, []
-
     for last in last_affected:
-        cmp_v = _compare_versions(ecosystem, last, version)
-        if cmp_v is None or cmp_v >= 0:
-            continue
-        if best_intro is None or (
-            (ci := _compare_versions(ecosystem, best_intro, last)) is not None and ci <= 0
-        ):
+        if cmp(last, version) < 0 and (best_intro is None or cmp(best_intro, last) <= 0):
             return False, []
-
-    relevant_fixes = [
-        fix
-        for fix in fixed_versions
-        if (cf := _compare_versions(ecosystem, fix, version)) is not None and cf > 0
-    ]
-    return True, relevant_fixes
+    return True, [fix for fix in fixed_versions if cmp(fix, version) > 0]
 
 
 def _matches_affected_version(
     affected: dict[str, Any], ecosystem: str, version: str
 ) -> tuple[bool, list[str]]:
-    """Evaluate version lists and OSV ranges for an already-package-matched affected block."""
+    """Evaluate a package-matched affected block; raise ``ValueError`` when it cannot decide."""
     fixed_versions: list[str] = []
-    matched = False
-    raw_versions = affected.get("versions")
-    if isinstance(raw_versions, list) and any(
+    raw_versions, raw_ranges = affected.get("versions", []), affected.get("ranges", [])
+    if not isinstance(raw_versions, list) or not isinstance(raw_ranges, list):
+        raise ValueError("OSV affected versions or ranges are not a list")
+    matched = any(
         isinstance(ver, str) and _compare_versions(ecosystem, version, ver) == 0
         for ver in raw_versions
-    ):
-        matched = True
-    raw_ranges = affected.get("ranges")
-    if isinstance(raw_ranges, list):
-        for rng in raw_ranges:
-            if not isinstance(rng, dict):
-                continue
-            in_range, rng_fixed = _range_matches(ecosystem, version, rng)
-            if in_range:
-                matched = True
-                fixed_versions.extend(rng_fixed)
+    )
+    for rng in raw_ranges:
+        in_range, rng_fixed = _range_matches(
+            ecosystem, version, rng if isinstance(rng, dict) else {}
+        )
+        if in_range:
+            matched = True
+            fixed_versions.extend(rng_fixed)
     return matched, sorted(set(fixed_versions))
 
 
@@ -559,7 +524,11 @@ def match_offline_advisories(
         )
         matched_by_adv: dict[str, tuple[_ParsedAdvisory, list[str]]] = {}
         for adv, aff in pkg_index.get((eco.lower(), name), ()):
-            is_match, fixed = _matches_affected_version(aff, eco, version)
+            try:
+                is_match, fixed = _matches_affected_version(aff, eco, version)
+            except ValueError as exc:
+                report.errors.append(f"{bom_ref}: offline advisory {adv.record_id}: {exc}")
+                continue
             if is_match:
                 existing = matched_by_adv.get(adv.record_id)
                 if existing is None:
