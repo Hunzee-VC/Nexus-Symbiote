@@ -389,11 +389,66 @@ A way around a limit that its entry does not describe is worth a
   clients of other frameworks,
   leave no gap; the collector records some of those only as a code-detected client.
   User-level client settings in your home directory are not read either.
-- **Some client files are only detected.** Zed `context_servers`, opencode `mcp`,
-  `.continue/mcpServers/` and `.junie/mcp/mcp.json` are gaps; their servers are not
-  parsed. A copy at any depth, such as `pkg/opencode.json` or
-  `pkg/.continue/mcpServers/`, is a gap too, and another spelling of one, such as
-  `pkg/.Zed/settings.json`, is a [case-variant failure](#every-collector).
+- **Some client shapes are read with limits.** Zed `context_servers`, opencode `mcp`,
+  Continue `mcpServers` in `.continue/config.yaml`, in the `.yaml` and `.yml` files
+  directly in `.continue/mcpServers/` and in the local agent files directly in
+  `.continue/agents/`, `.continue/assistants/` and `.continue/configs/`, and Junie
+  `.junie/mcp/mcp.json` are parsed, at any depth and through a directory symlink, as
+  the other client files are. That Continue reads the three agent directories in a
+  workspace is confirmed from Continue's source, not its documentation, which names
+  only `~/.continue/agents/`. A server that declares neither a command nor an
+  endpoint, in any client file, holds no launch the collector can classify, so it is
+  inventoried with an unknown launcher, a high `launcher_identity` finding and a
+  gap; a Zed server with `"source": "extension"` is one too, and its `settings`
+  values are scrubbed as environment values are. opencode replaces `{env:NAME}` and
+  `{file:PATH}` in its configuration text when it loads it; the collector reads each
+  as an unresolved reference, as it reads `${NAME}`, in a server's string fields and
+  in the words and values one level below them, such as `oauth.clientId`. A command
+  that holds one is an unknown launcher that depends on the environment, a package
+  specification that holds one, such as `pkg@{env:VERSION}`, is an unknown launcher
+  too (an unparsed package reference), not only an unpinned one, each with a high
+  `launcher_identity` finding and a gap, and an endpoint that holds one is
+  unresolved. One in an object nested inside such a value, such as an object inside
+  `oauth`, stays literal text. An opening `{env:` or `{file:` whose closing brace is
+  not in the same string value, or one in a comment or a key, can change the strings
+  opencode reads, so the file is a collection failure.
+  Zed's `env` may be `null`, as Zed reads it as optional, so a Zed server with
+  `"env": null` is inventoried where the same server in `.mcp.json` is refused; a
+  `null` `args` is refused. A Zed entry with no source and no launch is read as one
+  an extension provides, and a `"source": "custom"` entry with no launch holds none.
+  An opencode `remote` server's transport is read from its endpoint, as for a server
+  that declares no type; one without an endpoint is read as Streamable HTTP, so a
+  command beside it is a `transport_ambiguity` finding rather than a launch, as
+  opencode starts no command for a remote server. A `.continue/mcpServers/` file
+  whose top level is a server rather than a block holding a `mcpServers` list, a
+  `.json` file there whose name is not a client file name, and a `.yaml` or `.yml` file in a directory below it or below an agent
+  directory are gaps: the collector does not read them there. A Continue entry that
+  references a hub block with `uses:` is a gap too, since its launch is on the hub and
+  is not resolved offline. A Continue name declared twice refuses every entry of that
+  name, and an `env` value that is not a string, such as YAML `PORT: 8080`, refuses
+  the server as an invalid server configuration; quote the value. Continue files are
+  read by the bounded YAML reader, which does not expand anchors, aliases or tags: an
+  empty or comment-only file holds no servers, and so does a file with an anchor,
+  alias or tag that never spells `mcpServers` (or, in a server directory, `command`,
+  `args`, `url` or `type`), but such a file that does is a collection failure. That
+  reader is pure Python, so each Continue file costs more to read than a JSON file
+  of the same size; its 20,000-token bound applies to every one. Continue's
+  `apiKey`, `requestOptions` and `uses` block inputs (`with`) are not interpreted,
+  but their credential values are scrubbed from every server of the file, as are
+  those of an opencode server refused for declaring both `environment` and `env` and
+  those of a Continue entry that is not inventoried (one without a name, a name
+  declared twice, a `uses` block). Continue's source reads the agent directories
+  recursively and keeps `.yaml` and `.yml` files at any depth there; the collector
+  reads only the files directly in them, so a deeper one is a gap. Whether Continue
+  reads a `.yml` file in `.continue/mcpServers/` is not confirmed; one is inventoried.
+  Continue loads `config.json` only from its global `~/.continue` directory and
+  reads no file named `config.yml`, so a workspace `.continue/config.json` or
+  `.continue/config.yml` is not read and leaves no gap. Continue merges a workspace
+  `.continuerc.json` onto that global `config.json`; the collector does not read its
+  `experimental.modelContextProtocolServers` and records a gap when it declares any,
+  but does not look for the other workspace names Continue accepts, which end in
+  `.continuerc.json`. Another spelling of one of these files, such as `pkg/.Zed/settings.json`, is a
+  [case-variant failure](#every-collector).
 - **Gemini CLI's server command is read only as plain words.** Gemini CLI starts
   `mcpServerCommand`, or `mcp.serverCommand` in its current settings layout, as a
   server named `mcp`, in place of an `mcpServers` entry of that name, and so does the
@@ -696,6 +751,11 @@ A way around a limit that its entry does not describe is worth a
   name with a digest of the declaring file; handlers imported from other modules
   are not covered. Observe the effective tools with `discover-mcp` or
   `verify-live`.
+- **Hidden characters are read in declared tool text only.** The text of each
+  entry in a `tools` array is checked for the hidden characters an instruction file
+  is checked for. A descriptor recorded by `discover-mcp --record` or
+  `verify-live --record` is not, and neither is a description in server source,
+  which is not collected. A tool's name is not part of the check.
 - **Tool digests are unkeyed.** A tool's `definition_hash` covers the declared
   descriptor, including text the exported descriptor omits, so anyone holding the
   inventory can confirm a guess of a low-entropy value withheld there.
@@ -1410,6 +1470,21 @@ A way around a limit that its entry does not describe is worth a
   methods, and aliases imported by name from `a2a` modules are recognized. The
   alias check is syntactic and can report a gap even when a name is later rebound;
   assignment aliases, re-exports under other names and dynamic lookup are not resolved.
+- **Guardrail and evaluation configuration is recognised by name only.** The rag
+  collector records `promptfooconfig.yaml`, `promptfooconfig.yml`,
+  `promptfooconfig.json`, `guardrails.yaml`, `guardrails.yml`, `guardrails.json`, and a
+  `config.yml` or `config.yaml` beside at least one `.co` file, as `guardrail-policy`
+  components bound by digest. A configuration under any other name, such as a
+  promptfoo file passed with `-c`, or `.co` files in a subdirectory of the directory
+  that holds `config.yml`, is not recorded. The content is not parsed: the record
+  carries no model, version, rule or provider, raises no finding, and does not show
+  that anything loads or enforces the file. The inferred repository agent lists every
+  such file in `guardrail_refs`, which is a repository association, not observed use.
+  Guardrails declared in Terraform or other infrastructure code, or built in source
+  code, are not collected. `validate` does not recompute `config_hash` in its
+  integrity check; `validate --project` compares it with a fresh collection.
+- **Memory stores are not collected.** No built-in collector emits `memory-store`
+  components.
 - **Python import heuristics are shallow.** The a2a and rag collectors read only
   Python files that name the SDK or a vector-store library. The rag collector skips
   one it cannot read or parse or that exceeds 262,144 characters. The a2a
