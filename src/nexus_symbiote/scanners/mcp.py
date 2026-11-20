@@ -22,6 +22,8 @@ import os
 import posixpath
 import re
 import shlex
+from array import array
+from bisect import bisect_left
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -921,10 +923,11 @@ def _server_hits(config: dict[str, Any]) -> PositionHits:
 
 
 def _declared_hits(config: dict[str, Any]) -> PositionHits:
-    """The hits of a refused server's env and header maps, read as a parsed one's are."""
-    env = config.get("env")
+    """The hits of a refused server's env, arguments and headers, read as a parsed one's are."""
+    env, args = config.get("env"), config.get("args")
     maps = [m for m in (config.get("headers"), config.get("http_headers")) if isinstance(m, dict)]
-    return list(_credential_hits(env if isinstance(env, dict) else {}, [], maps, ()))
+    args = args if isinstance(args, list) else []
+    return list(_credential_hits(env if isinstance(env, dict) else {}, args, maps, ()))
 
 
 def _server_literals(config: dict[str, Any], hits: PositionHits) -> list[str]:
@@ -1293,44 +1296,45 @@ def _exportable_name(name: str) -> bool:
     )
 
 
-def _folded(text: str) -> str:
-    return text.casefold().replace("-", "_")
+def _folded(text: str) -> set[str]:
+    return {(low := text.casefold()).replace("-", "_"), re.sub("[-_.]", "", low)} - {""}
 
 
 class _Parts:
-    """Strings found in a name by its windows: whole if ``exact``, else folded, and one of 16 or
-    more characters by any 16 in a row (any 23 past 4,096), so each name costs its length."""
+    """Strings found in a name by its windows' 64-bit hashes, where a collision withholds it: whole
+    if ``exact``, else folded, and one of 16 or more characters by any 16 in a row (23 past 4,096)."""
 
     def __init__(self, texts: Iterable[str], *, exact: bool = False) -> None:
-        self.exact = exact
-        self.parts: set[str] = set()
-        for text in texts if exact else map(_folded, texts):
-            size = len(text) if exact else min(len(text), 16)
-            step = 1 if len(text) <= 4096 else 8
-            self.parts.update(text[i : i + size] for i in range(0, len(text) - size + 1, step))
-        self.sizes = sorted({len(part) for part in self.parts})
+        self.exact, self.sizes = exact, set[int]()
+        found = [array("q") for _ in range(256)]
+        for text in texts if exact else (form for item in texts for form in _folded(item)):
+            self.sizes.add(size := len(text) if exact else min(len(text), 16))
+            for start in range(0, len(text) - size + 1, 1 if len(text) <= 4096 else 8):
+                found[(part := hash(text[start : start + size])) & 255].append(part)
+        self.parts = [array("q", sorted(set(parts))) for parts in found]
 
     def find(self, name: str) -> Iterator[tuple[int, int]]:
-        text = name if self.exact else _folded(name)
-        for size in self.sizes:
-            for start in range(len(text) - size + 1):
-                if text[start : start + size] in self.parts:
-                    yield start, start + size
+        for text in (name,) if self.exact else _folded(name):
+            for size in self.sizes:
+                for start in range(len(text) - size + 1):
+                    parts = self.parts[(part := hash(text[start : start + size])) & 255]
+                    if part in parts[(at := bisect_left(parts, part)) : at + 1]:
+                        yield start, start + size
 
 
 class _Names:
     """Which env, header and field names may be shown, each name's verdict reached once a file.
 
-    A name holding a literal is withheld: whole, or by 16 characters in a row, in any case and
-    with "-" for "_". In the inventory only a credential-shaped literal of the scan counts, or
+    A name holding a literal is withheld: whole, or by 16 characters in a row, in any case, with
+    "-" for "_" and with or without "-", "_" and ".". In the inventory only a credential-shaped literal of the scan counts, or
     any of the server's own; the finding never names one holding any literal of the scan.
     Another value the file's scrubber holds withholds it whole, or as a credential-shaped part,
     unless that is a credential's name (OPENAI_API_KEY, also in AZURE_OPENAI_API_KEY).
     """
 
-    def __init__(self, literals: Iterable[str]) -> None:
-        found = {literal for literal in literals if literal}
-        self.every, self.shaped = _Parts(found), _Parts(filter(credential_shaped, found))
+    def __init__(self, literals: Sequence[str]) -> None:
+        shaped = set(filter(credential_shaped, literals))
+        self.every, self.shaped = _Parts(set(literals) - shaped), _Parts(shaped)
         self.values = self.own = _Parts((), exact=True)
         self.verdicts: dict[str, tuple[bool, bool]] = {}
 
@@ -2397,8 +2401,8 @@ class MCPScanner(Scanner):
         from each. A server that _server_problem refuses is never parsed, but its
         `env`, `headers` and `http_headers` still count, as they did before launcher
         values were added: refusing it must not publish what its siblings repeat. Only
-        its launcher is not analysed. Each parsed server's launch positions are read
-        once, into ``server_hits`` by the server's identity, for its finding.
+        its launcher is not analysed: its arguments are read for the names they withhold. Each
+        server's launch positions are read once, into ``server_hits`` by the server's identity.
         """
         values: list[str] = []
         for _, config in entries:
@@ -2410,7 +2414,7 @@ class MCPScanner(Scanner):
                     if isinstance(mapping, dict):
                         values.extend(secret_values(mapping))
                 hits = _declared_hits(config)
-                values.extend(_literals(hits))
+                values.extend(_literals([hit for hit in hits if hit[0] != "argument"]))
                 if server_hits is not None:
                     server_hits[id(config)] = hits
                 continue

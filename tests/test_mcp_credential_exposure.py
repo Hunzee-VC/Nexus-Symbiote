@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import base64
 import json
+import random
+import string
 import time
+import tracemalloc
 from pathlib import Path
 
 import pytest
@@ -1921,6 +1924,44 @@ def _holder(name: str, *, header: bool = False) -> dict:
             },
             SESAME,
         ),
+        # A refused server's argument, whether a field or its command has the wrong type.
+        (
+            {
+                ".mcp.json": {
+                    "db": {"command": "npx", "args": ["x@1.0.0", "--password", SESAME], "tools": 1},
+                    "gh": _holder(SESAME),
+                }
+            },
+            SESAME,
+        ),
+        (
+            {
+                ".mcp.json": {
+                    "db": {"command": ["npx"], "args": ["x@1.0.0", "--password", SESAME]},
+                    "gh": _holder(SESAME),
+                }
+            },
+            SESAME,
+        ),
+        # Other separators, or none, in the name or in the literal.
+        *(
+            (
+                {
+                    ".mcp.json": {
+                        "db": {**GH_SERVER, "env": {"DB_PASSWORD": literal}},
+                        "gh": _holder(name),
+                    }
+                },
+                name,
+            )
+            for literal, name in (
+                (SESAME, "Open.Sesame.Pass"),
+                (SESAME, "OpenSesamePass"),
+                ("OpenSesamePass", "X_Open-Sesame.Pass"),
+                (PARTIAL, "X." + PARTIAL.replace("-", "")[:16]),
+                (PARTIAL, "kq7m.zw9x.4lp8.ztq2"),
+            )
+        ),
         # A password of another client file.
         (
             {
@@ -2008,6 +2049,26 @@ def test_a_name_holding_any_literal_of_the_scan_is_withheld_from_every_output(
         assert list(gh.env) == ["[redacted-1]"]
     outputs = _cli_outputs(tmp_path, project)
     assert not any(name in text or SESAME in text for text in outputs)
+
+
+def test_long_literals_are_indexed_in_bounded_memory(tmp_path):
+    letters = string.ascii_letters + string.digits
+    choose = random.Random(7).choices  # noqa: S311 - a reproducible test input
+    servers = {
+        f"s{index}": {**GH_SERVER, "env": {"API_TOKEN": "".join(choose(letters, k=4000))}}
+        for index in range(100)
+    }
+    project = _project(tmp_path, servers)
+    size = sum(len(server["env"]["API_TOKEN"]) for server in servers.values())
+    tracemalloc.start()
+    try:
+        result = MCPScanner().scan(project)
+        peak = tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+    assert len(_servers(result)) == 100 and not result.scan_failures
+    # Every 16-character window as a string cost about 200 bytes for each character.
+    assert peak < 60 * size
 
 
 @pytest.mark.parametrize(
