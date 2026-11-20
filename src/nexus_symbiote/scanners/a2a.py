@@ -15,6 +15,7 @@ from urllib.parse import urlsplit
 
 from nexus_symbiote.core.enums import RiskSeverity, TrustTier
 from nexus_symbiote.core.hashing import canonical_json, hash_canonical
+from nexus_symbiote.core.identifiers import reference_text
 from nexus_symbiote.core.models import (
     UNBOUND_VALUES_DETAIL,
     A2AClientComponent,
@@ -949,7 +950,11 @@ class A2AScanner(Scanner):
         aliases = named[1:]
         name = _bounded_name(declared_name) if declared_name is not None else "unnamed-agent"
         # An unnamed card is identified by its location, so two of them do not collide.
-        bom_ref = f"a2a-server:{name}" if declared_name is not None else f"a2a-server:{rel_path}"
+        bom_ref = (
+            f"a2a-server:{reference_text(name)}"
+            if declared_name is not None
+            else f"a2a-server:{rel_path}"
+        )
         shown = neutralize(name)
         protocols = _strings(data.get("protocols", []))
         declared_skills = data.get("skills", [])
@@ -1186,7 +1191,7 @@ class A2AScanner(Scanner):
         if len(urls) > 1:
             properties["endpoint_origins"] = [_origin(url) for url in urls[1:]]
         return A2AClientComponent(
-            bom_ref=f"a2a-client:{name}",
+            bom_ref=f"a2a-client:{reference_text(name)}",
             name=name,
             agent_card_url=_origin(card_url) if card_url else None,
             authentication_methods=auth_methods,
