@@ -867,6 +867,21 @@ A way around a limit that its entry does not describe is worth a
   TFLite, Core ML and ExecuTorch files are rated `unknown`: Keras Lambda layers,
   SavedModel operations and custom operators are not inspected. Each is a high
   finding, which the default gate does not fail on by severity alone.
+- **Most formats are recorded from the file name.** Only a `.gguf` file's four magic
+  bytes and a `.safetensors` file's header are checked before the record gives a
+  format and a model type
+  ([model integrity](model-integrity.md#format-and-model-type)). A file under any
+  other model suffix, such as text saved as `model.onnx`, `model.tflite` or
+  `model.ggml`, is recorded with the format its name claims and a model type, rated
+  `unknown`, and one under a pickle-family name the same, rated by its first 64 KiB as
+  the entry above says, so a text file there is `unknown`. The GGUF check reads the magic and rates what follows: a
+  file that starts with `GGUF` is recorded as `llama.cpp` unless the content after the
+  magic is rated `unsafe-code-execution`, and
+  `properties.gguf_metadata` says when its version or metadata could not be read.
+  The standard exports keep such a file's type: a file whose format was not
+  established is still a CycloneDX `machine-learning-model` and an SPDX `ai_AIPackage`,
+  as every component of the `model` collector is, without the format and model type
+  properties.
 - **Some files are not inventoried.** A file outside the
   [listed names](model-integrity.md#model-files-and-references) is inventoried by
   its content only when it is named `.npy`, `.npz` or `.dat` or has any name below a
@@ -1586,19 +1601,46 @@ A way around a limit that its entry does not describe is worth a
   confirm an identifier; so can a JSON report behind a leading comment line or nested one
   level deeper. A value written below a credential key is withheld when it is the one value
   on its line and the line that opens it, a key and its mark with at most a block indicator,
-  a bracket or a comment after them, is within the eight lines above. A line of several
+  a bracket or a comment after them, is within the eight lines above; keys nested in a
+  bracket between them, such as `{"values": [`, do not end that search. A line of several
   words in a block below such a key, a value further down, and a value below a typed
   declaration such as `const credentials: string[] = [` are read alone and can be named.
+  So is a value below a compact entry written with spaces, such as `{"type": "basic"},`,
+  which reads as a line of several words.
   The redactor decides which keys name a credential and reads names broadly, so a list of
   model identifiers below `requires_token:`, `cache_key = (` or `modelsRequiringApiKey = [`
   is withheld; plural names such as `api_keys:` and `tokens:` are not credential names to
-  it. The kind is
-  the report's: the scan checks that the identifier
-  stands at the cited line, not that it names a model, except that an Amazon Bedrock
+  it. The kind is the report's: the scan checks that the identifier stands at the cited
+  line, not that it names a model, except that an Amazon Bedrock
   resource name of another kind, such as a guardrail, is not named. The same model written
   two ways, such as `anthropic/<model>` and `<model>`, is two components. Findings of other kinds, container images, infrastructure
   and data are not named this way, and a standalone `import-shadowscan` names nothing; see
   [models named from cited evidence](shadowscan-integration.md#models-named-from-cited-evidence).
+- **Two finding kinds are projected for one resource type each; the rest are gaps.** An
+  `agent-config` finding becomes an `ide-agent` only with resource type `coding-agent-config`,
+  and a `framework-usage` finding an `agent` only with resource type `project`. Any other
+  resource type of those kinds stays unmapped, such as the `lockfile-inventory` finding that
+  ShadowScan 0.1.4 reports for a `uv.lock` that lists an AI package, and so does every
+  `secret`, `token`, `infra`, identity and grant finding and every finding of the kinds
+  `gateway-caller`, `network-contact` and `runtime-process`. One unmapped entry keeps
+  the default scan, validate and risk gates closed, so a code report with a credential, an
+  infrastructure file or such a lockfile still does not pass. The component type is no
+  narrower than the kind and resource type: a project that only implements or configures an
+  MCP server is imported as an `agent`, and an `AGENTS.md` file or a set of `SKILL.md` files
+  as an `ide-agent`, beside what the local collectors record for the same files. An imported
+  `agent` or `ide-agent` carries a digest-based label and no `ide_type`, `permission_mode`,
+  framework or autonomy, and is not linked to the configuration the local collectors read from
+  the same files. Its ShadowScan rating counts in `risk` as `shadowscan-heuristic`, where it
+  can repeat what the local collectors already rate on those files, and a `critical` rating
+  closes the default risk gate by itself unless `risk.ignore_categories` lists
+  `shadowscan-heuristic`.
+  `trace-diff` treats each imported agent as a declared agent, matched by its label, and lists
+  it as unobserved when no trace names it. `graph` counts each imported agent and IDE agent
+  among the 200 sources it searches for exposure paths, in name order, so a report with some
+  two hundred of them can leave a repository agent unsearched; the view says how many it left
+  out, and `--focus` on the agent shows its paths. The mapping was reviewed against ShadowScan
+  0.1.4 at commit 2b80f19 only; see
+  [what each ShadowScan kind becomes](shadowscan-integration.md#what-each-shadowscan-kind-becomes).
 - **`verify-discovery --bundle` checks direct imports only.** It accepts only a BOM
   written by `import-shadowscan`. For a merged `scan` BOM, use the signature policy
   with `--project`.
@@ -1874,8 +1916,11 @@ A way around a limit that its entry does not describe is worth a
 - **Exposure paths show potential reach.** A path is the shortest chain of recorded
   associations from an agent or IDE agent to a risky component. It does not show that
   the agent can invoke the component, that a credential reaches it or that an exploit
-  is possible. At most 200 agents and IDE agents are searched, those that reach a risky
-  component first, and 200 paths kept, and the view reports how many were left out.
+  is possible. At most 200 agents and IDE agents are searched, those whose best path
+  ranks highest, and the 200 best paths kept, and the view reports how many were left
+  out. An inventory with 200 sources whose paths outrank a repository agent's, such as
+  imported agents rated critical, leaves that agent's paths out of the view; `--focus`
+  on the agent still shows them.
 - **Large inventories make large pages.** `--max-nodes` bounds components, not edges,
   and the HTML page renders every detail when it is written, so a large or dense
   inventory gives a page that a browser opens slowly. Use `--focus` or

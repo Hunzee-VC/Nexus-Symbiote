@@ -201,7 +201,25 @@ as described below.
    ```
 
    Offline verification with `gh attestation verify --bundle` then stays possible
-   after the run is gone.
+   after the run is gone. Fetch the Sigstore trusted root once while online, with
+   `gh attestation trusted-root > trusted_root.jsonl`; the verification itself then
+   needs neither `gh auth login` nor a network connection. `SHA256SUMS` names the
+   distributions as `dist/<file>`, so map that prefix to where they were downloaded.
+   From the directory that holds `release-assets`:
+
+   ```bash
+   sed -n 's#  dist/#  release-assets/release-distributions/#p' \
+     release-assets/release-evidence/SHA256SUMS | sha256sum --strict -c -
+   bundles=(release-assets/distribution-attestation/*)   # the run retains exactly one
+   gh attestation verify \
+     release-assets/release-distributions/nexus_symbiote-<version>-py3-none-any.whl \
+     --repo aisecnomad/Nexus-Symbiote \
+     --bundle "${bundles[0]}" \
+     --custom-trusted-root trusted_root.jsonl \
+     --signer-workflow aisecnomad/Nexus-Symbiote/.github/workflows/release.yml \
+     --source-ref refs/heads/main --source-digest <release commit SHA> \
+     --deny-self-hosted-runners
+   ```
 8. Update the records that describe the release, in one documentation pull request:
    the changelog heading's date (the day of the PyPI upload, in UTC), `date-released`
    in `CITATION.cff`, the dated rows of the

@@ -41,7 +41,7 @@ Risk findings, capabilities, authorizations, trust tiers, assurance levels and d
 | Native | SPDX | Notes |
 | --- | --- | --- |
 | Inventory | `software_Sbom` | The document's root element. Its root is the repository agent of a scan, otherwise every agent. `software_sbomType` is `source` for a repository scan. |
-| Agents and models | `ai_AIPackage` | `software_primaryPurpose` is `application` or `model`; `ai_typeOfModel` carries a model's declared type and `ai_informationAboutApplication` an agent's description. |
+| Agents and models | `ai_AIPackage` | `software_primaryPurpose` is `application` or `model`; `ai_typeOfModel` carries a model's declared type, when the inventory records one, and `ai_informationAboutApplication` an agent's description. |
 | Memory, RAG and data sources | `dataset_DatasetPackage` | `dataset_datasetType` is `noAssertion`, the only property the class requires. |
 | Prompts | `software_File` | `verifiedUsing` carries the content digest. |
 | Everything else | `software_Package` | |
@@ -74,7 +74,7 @@ CycloneDX properties and SPDX `extension_CdxPropertyEntry` records use these nam
 | `nexus-symbiote:componentType`, `:trustTier`, `:assuranceLevel` | CycloneDX component | Native enumeration values. |
 | `nexus-symbiote:requestedVersion` | CycloneDX component | A declared version that is not exact. |
 | `nexus-symbiote:autonomyLevel`, `:framework`, `:modelRef`, `:toolRef` | CycloneDX agent | `autonomyLevel` is `unknown` when not declared; references repeat per target. |
-| `nexus-symbiote:modelType`, `:provider`, `:serializationFormat`, `:serializationSafety`, `:signingStatus`, `:trustRemoteCode` | CycloneDX model | `trustRemoteCode` is a declared setting. |
+| `nexus-symbiote:modelType`, `:provider`, `:serializationFormat`, `:serializationSafety`, `:signingStatus`, `:trustRemoteCode` | CycloneDX model | `trustRemoteCode` is a declared setting. `modelType` and `serializationFormat` are absent when the inventory records none, as for a model file whose [format was not established](model-integrity.md#format-and-model-type). |
 | `nexus-symbiote:definitionHash`, `:definitionHashVersion`, `:annotation.<name>` | CycloneDX tool | One annotation property per MCP annotation. |
 | `nexus-symbiote:transport`, `:toolCount`, `:versionPinned`, `:schemaHash` | CycloneDX MCP server | `toolCount` is written only when nonzero, because zero also means not observed. |
 | `nexus-symbiote:promptType`, `:contentHash` | CycloneDX prompt | |
