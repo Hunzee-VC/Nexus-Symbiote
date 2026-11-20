@@ -1,0 +1,6 @@
+TLSH library not available. Install with: pip install python-tlsh
+Scanning /aibom-run/work/ai-finder-alt/corpus...
+Invalid JSON in .vscode/mcp.json: Expecting property name enclosed in double quotes: line 2 column 3 (char 4)
+Scanned 25 files in 1674ms
+Found 50 AI artifacts
+Output written to /aibom-run/results3/ai-finder-alt/noenrich/report.json
