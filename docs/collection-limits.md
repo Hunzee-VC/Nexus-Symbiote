@@ -237,8 +237,7 @@ shorten lists whose content is recorded or bound anyway.
 | Codec name in a Python encoding declaration | 64 characters |
 | Dots separating key or table-name parts in TOML read by the registry, IDE and MCP collectors, including Codex settings and package-resolver configuration; quoted parts count, dots inside strings and comments do not | 16 (17 parts); checked before parsing |
 | MCP tool registrations in one TypeScript or JavaScript file | 1,000 |
-| TypeScript native parse time per file | 250 ms, in proportion to `syntax-bytes` above its default |
-| TypeScript analysis time per file | 2 s, in proportion to `ts-nodes` above its default |
+| Processor time of one TypeScript or JavaScript parse, the only bound on this page that counts time; see [the TypeScript parse time limit](#the-typescript-parse-time-limit) | 250 ms, in proportion to `syntax-bytes` above its default |
 | Native inventories and ShadowScan reports read by any command | 16 MiB |
 | Nesting levels of arrays and objects in a native inventory read through the shared reader, the root counted (`verify-discovery` and `verify-live` stop at the recursion limit instead; `attest` records a deeper subject, up to 256 levels, as native) | 128 |
 | `agent.yaml` and `.nexus-symbiote.yaml` | 1 MiB each |
@@ -278,3 +277,36 @@ signature bound is refused with "Policy artifact or bundle is unavailable beneat
 the project root", which does not yet name the bound; a model artifact above
 5 GiB can be hashed under `model-bytes` but cannot be verified by digest pin or
 signature.
+
+### The TypeScript parse time limit
+
+Every other bound on this page counts something a scan reads, such as bytes,
+entries or nodes, so whether a scan reaches it depends on the project and the
+limits alone. The parse time limit counts time, and exists only for input that no
+such count bounds: a file the grammar cannot parse, whose error recovery can take
+far longer than the file's size or node count would suggest.
+
+It is the same 250 ms as in releases up to 0.2.0, scaled the same way by `syntax-bytes`, but
+it counts the processor time the parser itself uses, not time on the clock. So a
+busy machine does not use it up, and neither does the one-time load of the parser
+and its grammar before the first parse, which those releases counted and which
+could turn a cold first scan of a small server into a failure. The parser can be
+stopped only after an interval of wall-clock time; that interval equals the
+budget, the deadline used before, so one attempt at a runaway parse stops where it
+stopped before and uses no more time or memory. A parse the interval stops when
+the parser has had less than half of the budget as processor time was held up by
+the machine, and starts again from the beginning, for at most three attempts. That
+lets a small server through on a loaded machine; a file that never gets its
+processor time is then refused. A stopped parse that had at least half of the
+budget is refused at once, so on an idle machine a file the grammar cannot end
+costs one interval.
+
+A file whose parse reaches the limit is the failure
+`TypeScript parsing exceeded its time limit`, and fails the default gates. A file
+that parses is bounded by `syntax-bytes` and `ts-nodes` instead; the analysis
+after the parse is linear in the file's nodes, runs only within `ts-nodes` and has
+no separate deadline. Ordinary source reaches the node limit first. A valid file
+whose parse needs more than the budget is refused for time, as it was before: in
+practice only an unusual file of a few hundred kilobytes of one token-dense
+construct, such as a large array or object literal, parses slowly enough to reach
+it.
