@@ -1979,3 +1979,34 @@ def test_a_caller_span_does_not_lend_its_identity_to_the_agent_it_invokes(tmp_pa
     )
     assert callee["reconciliation"]["matched"][0]["workload_identity_matched"] is False
     assert callee["gate"]["passed"] is False
+
+
+@pytest.mark.parametrize("kind", [0, 1, 2, 5, 9])
+def test_a_span_the_agent_emits_is_gated_on_its_own_identity(tmp_path, kind):
+    agent = _agent("agent:support", "support").model_copy(
+        update={"workload_identity": "spiffe://example.org/sa/support"}
+    )
+    own = {"gen_ai.operation.name": "invoke_agent", "gen_ai.agent.name": "support"}
+    rogue = {**own, "spiffe.id": "spiffe://example.org/sa/rogue"}
+    evidence = _evidence(tmp_path, [agent], otlp_span(rogue, kind=kind))
+    assert evidence["reconciliation"]["matched"][0]["workload_identity_matched"] is False
+    assert evidence["gate"]["passed"] is False
+
+
+@pytest.mark.parametrize("kind", [3, 4])
+def test_a_caller_span_reports_its_own_identity_and_gates_an_unreadable_one(tmp_path, kind):
+    agent = _agent("agent:support", "support").model_copy(
+        update={"workload_identity": "spiffe://example.org/sa/support"}
+    )
+    own = {"gen_ai.operation.name": "invoke_agent", "gen_ai.agent.name": "support"}
+    caller = otlp_export(
+        otlp_span(own, kind=kind), resource={"spiffe.id": "spiffe://example.org/sa/rogue"}
+    )
+    evidence = collect(_inventory(tmp_path, agent), [_trace(tmp_path, caller)])
+    [entry] = evidence["reconciliation"]["matched"]
+    assert entry["caller_workload_identities"] == ["spiffe://example.org/sa/rogue"]
+    assert "workload_identity_matched" not in entry
+    secret = "spiffe://example.org/token/sk-ant-api03-" + "a" * 95
+    hidden = _evidence(tmp_path, [agent], otlp_span({**own, "spiffe.id": secret}, kind=kind))
+    assert hidden["reconciliation"]["matched"][0]["workload_identity_matched"] is False
+    assert hidden["gate"]["passed"] is False

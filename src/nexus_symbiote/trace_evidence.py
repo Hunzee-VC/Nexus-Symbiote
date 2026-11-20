@@ -138,6 +138,7 @@ class _Item:
     services: set[str] = field(default_factory=set)
     details: set[str] = field(default_factory=set)
     workload_identities: set[str] = field(default_factory=set)
+    caller_identities: set[str] = field(default_factory=set)
     definition_hashes: set[str] = field(default_factory=set)
     unreadable_workload_identities: int = 0
     unreadable_definition_hashes: int = 0
@@ -289,14 +290,18 @@ class Observations:
             self._record(span)
             item.details.add(detail)
         # A CLIENT or PRODUCER span names the component it calls: its own (and its
-        # resource's) spiffe.id is the caller's, and only peer.identity is the callee's.
-        id_key = "peer.identity" if span.kind in (3, 4) else "spiffe.id"
-        w_id = span.attributes.get(id_key)
-        if isinstance(w_id, Unreadable):
-            item.unreadable_workload_identities += 1
-        elif isinstance(w_id, str) and w_id not in item.workload_identities:
-            self._record(span)
-            item.workload_identities.add(w_id)
+        # resource's) spiffe.id is the caller's, reported apart, and only peer.identity
+        # is compared as the callee's. An unreadable identity gates on every kind.
+        client, own = span.kind in (3, 4), span.attributes.get("spiffe.id")
+        for w_id, seen in (
+            (span.attributes.get("peer.identity") if client else own, item.workload_identities),
+            (own if client else None, item.caller_identities),
+        ):
+            if isinstance(w_id, Unreadable):
+                item.unreadable_workload_identities += 1
+            elif isinstance(w_id, str) and w_id not in seen:
+                self._record(span)
+                seen.add(w_id)
         if kind == "tool":
             t_hash = span.attributes.get("gen_ai.tool.definition_hash")
             if isinstance(t_hash, Unreadable):
@@ -573,6 +578,8 @@ def reconcile(observations: Observations, bom: AIBOM) -> dict[str, list[dict[str
                 "inventory_ref": component.bom_ref,
                 "basis": basis,
             }
+            if item.caller_identities:
+                matched_entry["caller_workload_identities"] = sorted(item.caller_identities)
             if item.workload_identities or item.unreadable_workload_identities:
                 declared_id = _trimmed(getattr(component, "workload_identity", None))
                 matched_entry["reported_workload_identities"] = sorted(item.workload_identities)
