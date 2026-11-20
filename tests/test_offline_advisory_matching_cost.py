@@ -337,6 +337,56 @@ def test_the_indexed_matcher_reports_what_pairwise_matching_reported(ecosystem):
     }
 
 
+def test_flags_and_errors_follow_the_pairwise_rules_on_a_worked_example():
+    compared, not_a_list = "OSV range version cannot be compared", "OSV range events are not a list"
+    blocks = [
+        # An unparsable fix: a flagged match once the version reaches the introduced.
+        ("GHSA-1", {"ranges": [{"events": [{"introduced": "2.0"}, {"fixed": "nope!"}]}]}),
+        # A parsable version reaches the second range; one that does not parse stops first.
+        (
+            "GHSA-2",
+            {
+                "ranges": [
+                    {"events": [{"introduced": "0"}, {"limit": "1.0"}, {"limit": "x!"}]},
+                    {"events": "bad"},
+                ]
+            },
+        ),
+        # A parsable fix excludes 2.5 before the unparsable bound is considered, and the
+        # listing decides 2.5 anyway; below the fix the match is flagged.
+        (
+            "GHSA-3",
+            {
+                "versions": ["2.5"],
+                "ranges": [
+                    {"events": [{"introduced": "0"}, {"fixed": "2.0"}, {"last_affected": "j!"}]}
+                ],
+            },
+        ),
+        # Only the identical string lists a version that does not parse.
+        ("GHSA-4", {"versions": ["not-a-version"]}),
+        # An unparsable introduced is an error for every version.
+        ("GHSA-5", {"ranges": [{"events": [{"introduced": "bad!"}]}]}),
+    ]
+    budget = offline._MatchBudget(10**6)
+    matcher = offline._PackageMatcher(
+        "PyPI", [(_advisory(record_id), block) for record_id, block in blocks], budget
+    )
+    always = [("GHSA-2", not_a_list), ("GHSA-5", compared)]
+    expected = {
+        "0.5": ([("GHSA-3", ["2.0"], ["j!"])], always),
+        "1.5": ([("GHSA-3", ["2.0"], ["j!"])], always),
+        "2.5": ([("GHSA-1", [], ["nope!"]), ("GHSA-3", [], [])], always),
+        "not-a-version": (
+            [("GHSA-4", [], [])],
+            [("GHSA-1", compared), ("GHSA-2", compared), ("GHSA-3", compared), *always[1:]],
+        ),
+    }
+    for version, (found, undecided) in expected.items():
+        assert _reference_blocks(blocks, "PyPI", version)[:2] == (found, undecided)
+        assert _indexed_blocks(matcher, version, budget) == (found, undecided)
+
+
 def _component(name: str, version: str, kind: str = "pypi") -> RegistryEntryComponent:
     return RegistryEntryComponent(
         bom_ref=f"pkg:{kind}:{name}@{version}",
