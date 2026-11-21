@@ -839,6 +839,10 @@ _FIXED_BEFORE_4 = _transformers_record(
             ranges=[{"type": "ECOSYSTEM", "events": [{"introduced": "0", "fixed": "5"}]}]
         ),
         _transformers_record(ranges=[{"type": "ECOSYSTEM", "events": [{"introduced": "0"}, {}]}]),
+        _transformers_record(ranges=[{"type": "CALVER", "events": [{"introduced": "0"}]}]),
+        _transformers_record(ranges=[{"type": 7, "events": [{"introduced": "0"}]}]),
+        _transformers_record(ranges=[{"type": "ECOSYSTEM", "events": [{"fixed": "5.0"}]}]),
+        _transformers_record(ranges=[{"type": "ECOSYSTEM", "events": []}]),
     ],
     ids=[
         "ranges-not-list",
@@ -850,6 +854,10 @@ _FIXED_BEFORE_4 = _transformers_record(
         "fixed-not-string",
         "two-keys-in-event",
         "event-without-key",
+        "range-type-unknown",
+        "range-type-not-string",
+        "events-without-introduced",
+        "events-empty",
     ],
 )
 def test_offline_advisories_unevaluable_record_for_the_package_is_incomplete(tmp_path, bad):
@@ -978,6 +986,33 @@ def test_offline_advisories_exact_listing_decides_before_unparsable_bounds(tmp_p
         ([{"introduced": "0"}, {"fixed": "2.0"}, {"last_affected": "junk!"}], "1.5", ["junk!"]),
         ([{"introduced": "1.0"}, {"limit": "junk!"}], "2.5", ["junk!"]),
         ([{"introduced": "0"}, {"fixed": "x" * 100}], "2.5", ["x" * 64]),
+        # Two introduced events with no bound between them open one interval, in either order.
+        (
+            [{"introduced": "1.0"}, {"introduced": "0"}, {"last_affected": "junk!"}]
+            + [{"fixed": "2.0"}],
+            "2.5",
+            ["junk!"],
+        ),
+        (
+            [{"introduced": "0"}, {"introduced": "1.0"}, {"last_affected": "junk!"}]
+            + [{"fixed": "2.0"}],
+            "2.5",
+            ["junk!"],
+        ),
+        # A limit is not an interval bound, so it does not split the run either.
+        (
+            [{"introduced": "1.0"}, {"limit": "9.0"}, {"introduced": "0"}]
+            + [{"last_affected": "junk!"}, {"fixed": "2.0"}],
+            "2.5",
+            ["junk!"],
+        ),
+        # A bound between them does: the unparsable one belongs to the later interval only.
+        (
+            [{"introduced": "1.0"}, {"fixed": "2.0"}, {"introduced": "0"}]
+            + [{"last_affected": "junk!"}],
+            "2.5",
+            None,
+        ),
     ],
     ids=[
         "fixed-in-undecidable-interval",
@@ -988,6 +1023,10 @@ def test_offline_advisories_exact_listing_decides_before_unparsable_bounds(tmp_p
         "fixed-above",
         "limit",
         "long",
+        "introduced-run-later-first",
+        "introduced-run-zero-first",
+        "introduced-run-across-limit",
+        "introduced-split-by-bound",
     ],
 )
 def test_offline_advisories_parsable_bounds_decide_before_unparsable_ones(
@@ -1092,8 +1131,8 @@ def test_offline_advisories_consecutive_introduced_events_own_one_interval(tmp_p
 @pytest.mark.parametrize(
     ("rng", "reason"),
     [
-        ({"type": "FOO", "events": [{"introduced": "0"}]}, "OSV range type is not recognised"),
-        ({"type": 7, "events": [{"introduced": "0"}]}, "OSV range type is not recognised"),
+        ({"type": "FOO", "events": [{"introduced": "0"}]}, "OSV range type is not supported"),
+        ({"type": 7, "events": [{"introduced": "0"}]}, "OSV range type is not supported"),
         ({"type": "ECOSYSTEM", "events": [{"fixed": "2.0"}]}, "OSV range has no introduced event"),
         ({"type": "ECOSYSTEM", "events": []}, "OSV range has no introduced event"),
         ({"events": [{"limit": "*"}]}, "OSV range has no introduced event"),
