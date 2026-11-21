@@ -26,6 +26,7 @@ from nexus_symbiote.core.models import (
 )
 from nexus_symbiote.crosswalk_cli import register_crosswalk_commands
 from nexus_symbiote.digest_cli import register_digest_commands, source_date_epoch
+from nexus_symbiote.export_standard_cli import register_export_standard_commands
 from nexus_symbiote.graph import validate_graph
 from nexus_symbiote.graph_cli import register_graph_commands
 from nexus_symbiote.inventory_export_cli import register_inventory_export_commands
@@ -43,6 +44,7 @@ from nexus_symbiote.reporting import (
 )
 from nexus_symbiote.runtime_cli import register_runtime_commands
 from nexus_symbiote.supply_chain_cli import STAGED_INVENTORY, register_supply_chain_commands
+from nexus_symbiote.text_poisoning import apply_text_poisoning_rules
 from nexus_symbiote.trace_cli import register_trace_commands
 from nexus_symbiote.utils.files import write_output_file
 from nexus_symbiote.utils.terminal import (
@@ -1181,6 +1183,19 @@ def scan(
         failures_by[MANIFEST] = scan_failures[failure_count:]
     if len(surfaces_excluded) > exclusion_count:
         excluded_by[MANIFEST] = surfaces_excluded[exclusion_count:]
+    tp_failure_count, tp_exclusion_count = len(scan_failures), len(surfaces_excluded)
+    apply_text_poisoning_rules(
+        aibom,
+        root,
+        exclude_paths=policy.scan.exclude_paths,
+        failures=scan_failures,
+        exclusions=surfaces_excluded,
+        surfaces=surfaces_scanned,
+    )
+    if len(scan_failures) > tp_failure_count:
+        failures_by["text_poisoning"] = scan_failures[tp_failure_count:]
+    if len(surfaces_excluded) > tp_exclusion_count:
+        excluded_by["text_poisoning"] = surfaces_excluded[tp_exclusion_count:]
     graph_failures = validate_graph(aibom)
     scan_failures.extend(graph_failures)
     if graph_failures:
@@ -2382,6 +2397,7 @@ register_crosswalk_commands(main)
 register_trace_commands(main)
 register_inventory_export_commands(main)
 register_minimum_elements_commands(main)
+register_export_standard_commands(main)
 
 if __name__ == "__main__":
     main()

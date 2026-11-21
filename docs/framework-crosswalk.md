@@ -540,6 +540,18 @@ every rule.
 | `cwe` | CWE-451 User Interface (UI) Misrepresentation of Critical Information | all | A name with control, format or lookalike characters displays differently from what the agent and the inventory compare. |
 | `cwe` | CWE-1427 Improper Neutralization of Input Used for LLM Prompting | all | A tool name reaches the model's context with characters that are not neutralized. |
 
+### `instruction_injection`
+
+| Framework | Entry | Severities | Rationale |
+| --- | --- | --- | --- |
+| `owasp-llm-2025` | LLM01:2025 Prompt Injection | all | Prompt or instruction text contains override, exfiltration, or deception directives. |
+| `owasp-llm-2026` | LLM01:2026 Prompt Injection | all | Prompt or instruction text contains override, exfiltration, or deception directives. |
+| `owasp-asi-2026` | ASI01 Agent Goal Hijack | all | Injected directives in prompt or skill files can hijack the agent's goal. |
+| `mitre-atlas-2026.10` | AML.T0068 LLM Prompt Obfuscation | all | Concealed or override directives disguise instructions to alter agent or auditor behavior. |
+| `nist-ai-rmf-1.0` | MEASURE-2.7 Security and resilience are evaluated | all | Records a security-relevant property of the configuration, an input to evaluating its security. |
+| `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | all | Records a property of the system that bears on its robustness and cybersecurity. |
+| `cwe` | CWE-1427 Improper Neutralization of Input Used for LLM Prompting | all | Prompt or instruction text carries injection or auditor-deception directives without neutralization. |
+
 ### `instruction_layering`
 
 | Framework | Entry | Severities | Rationale |
@@ -852,6 +864,20 @@ No reference: no entry was defensible for this category.
 | `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | all | Records a property of the system that bears on its robustness and cybersecurity. |
 | `cwe` | CWE-451 User Interface (UI) Misrepresentation of Critical Information | all | The file can display differently from what the agent processes. |
 | `cwe` | CWE-1427 Improper Neutralization of Input Used for LLM Prompting | all | Instruction text reaches the model with characters that are not neutralized. |
+
+### `tool_description_poisoning`
+
+| Framework | Entry | Severities | Rationale |
+| --- | --- | --- | --- |
+| `owasp-llm-2025` | LLM01:2025 Prompt Injection | all | Poisoned tool descriptions act as indirect prompt injection inside tool metadata. |
+| `owasp-llm-2026` | LLM01:2026 Prompt Injection | all | Poisoned tool descriptions act as indirect prompt injection inside tool metadata. |
+| `owasp-asi-2026` | ASI01 Agent Goal Hijack | all | Hidden or coercive directives inside tool metadata can redirect agent execution. |
+| `owasp-asi-2026` | ASI02 Tool Misuse & Exploitation | all | Poisoned tool guidance steers agents toward unintended sensitive reads or exfiltration. |
+| `mitre-atlas-2026.10` | AML.T0010.005 Supply Chain Compromise: AI Agent Tool | all | Local tool descriptors embed malicious behavioral instructions inside the agent tool chain. |
+| `mitre-atlas-2026.10` | AML.T0068 LLM Prompt Obfuscation | all | Markup blocks or hidden directives inside tool schemas disguise injected instructions. |
+| `nist-ai-rmf-1.0` | MEASURE-2.7 Security and resilience are evaluated | all | Records a security-relevant property of the configuration, an input to evaluating its security. |
+| `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | all | Records a property of the system that bears on its robustness and cybersecurity. |
+| `cwe` | CWE-1427 Improper Neutralization of Input Used for LLM Prompting | all | Tool or schema description carries directive tags or exfiltration instructions into the model prompt. |
 
 ### `transitive_resolution`
 
