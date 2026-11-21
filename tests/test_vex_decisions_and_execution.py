@@ -96,6 +96,10 @@ def test_execution_bound_vex_yields_distinct_outcomes_and_keeps_unobserved_in_tr
     evidence = load_execution_evidence(trace_file, allow_unsigned=True)
     doc = VEXGenerator(execution_evidence=evidence).generate(bom)
 
+    assert any(
+        p["value"] == "unsigned" and p["name"] == "nexus-symbiote:traceAuthentication"
+        for p in doc["metadata"]["properties"]
+    )
     by_comp = {v["affects"][0]["ref"]: v for v in doc["vulnerabilities"]}
     assert set(by_comp.keys()) == {
         "tool:never-loaded",
@@ -355,6 +359,13 @@ def test_vex_cli_requires_dsse_attestation_links_live_advisories_and_verifies_sh
         json.dumps(
             {
                 "inventory_sha256": inv_sha,
+                "coverage": "complete",
+                "complete": True,
+                "errors": [],
+                "components_checked": 1,
+                "components_skipped": 0,
+                "components_excluded": 0,
+                "dry_run": False,
                 "advisories": [
                     {
                         "component_ref": "pkg:pypi:transformers@4.35.0",
@@ -425,6 +436,9 @@ def test_vex_cli_requires_dsse_attestation_links_live_advisories_and_verifies_sh
     )
     assert res_signed.exit_code == 0, res_signed.output
     doc = json.loads(res_signed.output)
+    metadata = {p["name"]: p["value"] for p in doc["metadata"]["properties"]}
+    assert metadata["nexus-symbiote:traceAuthentication"] == "attested"
+    assert metadata["nexus-symbiote:traceAttestationSha256"] == hash_bytes(att_file.read_bytes())
     assert doc["bomFormat"] == "CycloneDX"
     assert doc["specVersion"] == "1.7"
     assert len(doc["vulnerabilities"]) == 1
@@ -495,3 +509,68 @@ def test_a_flagged_offline_match_says_its_range_was_undecidable():
         for vuln in doc["vulnerabilities"]
     }
     assert flags == {"PYSEC-2025-193": "true", "PYSEC-2025-194": None}
+
+
+def test_partial_advisory_report_requires_opt_in_and_carries_coverage(tmp_path):
+    from nexus_symbiote.advisories import AdvisoryReport
+
+    report = AdvisoryReport(components_checked=1, errors=["lookup unavailable"])
+    path = tmp_path / "report.json"
+    path.write_text(json.dumps(report.to_dict()))
+    with pytest.raises(VEXDecisionError, match="coverage"):
+        load_advisory_report(path)
+    loaded = load_advisory_report(path, allow_partial=True)
+    inventory = AIBOM()
+    doc = VEXGenerator(advisory_report=loaded).generate(inventory)
+    props = {p["name"]: p["value"] for p in doc["metadata"]["properties"]}
+    assert props["nexus-symbiote:advisoryCoverage"] == "partial"
+    assert props["nexus-symbiote:advisoryErrors"] == "1"
+    assert props["nexus-symbiote:advisoryReportSha256"] == hash_bytes(path.read_bytes())
+    assert doc["serialNumber"] != VEXGenerator().generate(inventory)["serialNumber"]
+    assert (
+        doc["serialNumber"]
+        == VEXGenerator(advisory_report=loaded).generate(inventory)["serialNumber"]
+    )
+
+
+def test_vex_operator_material_rejects_writable_files_and_duplicate_yaml(tmp_path):
+    path = tmp_path / "decisions.yaml"
+    path.write_text("version: 1\ndecisions: []\ndecisions: []\n")
+    with pytest.raises(VEXDecisionError):
+        load_vex_decisions(path)
+    path.write_text("version: 1\ndecisions: []\n")
+    path.chmod(0o666)
+    with pytest.raises(VEXDecisionError, match="writable"):
+        load_vex_decisions(path)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        {"complete": True},
+        {"components_checked": False},
+        {"dry_run": "false"},
+        {"coverage": "complete"},
+    ],
+)
+def test_inconsistent_advisory_coverage_refused_even_with_partial_opt_in(tmp_path, mutation):
+    from nexus_symbiote.advisories import AdvisoryReport
+
+    payload = AdvisoryReport(components_checked=1, errors=["lookup incomplete"]).to_dict()
+    payload.update(mutation)
+    path = tmp_path / "advisories.json"
+    path.write_text(json.dumps(payload))
+    with pytest.raises(VEXDecisionError, match="coverage"):
+        load_advisory_report(path, allow_partial=True)
+
+
+def test_trusted_public_key_requires_protected_parent(tmp_path):
+    from nexus_symbiote.vex_decisions import _load_trusted_keys
+
+    directory = tmp_path / "keys"
+    directory.mkdir(mode=0o700)
+    public = directory / "verify.pem"
+    public.write_bytes(b"invalid key fixture")
+    directory.chmod(0o777)
+    with pytest.raises(VEXDecisionError, match="writable or untrusted ancestor"):
+        _load_trusted_keys((public,))
