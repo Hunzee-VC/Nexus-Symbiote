@@ -89,7 +89,8 @@ A few rules need their reasons:
   could be remote, so it counts as one. The `mcp` collector records an ambiguous
   authority as `[redacted]` in the first place.
 - The `mcp` collector exports an environment variable's name, with its value masked,
-  unless the name is token-shaped or not a plain field name; such a name is withheld as
+  unless the name is token-shaped, not a plain field name, or holds a credential
+  value read in the scan or its configuration file; such a name is withheld as
   `[redacted-N]`. That marker is the only credential signal the record keeps, so a
   plainly named variable such as `GITHUB_TOKEN` gives no class: names are not guessed
   at. A withheld name that is merely unusual, not a credential, still gives

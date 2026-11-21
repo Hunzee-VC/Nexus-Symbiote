@@ -106,6 +106,7 @@ Messages and recommendations are one line of plain text: control, bidirectional 
 | `capability_scope` | Destructive tool capability | none | LLM06:2025 | LLM03:2026 | ASI02 | AML.T0053 | MEASURE-2.7 |
 | `code_execution` | Remote code execution enabled | CWE-494, CWE-829 | LLM03:2025 | LLM04:2026 | ASI04, ASI05 | AML.T0011.000 | MANAGE-3.2 |
 | `completeness` | Incomplete declaration | none | none | none | none | none | GOVERN-1.6 |
+| `credential_exposure` | Literal credential in an MCP launch | CWE-798 | LLM02:2025 | LLM02:2026 | ASI03 | none | MEASURE-2.7 |
 | `credential_helper` | Credential helper command | none | none | none | ASI03, ASI05 | AML.T0142 | MEASURE-2.7 |
 | `custom_code` | Custom model code | CWE-829 | LLM03:2025 | LLM04:2026 | ASI04, ASI05 | AML.T0011.000 | MANAGE-3.2 |
 | `data_integrity` | Retrieval source integrity | CWE-319 (critical and high findings) | LLM04:2025, LLM08:2025 | LLM05:2026, LLM09:2026 | ASI06 | AML.T0070 | MEASURE-2.7 |

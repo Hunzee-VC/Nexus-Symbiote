@@ -353,8 +353,10 @@ A way around a limit that its entry does not describe is worth a
   unknown. Other locations and the runner's own namespace (`UV_*`, `PIP_*`,
   `YARN_*`, `BUN_*`, `DOCKER_*` and similar) are a medium `package_source`
   finding, and the package URL is withheld. Configuration names that look like
-  tokens or hold one after a prefix (`AWS_AKIA...`) are exported as `[redacted]`,
-  and a launcher package whose name or specifier looks like a token is withheld
+  tokens or hold one after a prefix (`AWS_AKIA...`), and names that hold a literal
+  credential of the scan or repeat a value the scrubber holds (not `X-Api-Key`), are
+  exported as `[redacted]` (`[redacted-N]` in the `env` map), and a launcher
+  package whose name or specifier looks like a token is withheld
   (`[withheld]`, no package URL) with a medium `completeness` finding.
 - **Changed values need the binding key.** Launch arguments, environment and header
   values are exported only as redacted positions and names, and endpoint and
@@ -395,6 +397,62 @@ A way around a limit that its entry does not describe is worth a
   issuer) are not scrubbed. In an inline shell or `cmd` script a credential is found
   by its shape or in a `NAME=value`, `--name=value` or `--name value` word, which
   covers cmd's `set NAME=<scheme> <credential>`.
+- **`credential_exposure` reports a precise subset of what is scrubbed.** The scrubber
+  redacts broadly on purpose; the finding is raised only for an MCP server's `env`
+  values, launch arguments, header values and endpoint URL query, and for an `env` or
+  header name in a known token shape. A credential in the `command` field itself, in
+  an `oauth` or `auth` object, in a Claude Code settings `env` value, or in an A2A or
+  RAG header is scrubbed or withheld as before but raises no `credential_exposure`
+  finding. A password in an endpoint URL's user information stays with
+  `transport_security`; a token in a URL path
+  (`https://hooks.slack.test/services/T0/B0/<token>`), a URL fragment or a
+  `;name=value` path parameter is not reported, and neither is a literal at a position
+  with no credential name, such as a value after `-t`, a positional argument or
+  `echo <token> | docker login --password-stdin`. Names are read as words: `TOTP_SEED`
+  and `PIN` do not name a credential, and `VAULT_SECRET_ID` ends in the descriptor
+  `id`, so it is not reported although an AppRole secret ID is a credential; an index
+  key other than a primary or routing key (`SORT_KEY`, `RECAPTCHA_SITE_KEY`) holds none,
+  and an owner or location (`AUTH_USER`, `TOKEN_ISSUER`, `DB_PASSWORD_HOST`) describes
+  one. A JWT, bare or after `Bearer`, under an `anon`, `anonymous`, `public`,
+  `publishable` or `pk` name is not reported even when it is a misnamed service key, a
+  seed phrase counts only under a mnemonic or seed phrase name (not `WALLET_SEED`),
+  httpie's `-a` only under a fetcher, and elsewhere `-u user:secret` only with a literal
+  after the colon. A Discord token's first part starts with M, N or O, and the header
+  lines one value injects count toward the 4,096 values of one file. Values
+  are read for what they most likely are, so a real credential that looks like a
+  reference, a placeholder or a label is missed: a value that holds `${` or `$(`
+  anywhere (the default or alternate text of a shell expansion, `${TOKEN:-<value>}`,
+  `:=`, `-`, `=`, `:+` or `+`, is read on its own and counts when it is a literal;
+  `${TOKEN:?message}` carries no value), `$` and two or more upper-case letters, digits or underscores up to
+  punctuation or its end (`S3cure!Pa$$W0RD` and `$PR0D_KEY` read as `$NAME`;
+  `$PR0D_Kx9...` does count), or a name in braces set off from letters and digits
+  (`pw-{prod}`), or, under a name that is not a password's, a lower-case shell
+  variable such as `$api_token_2`; one made of placeholder words such as `test`, `dev`,
+  `my` or `example` that random segments do not outnumber, a date, time or duration
+  (`2027-01-01T00:00:00Z`, `1h30m`) under a credential name, a value of
+  fewer than eight characters, a single word of letters under 16 characters
+  (`letmeinplease`, `Sunshinesummer`) even under a password name, since what remains
+  must be credential-shaped, a phrase of short words (`MixedCaseLettersOnlyValue`)
+  under a token, key or secret name, a cookie value under 16 characters outside a
+  session cookie, a passphrase that holds a sentence's small word such as `the`, `by`
+  or `in`, and, under any name but a passphrase's, a value with white space
+  (`correct horse battery staple 1`) that is not a scheme credential, a header line, a
+  cookie, a connection string, a JSON object, an assignment or a `password <value>`
+  pair. An argument longer than 64 KiB is split into words at white space only,
+  without shell quoting. The other way, weak and documented values still count where they read as
+  literals: `admin123` or `passw0rd` under a password name, `Basic dXNlcjpwYXNz` under
+  `Authorization`, `correct horse battery staple` under a passphrase name, a repeated
+  pattern such as `deadbeefdeadbeef...` or `ab12ab12ab12`, a UUID under `--key`, the
+  jwt.io example token, and a value under a name whose word `pass` is a stage not
+  listed (`LINT_PASS`; `FIRST_PASS` and `PASS_THROUGH` are not read as passwords). The
+  detail lists at most 12 positions and then `and N more positions`. Collection stops
+  at 64 positions for one server, after which the detail says
+  `and at least 52 more positions` however many more the server holds; the finding
+  names positions, never values, so a suppression binds to the positions and classes
+  the detail lists. Below the bound a new position changes the detail and retires the
+  suppression; past it, a reference at an existing position replaced by a literal
+  leaves the detail, and so the suppression, unchanged, as does replacing a literal
+  with another of the same class at any count.
 - **Resolver settings outside the root are not read.** Settings are read from the
   root `.npmrc`, `bunfig.toml`, `.yarnrc.yml`, `.yarnrc`, `.env.yarn`, `uv.toml`
   and the `[tool.uv]` table of `pyproject.toml`. User and global configuration,

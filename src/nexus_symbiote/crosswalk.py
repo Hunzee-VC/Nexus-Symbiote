@@ -98,6 +98,7 @@ FRAMEWORKS: tuple[Framework, ...] = (
         ),
         entries=(
             Entry("LLM01:2025", "Prompt Injection"),
+            Entry("LLM02:2025", "Sensitive Information Disclosure"),
             Entry("LLM03:2025", "Supply Chain"),
             Entry("LLM04:2025", "Data and Model Poisoning"),
             Entry("LLM06:2025", "Excessive Agency"),
@@ -117,6 +118,7 @@ FRAMEWORKS: tuple[Framework, ...] = (
         ),
         entries=(
             Entry("LLM01:2026", "Prompt Injection"),
+            Entry("LLM02:2026", "Sensitive Information Disclosure"),
             Entry("LLM03:2026", "Excessive Agency"),
             Entry("LLM04:2026", "Supply Chain"),
             Entry("LLM05:2026", "Data and Model Poisoning"),
@@ -235,9 +237,10 @@ FRAMEWORKS: tuple[Framework, ...] = (
         source="https://cwe.mitre.org/",
         verification="secondary",
         note=(
-            "Identifiers from the earlier SARIF catalog. The names of CWE-494, CWE-829 and "
-            "CWE-1427 match CWE 4.20 as the OWASP Top 10 for LLM Applications 2026 cites "
-            "them; the others were not checked against the CWE site for this release."
+            "Identifiers from the earlier SARIF catalog, and CWE-798 for the credential "
+            "exposure finding. The names of CWE-494, CWE-829 and CWE-1427 match CWE 4.20 as "
+            "the OWASP Top 10 for LLM Applications 2026 cites them; the others were not "
+            "checked against the CWE site for this release."
         ),
         entries=(
             Entry("CWE-250", "Execution with Unnecessary Privileges"),
@@ -247,6 +250,7 @@ FRAMEWORKS: tuple[Framework, ...] = (
             Entry("CWE-451", "User Interface (UI) Misrepresentation of Critical Information"),
             Entry("CWE-494", "Download of Code Without Integrity Check"),
             Entry("CWE-502", "Deserialization of Untrusted Data"),
+            Entry("CWE-798", "Use of Hard-coded Credentials"),
             Entry("CWE-829", "Inclusion of Functionality from Untrusted Control Sphere"),
             Entry(
                 "CWE-1336", "Improper Neutralization of Special Elements Used in a Template Engine"
@@ -470,6 +474,32 @@ CROSSWALK: dict[str, tuple[Reference, ...]] = {
             ISO_42001,
             "A.4.2",
             "Records information about a component that the inventory does not document.",
+        ),
+    ),
+    "credential_exposure": (
+        _ref(
+            OWASP_LLM_2025,
+            "LLM02:2025",
+            "A credential committed with the agent's configuration is disclosed to everyone "
+            "who reads the repository.",
+        ),
+        _ref(
+            OWASP_LLM_2026,
+            "LLM02:2026",
+            "A credential committed with the agent's configuration is disclosed to everyone "
+            "who reads the repository.",
+        ),
+        _ref(
+            OWASP_ASI_2026,
+            "ASI03",
+            "A committed credential lets whoever reads the repository act as the agent does.",
+        ),
+        _ref(NIST_AI_RMF, "MEASURE-2.7", _EVALUATION),
+        _ref(EU_AI_ACT, "Art. 15", _RESILIENCE),
+        _ref(
+            CWE,
+            "CWE-798",
+            "The credential is written into the configuration rather than supplied at run time.",
         ),
     ),
     "credential_helper": (
