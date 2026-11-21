@@ -13,8 +13,85 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 import pytest
+from packaging.requirements import InvalidRequirement, Requirement
+from packaging.utils import canonicalize_name
 
 import nexus_symbiote
+
+ALLOWED_WHEEL_REQUIRES_DIST = frozenset(
+    {
+        "click",
+        "cryptography",
+        "cyclonedx-python-lib",
+        "jsonschema",
+        "packageurl-python",
+        "packaging",
+        "platformdirs",
+        "pydantic",
+        "pyyaml",
+        "referencing",
+        "rfc8785",
+        "sigstore",
+        "sigstore-models",
+        "tree-sitter",
+        "tree-sitter-typescript",
+        "tuf",
+    }
+)
+FORBIDDEN_LLM_PACKAGES = frozenset(
+    {
+        "anthropic",
+        "autogen",
+        "autogen-agentchat",
+        "bedrock",
+        "boto3",
+        "cohere",
+        "crewai",
+        "dspy",
+        "dspy-ai",
+        "google-genai",
+        "google-generativeai",
+        "groq",
+        "langchain",
+        "langchain-anthropic",
+        "langchain-community",
+        "langchain-core",
+        "langchain-openai",
+        "langgraph",
+        "litellm",
+        "llama-index",
+        "llama-index-core",
+        "mcp",
+        "mistralai",
+        "ollama",
+        "openai",
+        "openai-agents",
+        "pyautogen",
+        "pydantic-ai",
+        "semantic-kernel",
+        "smolagents",
+        "torch",
+        "transformers",
+        "vllm",
+    }
+)
+
+
+def check_wheel_requires_dist(requires: list[str] | tuple[str, ...] | None) -> list[str]:
+    """Verify wheel Requires-Dist matches the reviewed offline core/extra allow-list (Invariant 3)."""
+    problems: list[str] = []
+    for raw in requires or ():
+        try:
+            name = str(canonicalize_name(Requirement(raw).name))
+        except InvalidRequirement:
+            problems.append(f"unparseable Requires-Dist entry: {raw!r}")
+            continue
+        if name in FORBIDDEN_LLM_PACKAGES:
+            problems.append(f"forbidden LLM/agent dependency in wheel Requires-Dist: {name}")
+        elif name not in ALLOWED_WHEEL_REQUIRES_DIST:
+            problems.append(f"unreviewed dependency in wheel Requires-Dist: {name}")
+    return problems
+
 
 TESTS = Path(__file__).resolve().parents[1] / "tests"
 CASES = (
@@ -83,6 +160,10 @@ def main() -> int:
     located_init = Path(str(installed.locate_file("nexus_symbiote/__init__.py"))).resolve()
     if not sys.flags.isolated or digest != installed_hash or origin != located_init:
         parser.error("use python -I and pip-install the exact wheel in the test environment")
+    if dep_problems := check_wheel_requires_dist(installed.requires):
+        for problem in dep_problems:
+            print(f"Wheel dependency policy violation: {problem}", file=sys.stderr)
+        return 1
     print(f"Testing {wheel.name} sha256={digest} from {origin}", flush=True)
 
     with TemporaryDirectory(prefix="symbiote-wheel-check-") as scratch:
