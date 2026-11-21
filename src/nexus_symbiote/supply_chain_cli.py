@@ -15,7 +15,7 @@ import click
 from nexus_symbiote import modes
 from nexus_symbiote.core.aibom import AIBOM, NativeFormatError
 from nexus_symbiote.live_cli import review_notice
-from nexus_symbiote.runtime_cli import _refuse_source_overwrite
+from nexus_symbiote.runtime_cli import _refuse_source_overwrite as _refuse_source_overwrite
 from nexus_symbiote.utils.files import create_staging_file
 from nexus_symbiote.utils.terminal import (
     echo_line,
