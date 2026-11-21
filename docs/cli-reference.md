@@ -62,6 +62,7 @@ change them. See [collection limits](collection-limits.md).
 | [`graph`](#graph) | offline | Write a self-contained HTML or JSON view of an inventory's associations, risk classes and exposure paths |
 | [`baseline`](#baseline) | offline | Write an unsigned snapshot only if the scan gate passes |
 | [`vex`](#vex) | offline | Export schema-validated VEX findings with optional operator decisions, advisories and trace evidence |
+| [`trifecta`](#trifecta) | offline | Analyze an inventory offline for lethal trifectas, chained toxic flows and tool shadowing |
 | [`crosswalk`](#crosswalk) | offline | Map findings to OWASP, MITRE ATLAS, NIST AI RMF, EU AI Act, ISO/IEC 42001 and CWE entries |
 | [`minimum-elements`](#minimum-elements) | offline | Report which G7 AI SBOM minimum elements an AgentBOM's CycloneDX export carries, and how to supply the missing ones |
 | [`verify-artifact`](#verify-artifact) | offline | Check a file's SHA-256, and optionally its Sigstore bundle |
@@ -1149,6 +1150,20 @@ and `stdio`, such as the `websocket` that the `mcp` collector records for a `ws:
 `wss://` endpoint, fails with reason `unsupported-transport`. The
 [launch policy](#launch-policy) section gives the policy's format and where it may be
 kept.
+
+### `trifecta`
+
+Analyze an inventory offline for lethal trifectas, chained toxic flows, and tool shadowing.
+
+```text
+nexus-symbiote trifecta [OPTIONS] AIBOM_PATH
+```
+
+| Option | Description |
+|---|---|
+| `-o`, `--output` `PATH` | Write the trifecta and toxic-flow report JSON to this file instead of standard output. |
+| `--fail-on-critical` / `--no-fail-on-critical` | Exit with status 1 when a critical lethal-trifecta finding is present (default: fail). |
+| `--fail-on-finding` / `--no-fail-on-finding` | Exit with status 1 when any trifecta, toxic-flow, or tool-shadowing finding is present (default: off). |
 
 ### `vex`
 
