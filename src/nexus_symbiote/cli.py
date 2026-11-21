@@ -991,6 +991,15 @@ def _render_aibom(
     ),
 )
 @click.option(
+    "--accept-default-excludes",
+    is_flag=True,
+    help=(
+        "Do not record a coverage gap for a non-empty default-excluded name (.git, "
+        "node_modules, __pycache__, .venv, venv). Without this flag such an entry "
+        "makes coverage partial. An empty directory does not."
+    ),
+)
+@click.option(
     "--fail-on-unsigned-discovery",
     is_flag=True,
     help="With --check, exit with status 1 when ShadowScan discovery evidence is unverified.",
@@ -1018,6 +1027,7 @@ def scan(
     operator_policy_max_age_days: int = 90,
     no_project_policy: bool = False,
     accept_project_policy: bool = False,
+    accept_default_excludes: bool = False,
     check_only: bool = False,
     fail_on_unsigned_discovery: bool = False,
     allow_unsigned_discovery: bool = False,
@@ -1123,7 +1133,10 @@ def scan(
         try:
             configure = getattr(scanner, "configure", None)
             if configure:
-                configure(exclude_paths=policy.scan.exclude_paths)
+                configure(
+                    exclude_paths=policy.scan.exclude_paths,
+                    accept_default_excludes=accept_default_excludes,
+                )
             elif policy.scan.exclude_paths:
                 raise ValueError("scanner does not support configured exclude_paths")
             result = scanner.scan(root)
@@ -1760,6 +1773,15 @@ def verify_discovery(
     ),
 )
 @click.option(
+    "--accept-default-excludes",
+    is_flag=True,
+    help=(
+        "Do not record a coverage gap for a non-empty default-excluded name (.git, "
+        "node_modules, __pycache__, .venv, venv) when reconciling the project. Without "
+        "this flag such an entry makes the local collection partial."
+    ),
+)
+@click.option(
     "--skip-integrity",
     is_flag=True,
     help=(
@@ -1799,6 +1821,7 @@ def validate(
     operator_policy_max_age_days: int = 90,
     no_project_policy: bool = False,
     accept_project_policy: bool = False,
+    accept_default_excludes: bool = False,
     skip_integrity: bool = False,
     json_output: bool = False,
     report_format: str | None = None,
@@ -1874,6 +1897,7 @@ def validate(
                 root,
                 exclude_paths=policy.scan.exclude_paths,
                 signature_policies=signature_policies,
+                accept_default_excludes=accept_default_excludes,
             )
             if root is not None
             else cv.validate(bom)
@@ -2000,6 +2024,15 @@ def validate(
     ),
 )
 @click.option(
+    "--accept-default-excludes",
+    is_flag=True,
+    help=(
+        "Do not record a coverage gap for a non-empty default-excluded name (.git, "
+        "node_modules, __pycache__, .venv, venv) when reconciling the project. Without "
+        "this flag such an entry makes the local collection partial."
+    ),
+)
+@click.option(
     "--require-discovery-signature",
     is_flag=True,
     help=(
@@ -2032,6 +2065,7 @@ def risk(
     operator_policy_max_age_days: int = 90,
     no_project_policy: bool = False,
     accept_project_policy: bool = False,
+    accept_default_excludes: bool = False,
     fail_on_unsigned_discovery: bool = False,
     allow_unsigned_discovery: bool = False,
     project: Path | None = None,
@@ -2112,6 +2146,7 @@ def risk(
             root,
             exclude_paths=policy.scan.exclude_paths,
             signature_policies=signature_policies,
+            accept_default_excludes=accept_default_excludes,
         )
         discovery: list[str] = []
         if discovery_signature_required(

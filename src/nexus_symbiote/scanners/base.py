@@ -289,11 +289,18 @@ class Scanner(ABC):
 
     name: str = "base"
     _exclude_paths: tuple[str | Path, ...] = ()
+    _accept_default_excludes: bool = False
     _files: ConfinedCollection | None = None
 
-    def configure(self, exclude_paths: Iterable[str | Path] = ()) -> None:
+    def configure(
+        self,
+        exclude_paths: Iterable[str | Path] = (),
+        *,
+        accept_default_excludes: bool = False,
+    ) -> None:
         """Set root-relative or absolute collection exclusions before ``scan``."""
         self._exclude_paths = tuple(exclude_paths)
+        self._accept_default_excludes = accept_default_excludes
 
     @contextmanager
     def _collection(
@@ -304,6 +311,7 @@ class Scanner(ABC):
             result.scan_failures,
             result.surfaces_excluded,
             exclude_paths=self._exclude_paths,
+            accept_default_excludes=self._accept_default_excludes,
             **bounds,
         ) as files:
             self._files = files

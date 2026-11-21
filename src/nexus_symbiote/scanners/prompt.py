@@ -1203,11 +1203,19 @@ def _report_skipped(skipped: list[Path], reported: set[Path], result: ScanResult
     """A coverage gap for each entry that a walk of an agent configuration directory
     skipped because its name, such as ``venv`` or ``node_modules``, is excluded by
     default. A host reads such a skill or subagent file like any other, so it is not
-    a dependency tree to leave out silently. Each path is reported once.
+    a dependency tree to leave out silently. Each path is reported once. A generic
+    collection gap for the same path, including one recorded through a directory
+    symlink's target, is replaced by this one.
     """
+    generic = ": default collection exclude; not collected"
     for path in skipped:
         if path not in reported:
             reported.add(path)
+            plain = f"{path.as_posix()}{generic}"
+            try:
+                result.surfaces_excluded.remove(plain)
+            except ValueError:
+                pass
             result.surfaces_excluded.append(
                 f"{path.as_posix()}: default-excluded name inside an agent configuration "
                 "directory; not collected"

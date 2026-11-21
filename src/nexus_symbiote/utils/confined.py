@@ -326,6 +326,23 @@ def _default_excluded(name: str) -> bool:
     return name in DEFAULT_EXCLUDES or fold_name(name) in DEFAULT_EXCLUDES
 
 
+def _under_agent_configuration_directory(relative: Path) -> bool:
+    """Whether ``relative`` sits inside a directory the prompt collector walks whole.
+
+    That collector already records a coverage gap for a default-excluded name there.
+    A second generic gap from this walk would name the same path twice.
+    """
+    from nexus_symbiote.scanners.prompt import INSTRUCTION_DIRECTORIES, SKILL_DIRECTORIES
+
+    parent = relative.parent.as_posix()
+    if parent == ".":
+        return False
+    for directory in (*INSTRUCTION_DIRECTORIES, *SKILL_DIRECTORIES):
+        if parent == directory or parent.startswith(directory + "/"):
+            return True
+    return False
+
+
 def _lexical_target(directory: Path, text: str) -> Path:
     """Resolve a link's text against its directory without following anything.
 
@@ -499,6 +516,7 @@ class ConfinedCollection:
         exclusions: list[str] | None = None,
         *,
         exclude_paths: Iterable[str | Path] = (),
+        accept_default_excludes: bool = False,
         max_file_bytes: int | Bound | None = None,
         max_entries: int | Bound | None = None,
         max_depth: int | Bound | None = None,
@@ -550,6 +568,7 @@ class ConfinedCollection:
         self._excluded: set[tuple[str, ...]] = set()
         self._invalid_policy = False
         self._lifted: frozenset[str] = frozenset()
+        self._accept_default_excludes = accept_default_excludes
         root_text = str(self.root)
         prefix = root_text.rstrip(os.sep) + os.sep
         for value in exclude_paths:
@@ -720,6 +739,33 @@ class ConfinedCollection:
         if denied:
             self._exclusion_log.add(f"{relative}: excluded by collection policy")
         return denied
+
+    def _default_exclude_occupied(self, directory_fd: int, name: str) -> bool:
+        """Whether a default-excluded entry holds something collection would have read.
+
+        An empty directory is not a gap. A regular file, a symlink, any other
+        non-directory, a directory that cannot be listed, and a directory with at
+        least one entry are. The check does not follow a symlink and does not
+        charge the entry budget: it stops at the first entry.
+        """
+        try:
+            metadata = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+        except OSError:
+            return True
+        if not stat.S_ISDIR(metadata.st_mode):
+            return True
+        flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
+        try:
+            child_fd = os.open(name, flags, dir_fd=directory_fd)
+        except OSError:
+            return True
+        try:
+            with os.scandir(child_fd) as stream:
+                return next(stream, None) is not None
+        except OSError:
+            return True
+        finally:
+            os.close(child_fd)
 
     def _has_exact_name(self, directory_fd: int, name: str) -> bool:
         """Whether ``directory_fd`` holds an entry whose exact spelling is ``name``."""
@@ -1126,8 +1172,12 @@ class ConfinedCollection:
         would follow a second link. ``directory_links`` collects the directory
         symlinks the walk met, and ``skipped`` the entries it neither entered nor
         yielded because their name is one of ``DEFAULT_EXCLUDES``, in any spelling a
-        case-insensitive file system treats as that name, which nothing records
-        otherwise. Every other symlink is a recorded failure. A directory whose
+        case-insensitive file system treats as that name. A non-empty one of those
+        entries is also a coverage gap, unless the collection was told to accept
+        default excludes, the entry is inside an agent configuration directory the
+        prompt collector reports itself, or ``skipped`` is set so the caller reports
+        it. An empty directory is not a gap. Every other symlink is a recorded
+        failure. A directory whose
         ``st_dev`` differs from the root's is a mount point, recorded as excluded and
         not entered; regular files are not refused for their device alone. Past the
         collection's listing bounds, the walk's per-entry failures end it as one line
@@ -1205,6 +1255,19 @@ class ConfinedCollection:
                 if self.excluded(child):
                     if scope.skipped is not None and _default_excluded(name):
                         scope.skipped.append(child)
+                    # A caller that collects skipped reports the entry itself.
+                    # Inside an agent configuration directory the prompt collector
+                    # reports it, including from a walk that does not collect skipped.
+                    if (
+                        scope.skipped is None
+                        and not self._accept_default_excludes
+                        and _default_excluded(name)
+                        and not _under_agent_configuration_directory(child)
+                        and self._default_exclude_occupied(directory_fd, name)
+                    ):
+                        self._exclusion_log.add(
+                            f"{child.as_posix()}: default collection exclude; not collected"
+                        )
                     continue
                 metadata = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
                 if (
