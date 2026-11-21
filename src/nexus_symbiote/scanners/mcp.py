@@ -1947,20 +1947,22 @@ _KNOWN_SETTINGS = (
 )
 
 
-def _environment_label(variable: str) -> str:
+def _environment_label(variable: str, launched: Iterable[str] = ()) -> str:
     """A package source label for an environment variable, never a token-shaped name.
 
     Every name comes from a fixed vocabulary but the scope of an npm scoped registry,
     which is named only as ``_setting_name`` names it, as the npm resolver view does.
     """
+    if TOKEN_SHAPE.search(variable):
+        return "env:[redacted]"
     key = _npm_key(variable)
     if (
         key is not None
         and _SCOPED_REGISTRY.fullmatch(key)
-        and _setting_name(key, set()) == "[other]"
+        and _setting_name(key, launched) == "[other]"
     ):
         return "env:npm_config_[other]"
-    return "env:[redacted]" if TOKEN_SHAPE.search(variable) else f"env:{variable}"
+    return f"env:{variable}"
 
 
 def _absolute(value: str, *, windows: bool = False) -> bool:
@@ -2072,11 +2074,13 @@ def _runner_environment(
     return sources, reasons
 
 
-def _setting_name(key: str, launched: set[str]) -> str:
+def _setting_name(key: str, launched: Iterable[str], *, selected: bool = False) -> str:
     """A resolver setting name safe to export; a name from no vocabulary is ``[other]``.
 
     A token pasted on its own .npmrc line is read by npm as ``<token>=true``, so
-    a key name is input and may be a secret.
+    a key name is input and may be a secret. So may the scope of a scoped registry,
+    which is named only when it is a launched package's scope, or the registry npm
+    ``selected`` for one through the ``scope`` setting.
     """
     if key in _KNOWN_SETTINGS:
         return key
@@ -2085,11 +2089,19 @@ def _setting_name(key: str, launched: set[str]) -> str:
         _SCOPED_REGISTRY.fullmatch(key)
         and _NPM_SCOPE.fullmatch(scope)
         and not TOKEN_SHAPE.search(scope)
+        and (selected or any(name.startswith(f"{scope}/") for name in launched))
     ):
         return f"{scope}:{rest}"
     if key.startswith("sources.") and key[8:] in launched:
         return key
     return "[other]"
+
+
+def _option_label(option: str, launched: Iterable[str]) -> str:
+    """A runner option's source label; a scoped registry names only a launched scope."""
+    if option.startswith("--@") and option.endswith(":registry"):
+        return f"--{_setting_name(option[2:], launched)}"
+    return option
 
 
 def _npm_key(variable: str) -> str | None:
@@ -3358,7 +3370,10 @@ class MCPScanner(Scanner):
         if identity.sources:
             launcher_properties["package_sources"] = identity.sources
         # Repeated "[other]" names stay, so adding an unnamed setting changes the digest.
-        resolver_names = sorted(view.names)
+        resolver_names = sorted(
+            "[redacted]" if scrubber.contains(label) or TOKEN_SHAPE.search(label) else label
+            for label in view.names
+        )
         if resolver_names:
             launcher_properties["resolver_settings"] = resolver_names
         if context:
@@ -3511,14 +3526,18 @@ class MCPScanner(Scanner):
         runner_sources: list[tuple[str, str]],
     ) -> list[str]:
         """Exported sources that redirect package resolution: label and origin only."""
-        found: list[tuple[str, str]] = [*launch.sources, *runner_sources]
+        launched = {str(package.name) for package in launch.packages if package.registry}
+        found: list[tuple[str, str]] = [
+            (_option_label(option, launched), value) for option, value in launch.sources
+        ]
+        found.extend(runner_sources)
         family = launch.family or ""
         environment = [*env.items(), *launch.environment]
         pattern = _REDIRECT_ENVIRONMENT.get(family)
         if pattern is not None and not view.environment:
             for variable, value in environment:
                 if re.fullmatch(pattern, variable, re.IGNORECASE):
-                    found.append((_environment_label(variable), value))
+                    found.append((_environment_label(variable, launched), value))
         trust_pattern = _TRUST_ENVIRONMENT.get(family)
         if trust_pattern is not None:
             # An added CA or disabled TLS verification lets a proxy or another
@@ -3539,6 +3558,9 @@ class MCPScanner(Scanner):
         found.extend(view.sources)
         sources: set[str] = {f"{label}=[unresolved]" for label in view.unresolved}
         for label, value in found:
+            if scrubber.contains(label) or TOKEN_SHAPE.search(label):
+                label = "[redacted]"
+                withheld.append("package source")
             for location in _origin_label(value) or ["[set]"]:
                 if scrubber.contains(location):
                     location = "[redacted]"
@@ -3573,14 +3595,19 @@ class MCPScanner(Scanner):
                 if key is None or value == "":
                     continue
                 if key == "scope":
-                    environment_scope = (_environment_label(variable), value)
+                    environment_scope = (_environment_label(variable, launched), value)
                 kind = _npm_setting(key, value)
                 if kind == "identity":
                     view.identity.append(f"npm {key} setting from the environment")
                 elif kind in {"source", "registry"}:
                     known = _setting_name(key, launched) != "[other]"
                     view.sources.append(
-                        (_environment_label(variable) if known else "env:npm_config_[other]", value)
+                        (
+                            _environment_label(variable, launched)
+                            if known
+                            else "env:npm_config_[other]",
+                            value,
+                        )
                     )
         if family == "yarn":
             # Yarn reads every setting from YARN_<NAME> variables, yarnPath included.
@@ -3640,7 +3667,10 @@ class MCPScanner(Scanner):
                     view.sources.append(
                         (scope_label, scope)
                         if selected == "scope"
-                        else (f"{path}:{_setting_name(selected, launched)}", settings[selected])
+                        else (
+                            f"{path}:{_setting_name(selected, launched, selected=True)}",
+                            settings[selected],
+                        )
                     )
         return view
 
