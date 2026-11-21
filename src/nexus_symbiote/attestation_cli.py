@@ -25,11 +25,11 @@ from nexus_symbiote.runtime_cli import (
     _InputTooLargeError,
     _KeyFileError,
     _load_private,
-    _load_trusted_public,
     _passphrase,
     _read,
     _refuse_source_overwrite,
 )
+from nexus_symbiote.runtime_cli import _load_trusted_public as _load_trusted_public
 from nexus_symbiote.utils.terminal import echo_line, json_text, write_cli_output
 
 MAX_AGE_DAYS = 36500
