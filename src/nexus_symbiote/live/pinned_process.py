@@ -241,6 +241,17 @@ def isolation_off() -> Iterator[None]:
         _ISOLATION.reset(token)
 
 
+def teardown_verifiable() -> bool:
+    """Whether cleanup can tell that nothing the launcher started is still running.
+
+    It can inside a PID namespace, and under the opt-out on Linux, where the wrapper's tree
+    is swept from /proc. Opted out elsewhere, cleanup signals only the launcher's process
+    group and cannot list what left it, so a clean cleanup there says nothing about a
+    process that moved to another session.
+    """
+    return isolation_enabled() or sys.platform.startswith("linux")
+
+
 def stage_pinned_executable(command: str, digest: str, work: Path) -> Path:
     """Copy the exact bytes of ``command`` to ``work/server`` and check ``digest``."""
     if (

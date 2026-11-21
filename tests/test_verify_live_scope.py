@@ -665,3 +665,46 @@ def test_descriptor_checks_share_the_session_deadline(tmp_path, monkeypatch):
     started = time.monotonic()
     assert _reason(tmp_path, launcher(tmp_path, tools=tools)) == "deadline"
     assert time.monotonic() - started < 4
+
+
+def test_an_opted_out_launch_where_descendants_cannot_be_listed_reports_teardown_unverified(
+    tmp_path, monkeypatch
+):
+    """Off Linux the opt-out's cleanup signals one process group and lists nothing.
+
+    A helper that called setsid outlives it, so a matching server must not read as a clean
+    teardown: the result says unverified, and the status and exit code stay what they were.
+    """
+    from nexus_symbiote.live import pinned_process
+
+    policy = launcher(tmp_path)
+    monkeypatch.setattr(pinned_process.sys, "platform", "darwin")
+    result, _, _ = invoke(tmp_path, inventory(), policy, "--json-output", "--no-isolation")
+    assert result.exit_code == 0, result.output
+    server = json.loads(result.stdout)["results"][0]
+    assert (server["status"], server["teardown"]) == ("verified", "unverified")
+    assert "Server mcp:weather: teardown-unverified: " in result.stderr
+    recorded, _, _ = invoke(tmp_path, inventory(), policy, "--record", "--no-isolation")
+    assert recorded.exit_code == 0, recorded.output
+    assert "Server mcp:weather: teardown-unverified: " in recorded.stderr
+
+
+def test_teardown_is_confirmed_only_where_cleanup_can_list_what_the_launcher_started(tmp_path):
+    expected = "confirmed" if sys.platform.startswith("linux") else "unverified"
+    report = verify_mcp_servers(inventory(), trusted_launchers=launcher(tmp_path))
+    assert [(r.status, r.teardown) for r in report.results] == [("verified", expected)]
+    result, _, _ = invoke(tmp_path, inventory(), launcher(tmp_path), "--no-isolation")
+    assert result.exit_code == 0, result.output
+    assert ("teardown-unverified" in result.stderr) is (expected == "unverified")
+
+
+def test_a_server_whose_launcher_never_ran_reports_no_teardown(tmp_path, monkeypatch):
+    from nexus_symbiote.live import pinned_process
+
+    monkeypatch.setattr(pinned_process.sys, "platform", "darwin")
+    report = verify_mcp_servers(inventory(), trusted_launchers={})
+    assert [(r.reason, r.teardown) for r in report.results] == [("missing-launch-policy", None)]
+    policy = launcher(tmp_path)
+    policy["mcp:weather"]["sha256"] = "sha256:" + "0" * 64
+    report = verify_mcp_servers(inventory(), trusted_launchers=policy)
+    assert [(r.reason, r.teardown) for r in report.results] == [("launcher-digest-mismatch", None)]

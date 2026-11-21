@@ -25,6 +25,7 @@ from nexus_symbiote.core.hashing import (
 from nexus_symbiote.core.models import MCPServerComponent, ToolComponent
 from nexus_symbiote.graph import validate_graph
 from nexus_symbiote.live import stdio
+from nexus_symbiote.live.pinned_process import teardown_verifiable
 from nexus_symbiote.live.stdio import (
     LaunchPolicyError,
     PinnedObservation,
@@ -94,6 +95,23 @@ REASONS: dict[str, str] = {
 }
 
 
+# Reasons that are decided before the pinned launcher is executed.
+_NOT_STARTED = frozenset(
+    {
+        "missing-launch-policy",
+        "invalid-launch-policy",
+        "launcher-unavailable",
+        "launcher-digest-mismatch",
+        "launcher-start-failed",
+        "isolation-unavailable",
+    }
+)
+TEARDOWN_UNVERIFIED = (
+    "The pinned launcher ran under --no-isolation on a platform where cleanup cannot list "
+    "what it started; a process it moved to another session may still be running on this "
+    "worker."
+)
+
 # Transport labels of servers reached over the network; discover-mcp observes them.
 REMOTE_TRANSPORTS = frozenset({"sse", "streamable-http", "http"})
 
@@ -135,6 +153,9 @@ class ServerVerifyResult:
     declaration: dict[str, Any] | None = field(default=None, repr=False)
     identity_hash: str | None = None
     identity_status: str | None = None  # "match" | "changed" | "unrecorded"
+    # None when no launcher was executed. "unverified" never fails the server: it says the
+    # result holds no evidence that the launcher's processes ended.
+    teardown: str | None = None  # "confirmed" | "unverified"
 
     @property
     def rug_pull_detected(self) -> bool:
@@ -161,6 +182,7 @@ class ServerVerifyResult:
             "declaration_status": self.declaration_status,
             "identity_hash": self.identity_hash,
             "identity_status": self.identity_status,
+            "teardown": self.teardown,
             "tools": [
                 {
                     "name": f.name,
@@ -376,6 +398,11 @@ def verify_mcp_servers(
             result.reason = "invalid-descriptor"
         except Exception:
             result.reason = "internal-error"
+        if result.reason not in _NOT_STARTED:
+            if not teardown_verifiable():
+                result.teardown = "unverified"
+            elif result.reason is None:
+                result.teardown = "confirmed"
         if result.reason is not None:
             result.error = REASONS[result.reason]
             continue
