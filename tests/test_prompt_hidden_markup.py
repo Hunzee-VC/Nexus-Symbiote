@@ -1009,7 +1009,7 @@ HIDDEN_BODY = (
 )
 
 
-@pytest.mark.parametrize("opener", ["---", "---yaml", "﻿---"])
+@pytest.mark.parametrize("opener", ["---", "---yaml", "\ufeff---"])
 def test_a_fence_in_front_matter_does_not_hide_the_body(opener):
     # cmark-gfm reads the indented fence in the YAML as one that runs to the end.
     text = FENCED_FRONT_MATTER.replace("---", opener, 1) + HIDDEN_BODY
