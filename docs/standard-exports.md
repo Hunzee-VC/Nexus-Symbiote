@@ -130,6 +130,7 @@ Messages and recommendations are one line of plain text: control, bidirectional 
 | `missing_lockfile_integrity` | Lockfile record without integrity | CWE-494 | LLM03:2025 | LLM04:2026 | ASI04 | AML.T0010.001 | MANAGE-3.1 |
 | `mutable_image_tag` | Mutable image tag | CWE-829 | LLM03:2025 | LLM04:2026 | ASI04 | AML.T0010.004 | MANAGE-3.1 |
 | `nonregistry_source` | Package from outside a registry | CWE-829 (high findings) | LLM03:2025 (high findings) | LLM04:2026 (high findings) | ASI04 (high findings) | AML.T0010.001 (high findings) | MANAGE-3.1 (high findings) |
+| `oversight_gap` | Destructive tool auto-approved | CWE-250 | LLM06:2025 | LLM03:2026 | ASI02 | none | none |
 | `package_alias` | Package alias | none | LLM03:2025 | LLM04:2026 | ASI04 | AML.T0074 | MANAGE-3.1 |
 | `package_source` | Non-default MCP package source | none | LLM03:2025 | LLM04:2026 | ASI04 | AML.T0010.005 | MANAGE-3.1 |
 | `permission_scope` | Unscoped agent permissions | CWE-250 | LLM06:2025 | LLM03:2026 | ASI02, ASI03 | AML.T0053, AML.T0105 (high findings) | MEASURE-2.7 |
@@ -144,6 +145,7 @@ Messages and recommendations are one line of plain text: control, bidirectional 
 | `shadowscan-heuristic` | Imported discovery risk | none | none | none | none | none | none |
 | `shadowscan-inventory-unmatched` | Imported unmatched discovery | none | none | none | none | none | GOVERN-1.6 |
 | `signing_status` | Unsigned model artifact | CWE-345 | LLM03:2025 | LLM04:2026 | ASI04 | AML.T0010.003 | MANAGE-3.2 |
+| `subagent_inline_mcp_server` | Subagent inline MCP server | none | LLM03:2025 | none | ASI04 | none | MANAGE-3.1 |
 | `tag_characters` | Unicode tag characters in instructions | CWE-451, CWE-1427 | LLM01:2025 | LLM01:2026 | ASI01 | AML.T0068 | MEASURE-2.7 |
 | `tool_description_poisoning` | Poisoned instructions in tool description or schema | CWE-1427 | LLM01:2025 | LLM01:2026 | ASI01, ASI02 | AML.T0010.005, AML.T0068 | MEASURE-2.7 |
 | `transitive_resolution` | Dependencies resolved at launch | CWE-829 | LLM03:2025 | LLM04:2026 | ASI04 | AML.T0109 | MANAGE-3.1 |

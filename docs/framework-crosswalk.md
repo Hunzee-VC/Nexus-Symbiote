@@ -687,6 +687,15 @@ every rule.
 | `iso-iec-42001-2023` | A.10.3 Suppliers are managed | high | Records a supplied component whose identity, version or resolution is not established. |
 | `cwe` | CWE-829 Inclusion of Functionality from Untrusted Control Sphere | high | The package comes from a git reference or plain HTTP source that can change. |
 
+### `oversight_gap`
+
+| Framework | Entry | Severities | Rationale |
+| --- | --- | --- | --- |
+| `owasp-llm-2025` | LLM06:2025 Excessive Agency | all | Auto-approving destructive tools grants excessive agency. |
+| `owasp-llm-2026` | LLM03:2026 Excessive Agency | all | Auto-approving destructive tools grants excessive agency. |
+| `owasp-asi-2026` | ASI02 Tool Misuse & Exploitation | all | Destructive tool calls lack human-in-the-loop confirmation. |
+| `cwe` | CWE-250 Execution with Unnecessary Privileges | all | A destructive or shell tool executes without human approval. |
+
 ### `package_alias`
 
 | Framework | Entry | Severities | Rationale |
@@ -834,6 +843,14 @@ No reference: no entry was defensible for this category.
 | `nist-ai-rmf-1.0` | MANAGE-3.2 Pre-trained models are monitored | all | Records how safely a pre-trained model loads, or whether its weights are verified. |
 | `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | all | Records a property of the system that bears on its robustness and cybersecurity. |
 | `cwe` | CWE-345 Insufficient Verification of Data Authenticity | all | The model's weights are not bound to a verified signature or digest pin. |
+
+### `subagent_inline_mcp_server`
+
+| Framework | Entry | Severities | Rationale |
+| --- | --- | --- | --- |
+| `owasp-llm-2025` | LLM03:2025 Supply Chain | all | Unpinned inline MCP server declarations expand the agent supply chain. |
+| `owasp-asi-2026` | ASI04 Agentic Supply Chain Vulnerabilities | all | Inline subagent mcpServers bypass top-level MCP server inventory review. |
+| `nist-ai-rmf-1.0` | MANAGE-3.1 Third-party AI risks are monitored and controlled | all | Records a third-party component whose identity, version or resolution is not established. |
 
 ### `tag_characters`
 
