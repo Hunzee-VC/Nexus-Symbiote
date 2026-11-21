@@ -16,19 +16,26 @@ from __future__ import annotations
 
 import hmac
 import os
+import stat
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
-import yaml
 from cryptography.exceptions import UnsupportedAlgorithm
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
-from nexus_symbiote.core.hashing import hash_bytes, open_regular_file, parse_json_strict
+from nexus_symbiote.core.hashing import (
+    hash_bytes,
+    open_directory_nofollow,
+    open_regular_file,
+    parse_json_strict,
+)
+from nexus_symbiote.policy import parse_yaml_mapping
+from nexus_symbiote.utils.crypto import _trusted_ancestor_uids
 
 MAX_DECISIONS_BYTES = 4 * 1024 * 1024
 MAX_DECISIONS = 5_000
@@ -107,9 +114,7 @@ class VEXDecisionSet(BaseModel):
         for entry in self.decisions:
             key = (entry.id, entry.component_ref)
             if key in seen:
-                raise ValueError(
-                    f"duplicate VEX decision for ({entry.id!r}, {entry.component_ref!r})"
-                )
+                raise ValueError("duplicate VEX decision")
             seen.add(key)
         return self
 
@@ -214,13 +219,46 @@ def _ensure_outside_project(
             raise VEXDecisionError(msg)
 
 
+def _check_operator_directory(path: Path, trusted: set[int]) -> None:
+    # Walk top down. A writable directory is safe for traversal only if its
+    # trusted owner enforces sticky protection on the next, also checked entry.
+    absolute = path.absolute()
+    if ".." in absolute.parts:
+        raise VEXDecisionError("Operator material must use a path without parent traversal")
+    for directory in reversed(absolute.parents):
+        if directory == Path(absolute.anchor):
+            continue
+        fd = open_directory_nofollow(directory)
+        try:
+            info = os.fstat(fd)
+        finally:
+            os.close(fd)
+        if info.st_uid not in trusted or (info.st_mode & 0o022 and not info.st_mode & stat.S_ISVTX):
+            raise VEXDecisionError("Operator material has a writable or untrusted ancestor")
+
+
 def _read_regular_bytes(
     path: Path, max_bytes: int, label: str, *, single_link: bool = False
 ) -> bytes:
     try:
+        trusted = (
+            _trusted_ancestor_uids(os.geteuid())
+            if single_link and hasattr(os, "geteuid")
+            else set()
+        )
+        if single_link:
+            if not trusted:
+                raise VEXDecisionError("Cannot establish ownership of operator material")
+            _check_operator_directory(path, trusted)
         with open_regular_file(path) as handle:
-            if single_link and os.name == "posix" and os.fstat(handle.fileno()).st_nlink != 1:
-                raise VEXDecisionError(f"{label} must not have additional hard links")
+            if single_link:
+                info = os.fstat(handle.fileno())
+                if info.st_nlink != 1:
+                    raise VEXDecisionError(f"{label} must not have additional hard links")
+                if info.st_uid not in trusted or info.st_mode & 0o022:
+                    raise VEXDecisionError(
+                        f"{label} has an untrusted owner or is group/world writable"
+                    )
             raw = handle.read(max_bytes + 1)
     except OSError as exc:
         raise VEXDecisionError(f"Cannot safely read {label.lower()}: {exc}") from exc
@@ -249,10 +287,10 @@ def load_vex_decisions(
         payload: Any = (
             parse_json_strict(text, max_bytes=MAX_DECISIONS_BYTES)
             if path.suffix.lower() == ".json" or text.lstrip().startswith("{")
-            else yaml.safe_load(text)
+            else parse_yaml_mapping(text, max_nodes=100_000)
         )
-    except (ValueError, yaml.YAMLError) as exc:
-        raise VEXDecisionError(f"Invalid VEX decisions syntax: {exc}") from exc
+    except (ValueError, RecursionError) as exc:
+        raise VEXDecisionError("Invalid VEX decisions syntax or complexity") from exc
     if not isinstance(payload, dict):
         raise VEXDecisionError(
             "VEX decisions file must be a mapping with 'version' and 'decisions'"
@@ -261,8 +299,14 @@ def load_vex_decisions(
         raise VEXDecisionError(f"VEX decisions file exceeds {MAX_DECISIONS} entries")
     try:
         model = VEXDecisionSet.model_validate(payload)
-    except Exception as exc:
-        raise VEXDecisionError(f"Invalid VEX decisions schema: {exc}") from exc
+    except ValidationError as exc:
+        duplicate = any(
+            e["msg"] == "Value error, duplicate VEX decision"
+            for e in exc.errors(include_input=False)
+        )
+        raise VEXDecisionError(
+            "duplicate VEX decision" if duplicate else "Invalid VEX decisions schema"
+        ) from exc
     return LoadedVEXDecisions(entries=tuple(model.decisions), sha256=hash_bytes(raw))
 
 
@@ -418,11 +462,23 @@ def load_execution_evidence(
     )
 
 
+@dataclass(frozen=True)
+class LoadedAdvisoryReport:
+    advisories: list[dict[str, Any]]
+    sha256: str
+    coverage: str
+    checked: int
+    skipped: int
+    excluded: int
+    errors: int
+
+
 def load_advisory_report(
     path: Path,
     *,
     expected_inventory_sha256: str | None = None,
-) -> tuple[list[dict[str, Any]], str]:
+    allow_partial: bool = False,
+) -> LoadedAdvisoryReport:
     """Load an advisory report JSON produced by ``advisories`` (live or offline)."""
     raw = _read_regular_bytes(path, MAX_REPORT_BYTES, "Advisory report")
     payload = parse_json_strict(raw.decode("utf-8"), max_bytes=MAX_REPORT_BYTES)
@@ -436,5 +492,37 @@ def load_advisory_report(
             raise VEXDecisionError(
                 "Advisory report inventory_sha256 does not match the supplied AIBOM"
             )
-    advisories = [item for item in payload["advisories"] if isinstance(item, dict)]
-    return advisories, hash_bytes(raw)
+
+    def counter(name: str) -> int:
+        value = payload.get("components_" + name)
+        if type(value) is not int or value < 0:
+            raise VEXDecisionError("Advisory report lacks valid coverage counters")
+        return value
+
+    checked, skipped, excluded = (counter(k) for k in ("checked", "skipped", "excluded"))
+    errors = payload.get("errors")
+    dry_run = payload.get("dry_run")
+    if (
+        not isinstance(errors, list)
+        or not all(isinstance(e, str) for e in errors)
+        or type(dry_run) is not bool
+    ):
+        raise VEXDecisionError("Advisory report lacks valid coverage counters")
+    coverage = "none" if dry_run or not checked else "partial" if errors else "complete"
+    if payload.get("coverage") != coverage or payload.get("complete") is not (
+        coverage == "complete"
+    ):
+        raise VEXDecisionError("Advisory report coverage is inconsistent")
+    if coverage != "complete" and not allow_partial:
+        raise VEXDecisionError("Incomplete advisory coverage requires --allow-partial-advisories")
+    advisories = payload["advisories"]
+    if not all(
+        isinstance(a, dict)
+        and isinstance(a.get("advisory_id") or a.get("id"), str)
+        and isinstance(a.get("component_ref") or a.get("bom_ref"), str)
+        for a in advisories
+    ):
+        raise VEXDecisionError("Malformed advisory report entry")
+    return LoadedAdvisoryReport(
+        advisories, hash_bytes(raw), coverage, checked, skipped, excluded, len(errors)
+    )
