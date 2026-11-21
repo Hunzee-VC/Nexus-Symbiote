@@ -29,11 +29,8 @@ as described below.
    GitHub Enterprise Cloud. GitHub Actions must also be able to run: check
    *Billing & plans* if jobs end without starting.
 2. **Create two environments**, `testpypi` and `pypi`. Give each required reviewers,
-   enable *Prevent self-review*, and restrict deployments to `main`. While the
-   project has a single maintainer, *Prevent self-review* would leave nobody able to
-   approve a deployment, so leave it off until a second reviewer exists, as with the
-   interim branch protection; the required review still makes every upload wait for
-   an explicit approval. The `main`-only restriction matters because the main-only
+   enable *Prevent self-review*, and restrict deployments to `main`. Designate a second eligible reviewer before publishing. The release preflight
+   blocks publication when either environment under review permits self-review. The `main`-only restriction matters because the main-only
    checks live inside `release.yml`, which a branch could edit.
 3. **Create a pending trusted publisher on each index**, right before the first
    upload, because a pending publisher does not reserve the name:

@@ -254,7 +254,13 @@ def environment(**changes):
     return {
         "name": "pypi",
         "can_admins_bypass": False,
-        "protection_rules": [{"type": "required_reviewers", "reviewers": [{"type": "User"}]}],
+        "protection_rules": [
+            {
+                "type": "required_reviewers",
+                "prevent_self_review": True,
+                "reviewers": [{"type": "User"}],
+            }
+        ],
         "deployment_branch_policy": {"protected_branches": False, "custom_branch_policies": True},
         **changes,
     }
@@ -492,3 +498,15 @@ def test_the_administrator_check_needs_a_publication_target(live):
     with pytest.raises(SystemExit) as raised:
         controls.main()
     assert raised.value.code == 2
+
+
+@pytest.mark.parametrize("flag", [None, False, "true", 1])
+def test_publishing_requires_independent_review_on_the_reviewer_rule(flag):
+    env = environment()
+    rule = env["protection_rules"][0]
+    if flag is None:
+        rule.pop("prevent_self_review")
+    else:
+        rule["prevent_self_review"] = flag
+    env["protection_rules"].append({"type": "wait_timer", "prevent_self_review": True})
+    assert controls.evaluate_environment(env, MAIN_ONLY, name="pypi", branch="main")
