@@ -29,17 +29,30 @@ from typing import Any
 
 from nexus_symbiote.core.enums import RiskSeverity, TrustTier
 from nexus_symbiote.core.hashing import canonical_json, hash_canonical, parse_json_strict
-from nexus_symbiote.core.models import IDEAgentComponent, RiskAssessment, VerifiedExtensionComponent
+from nexus_symbiote.core.models import (
+    IDEAgentComponent,
+    ModelComponent,
+    RiskAssessment,
+    VerifiedExtensionComponent,
+)
 from nexus_symbiote.scanners.base import Scanner, ScanResult
+from nexus_symbiote.scanners.credential_files import credential_gap
 from nexus_symbiote.scanners.mcp import (
     _CODE_LOADING_ENVIRONMENT,
     SOURCE_BINDING_KEY_ENV,
     _exported_function,
 )
 from nexus_symbiote.scanners.source_binding import BindingError, value_binding
+from nexus_symbiote.settings_precedence import (
+    evaluate_tool_oversight,
+    extract_bounded_deny_rules,
+    extract_bounded_sandbox_domains,
+    scan_subagent_and_rule_frontmatter,
+)
 from nexus_symbiote.utils.confined import ConfinedCollection, fold_name
 from nexus_symbiote.utils.jsonc import strip_jsonc
 from nexus_symbiote.utils.secrets import REDACTED, redact_keyed_text, redact_text
+from nexus_symbiote.utils.terminal import neutralize
 from nexus_symbiote.utils.toml import loads as load_toml
 
 IDE_AGENT_CONFIGS: dict[str, dict[str, Any]] = {
@@ -579,6 +592,24 @@ def _rule_text(value: str, *, unkeyed: bool) -> str:
     tool, specifier = match.groups()
     shape = _free_text(specifier, program=True, unkeyed=unkeyed)
     return f"{_projected_text(tool, unkeyed=unkeyed)}({shape})"
+
+
+def _safe_rule_shape(rule: str) -> str:
+    """Format a permission rule by its unkeyed projection shape for inventory properties."""
+    try:
+        return neutralize(_rule_text(rule, unkeyed=True))
+    except AmbiguousURLError:
+        base, sep, _ = rule.partition("(")
+        safe_base = neutralize(redact_text(base.strip())) or REDACTED
+        return f"{safe_base}({REDACTED})" if sep else safe_base
+
+
+def _safe_projected_text(value: str) -> str:
+    """Format a settings string by its unkeyed projection for inventory properties."""
+    try:
+        return neutralize(_projected_text(value, unkeyed=True))
+    except AmbiguousURLError:
+        return REDACTED
 
 
 def _command_projection(value: Any, depth: int, *, unkeyed: bool, program: bool) -> Any:
@@ -2589,6 +2620,17 @@ class IDEAgentScanner(Scanner):
             if data is not None:
                 documents[relative] = data
         self._bind_settings(ide_type, documents, result, risks, properties)
+        if ide_type in {"claude-code", "cursor"}:
+            scan_subagent_and_rule_frontmatter(
+                files,
+                base,
+                risks,
+                properties,
+                ide_type=ide_type,
+                scan_failures=result.scan_failures,
+                surfaces_excluded=result.surfaces_excluded,
+                credential_check=credential_gap,
+            )
         mode = self._extract_permission_mode(settings or {}, ide_type, result)
         toml_mode = False
         if ide_type == "codex" and mode is None:
@@ -2783,6 +2825,42 @@ class IDEAgentScanner(Scanner):
         }
         if counts:
             properties["declared_permission_rule_counts"] = counts
+        deny_rules, deny_total, deny_digest, deny_trunc = extract_bounded_deny_rules(
+            merged, rule_formatter=_safe_rule_shape
+        )
+        if deny_rules:
+            properties["deny_rules"] = deny_rules
+        if deny_trunc:
+            properties["deny_rules_total"] = deny_total
+            properties["deny_rules_truncated"] = True
+            properties["deny_rules_digest"] = deny_digest
+        sandbox_domains, dom_total, dom_digest, dom_trunc = extract_bounded_sandbox_domains(
+            merged, text_formatter=_safe_projected_text
+        )
+        if sandbox_domains:
+            properties["sandbox_allowed_domains"] = sandbox_domains
+        if dom_trunc:
+            properties["sandbox_allowed_domains_total"] = dom_total
+            properties["sandbox_allowed_domains_truncated"] = True
+            properties["sandbox_allowed_domains_digest"] = dom_digest
+        default_mode = (
+            rules.get("defaultMode") if isinstance(rules.get("defaultMode"), str) else None
+        )
+        raw_always = merged.get("alwaysAllow") or rules.get("alwaysAllow")
+        always_allow: Iterable[str] = raw_always if isinstance(raw_always, (str, list)) else ()
+        tool_states, oversight_risks, tool_total, tool_trunc = evaluate_tool_oversight(
+            rules,
+            always_allow=always_allow,
+            approval_policy=default_mode,
+            source_name=f"{base}/.claude/settings.json" if base else ".claude/settings.json",
+            text_formatter=_safe_projected_text,
+        )
+        if tool_states:
+            properties["tool_human_in_the_loop"] = tool_states
+        if tool_trunc:
+            properties["tool_human_in_the_loop_total"] = tool_total
+            properties["tool_human_in_the_loop_truncated"] = True
+        risks.extend(oversight_risks)
         hook_commands = 0
         hook_severity: RiskSeverity | None = None
         # Auto-run settings and credential helpers run without an agent event, as hooks do.
@@ -2984,6 +3062,20 @@ class IDEAgentScanner(Scanner):
             sandbox = None
         properties["approval_policy"] = approval
         properties["sandbox_mode"] = sandbox
+        codex_model = config.get("model")
+        if isinstance(codex_model, str) and codex_model.strip():
+            clean_model = _safe_projected_text(codex_model.strip())[:512].strip()
+            if clean_model:
+                properties["model"] = clean_model
+                model_ref = f"model:{clean_model}"
+                if not any(comp.bom_ref == model_ref for comp in result.components):
+                    result.components.append(
+                        ModelComponent(
+                            bom_ref=model_ref,
+                            name=clean_model,
+                            properties={"source": CODEX_CONFIG},
+                        )
+                    )
         full_access = sandbox in {"danger-full-access", "full-access"} or approval == "always"
         declared = (
             "an unsandboxed full-access mode"
