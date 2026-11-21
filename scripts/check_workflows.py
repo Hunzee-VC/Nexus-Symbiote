@@ -74,6 +74,7 @@ CI_JOBS = frozenset(
         "codeql",
         "action",
         "action-annotations",
+        "offline-invariant",
     }
 )
 # What makes each verification job a gate. A job that keeps its name but loses its
@@ -130,6 +131,13 @@ REQUIRED_COMMANDS: dict[str, dict[str, tuple[str, ...]]] = {
             "$EVIDENCE/hostile.json",
         ),
         "action-annotations": ("gh api --paginate", "symbiote-injected-annotation", "set-output"),
+        # The suite again, where the kernel and not the suite's own tripwire denies egress.
+        "offline-invariant": (
+            "requirements-ci.lock",
+            "unshare --net",
+            "-m pytest",
+            "--strict-skips",
+        ),
         # The one check branch protection requires: it must still fail on a prerequisite
         # that did not succeed.
         "verified": ("sys.exit(bool(failed))",),
@@ -184,6 +192,9 @@ REQUIRED_TEXT: dict[str, dict[str, frozenset[str]]] = {
     "ci.yml": {
         "action": frozenset({"symbiote-injected-annotation", "$EVIDENCE/hostile.json"}),
         "action-annotations": frozenset({"symbiote-injected-annotation", "set-output"}),
+        # The gate reader does not follow sudo, unshare or setpriv, so these count where
+        # they appear; REVIEWED_GATE_STEPS holds the step that names them to its exact text.
+        "offline-invariant": frozenset({"unshare --net", "-m pytest", "--strict-skips"}),
     },
     # Called once per distribution inside a loop, which the gate reader does not follow;
     # tests/test_release_provenance.py runs the loop.
@@ -282,6 +293,54 @@ REVIEWED_GATE_STEPS: dict[str, dict[str, dict[str, tuple[str, dict[str, str]]]]]
                     "SARIF_PATH": "${{ runner.temp }}/codeql-sarif/python.sarif",
                     "CODEQL_REPORT": "${{ runner.temp }}/codeql-policy.json",
                 },
+            )
+        },
+        "offline-invariant": {
+            "unshare --net": (
+                (
+                    "set -euo pipefail\n"
+                    'HOST_UID="$(id -u)"\n'
+                    'HOST_GID="$(id -g)"\n'
+                    'OFFLINE_PYTHON="$RUNNER_TEMP/offline-venv/bin/python"\n'
+                    "export HOST_UID HOST_GID OFFLINE_PYTHON\n"
+                    "sudo --preserve-env=CI,HOST_UID,HOST_GID,OFFLINE_PYTHON,"
+                    "PYTEST_LOG,RUNNER_TEMP,HOME,TMPDIR \\\n"
+                    "  unshare --net bash --noprofile --norc -euo pipefail -c '\n"
+                    "    ip link set lo up\n"
+                    '    setpriv --reuid="$HOST_UID" --regid="$HOST_GID" --clear-groups \\\n'
+                    "      \"$OFFLINE_PYTHON\" - <<'\"'\"'PY'\"'\"'\n"
+                    "import errno\n"
+                    "import socket\n"
+                    "for family, addr in (\n"
+                    '    (socket.AF_INET, ("1.1.1.1", 443)),\n'
+                    '    (socket.AF_INET6, ("2606:4700:4700::1111", 443)),\n'
+                    "):\n"
+                    "    try:\n"
+                    "        sock = socket.socket(family, socket.SOCK_STREAM)\n"
+                    "    except OSError as error:\n"
+                    "        if family == socket.AF_INET6 and error.errno == errno.EAFNOSUPPORT:\n"
+                    "            continue\n"
+                    "        raise\n"
+                    "    with sock:\n"
+                    "        sock.settimeout(5.0)\n"
+                    "        try:\n"
+                    "            sock.connect(addr)\n"
+                    "        except OSError as error:\n"
+                    "            if error.errno != errno.ENETUNREACH:\n"
+                    '                raise SystemExit(f"Expected ENETUNREACH for '
+                    '{addr}, got {error!r}")\n'
+                    "        else:\n"
+                    '            raise SystemExit(f"Expected kernel egress denial for {addr}")\n'
+                    "PY\n"
+                    '    exec setpriv --reuid="$HOST_UID" --regid="$HOST_GID" --clear-groups \\\n'
+                    "      timeout --signal=INT --kill-after=30s 45m \\\n"
+                    '      "$OFFLINE_PYTHON" -m pytest -n auto --dist worksteal -vv --strict-skips '
+                    "\\\n"
+                    "      -o test_timeout=120 2>&1 \\\n"
+                    '      | tee "$PYTEST_LOG"\n'
+                    "  '\n"
+                ),
+                {"PYTEST_LOG": "${{ runner.temp }}/pytest-offline-invariant.log"},
             )
         },
     },

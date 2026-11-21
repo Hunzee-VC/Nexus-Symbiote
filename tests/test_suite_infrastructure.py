@@ -270,11 +270,44 @@ def test_ci_and_make_run_the_suite_with_the_same_parallel_options():
     for job in ("test", "floor", "coverage"):
         runs = [s["run"] for s in workflow["jobs"][job]["steps"] if "pytest" in s.get("run", "")]
         assert len(runs) == 1 and runs[0].count(f"python -m pytest {PARALLEL} ") == 1
+    offline = [
+        s["run"]
+        for s in workflow["jobs"]["offline-invariant"]["steps"]
+        if "-m pytest" in s.get("run", "")
+    ]
+    assert len(offline) == 1 and offline[0].count(f'"$OFFLINE_PYTHON" -m pytest {PARALLEL} ') == 1
     makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
     assert f"\nPYTEST_PARALLEL = {PARALLEL}\n" in makefile
     recipes = [line for line in makefile.splitlines() if " -m pytest " in line]
     assert len(recipes) == 4
     assert all(" -m pytest $(PYTEST_PARALLEL) " in line for line in recipes)
+
+
+def test_each_ci_suite_dumps_tracebacks_only_just_before_its_test_timeout():
+    """pytest's faulthandler dump walks a live xdist worker, which can kill the worker.
+
+    Coverage raised test_timeout to 240 s but kept the 120 s dump, so a bounds test that
+    legitimately ran about 130 s was dumped mid-run and its worker died (job 136599461709).
+    The dump is a hang diagnostic: it belongs just before the time limit, never well inside it.
+    """
+    import tomllib
+
+    ini = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    options = ini["tool"]["pytest"]["ini_options"]
+    workflow = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8"))
+    checked = 0
+    for job in ("test", "floor", "coverage"):
+        for step in workflow["jobs"][job]["steps"]:
+            run = step.get("run", "")
+            if "pytest" not in run:
+                continue
+            limit = re.search(r"-o test_timeout=(\d+)", run)
+            dump = re.search(r"-o faulthandler_timeout=(\d+)", run)
+            test_timeout = int(limit.group(1) if limit else options["test_timeout"])
+            faulthandler = int(dump.group(1) if dump else options["faulthandler_timeout"])
+            assert 0.9 * test_timeout <= faulthandler <= test_timeout, (job, run)
+            checked += 1
+    assert checked == 3
 
 
 def test_the_time_limit_and_the_isolation_hold_in_a_parallel_worker(suite, monkeypatch):

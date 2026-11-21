@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
+import contextvars
 import errno
 import json
 import math
 import os
 import re
 import sys
+from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypeVar
 
 import click
 
@@ -41,6 +43,7 @@ from nexus_symbiote.reporting import (
 )
 from nexus_symbiote.runtime_cli import register_runtime_commands
 from nexus_symbiote.supply_chain_cli import STAGED_INVENTORY, register_supply_chain_commands
+from nexus_symbiote.text_poisoning import apply_text_poisoning_rules
 from nexus_symbiote.trace_cli import register_trace_commands
 from nexus_symbiote.utils.files import write_output_file
 from nexus_symbiote.utils.terminal import (
@@ -125,28 +128,102 @@ def _input_problem(exc: BaseException) -> str:
     )
 
 
+def _resolve_operator_policy(
+    operator_policy: Path | None,
+    root: Path | None,
+    *,
+    attestation_path: Path | None = None,
+    trusted_keys: tuple[Path, ...] = (),
+    allow_unsigned: bool = False,
+    max_age_days: int = 90,
+) -> tuple[Any | None, str | None, tuple[str, ...]]:
+    from nexus_symbiote.operator_policy import (
+        OperatorPolicyAttestationError,
+        OperatorPolicyError,
+        load_operator_policy,
+    )
+
+    if operator_policy is None:
+        if attestation_path is not None or trusted_keys or allow_unsigned:
+            raise click.UsageError(
+                "--operator-policy-attestation, --operator-policy-key, and "
+                "--allow-unsigned-operator-policy require --operator-policy"
+            )
+        return None, None, ()
+    if allow_unsigned and (attestation_path is not None or trusted_keys):
+        raise click.UsageError(
+            "--allow-unsigned-operator-policy cannot be combined with "
+            "--operator-policy-attestation or --operator-policy-key"
+        )
+    try:
+        loaded = load_operator_policy(
+            operator_policy,
+            root,
+            envelope_path=attestation_path,
+            trusted_keys=trusted_keys,
+            allow_unsigned=allow_unsigned,
+            max_age_days=max_age_days,
+        )
+    except OperatorPolicyAttestationError as exc:
+        raise _GateClickException(neutralize(exc)) from exc
+    except OperatorPolicyError as exc:
+        raise _failure(exc) from exc
+    return loaded.policy, loaded.digest, loaded.signers
+
+
+def _format_operator_source(digest: str, signers: tuple[str, ...]) -> str:
+    if signers:
+        return f"operator:{digest} (signers: {','.join(signers)})"
+    return f"operator:{digest}"
+
+
+_LAST_CLAMPED_SETTINGS: contextvars.ContextVar[tuple[str, ...]] = contextvars.ContextVar(
+    "_LAST_CLAMPED_SETTINGS", default=()
+)
+
+
 def _policy_with_source(
     root: Path,
     *,
     ignore_project: bool = False,
     warn: bool = True,
     allow_weakening: bool = False,
+    operator: Policy | None = None,
+    operator_digest: str | None = None,
+    operator_signers: tuple[str, ...] = (),
 ) -> tuple[Policy, str, list[str]]:
-    """Load the governing policy and say where it came from and what it relaxes.
-
-    A gate that a checkout-supplied file switched off must be a visible choice, so
-    every relaxation is returned for machine-readable output and, unless the caller
-    emits JSON that already carries it, printed on stderr. In CI a warning on stderr is
-    not a choice anyone made, so there a policy that weakens a gate is refused unless
-    the operator ignores it (``--no-project-policy``) or accepts it explicitly
-    (``--accept-project-policy``), as unsigned discovery evidence is.
-    """
+    """Load the governing policy and say where it came from and what it relaxes."""
+    from nexus_symbiote.operator_policy import narrow_policy
     from nexus_symbiote.policy import (
         PolicyError,
         default_policy,
         load_policy_file,
         weakened_settings,
     )
+
+    _LAST_CLAMPED_SETTINGS.set(())
+    if operator is not None and operator_digest is not None:
+        op_label = _format_operator_source(operator_digest, operator_signers)
+        if ignore_project:
+            return operator, op_label, weakened_settings(operator)
+        try:
+            loaded_proj = load_policy_file(root)
+        except PolicyError as exc:
+            raise _failure(exc) from exc
+        if loaded_proj is None:
+            return operator, op_label, weakened_settings(operator)
+        proj_policy, proj_path, _ = loaded_proj
+        narrowed, clamped = narrow_policy(operator, proj_policy)
+        _LAST_CLAMPED_SETTINGS.set(tuple(clamped))
+        if clamped and warn:
+            echo_line(
+                "WARNING: project policy ",
+                proj_path,
+                " attempted to relax operator policy; clamped: ",
+                "; ".join(clamped),
+                err=True,
+            )
+        return narrowed, op_label, weakened_settings(narrowed)
 
     if ignore_project:
         return default_policy(), "built-in", []
@@ -190,17 +267,29 @@ def _inventory_policy(
     ignore_project: bool,
     warn: bool = True,
     allow_weakening: bool = False,
+    operator: Policy | None = None,
+    operator_digest: str | None = None,
+    operator_signers: tuple[str, ...] = (),
 ) -> tuple[Policy, str, list[str]]:
-    """Policy for a command that reads an inventory: only a named project supplies one.
+    """Policy for a command that reads an inventory: only a named project or operator supplies one."""
+    from nexus_symbiote.policy import default_policy, nearest_policy_file, weakened_settings
 
-    An inventory can be written anywhere, including shared directories such as /tmp,
-    so its location never selects the policy that gates it.
-    """
-    from nexus_symbiote.policy import default_policy, nearest_policy_file
-
+    _LAST_CLAMPED_SETTINGS.set(())
     if project is not None:
         return _policy_with_source(
-            project, ignore_project=ignore_project, warn=warn, allow_weakening=allow_weakening
+            project,
+            ignore_project=ignore_project,
+            warn=warn,
+            allow_weakening=allow_weakening,
+            operator=operator,
+            operator_digest=operator_digest,
+            operator_signers=operator_signers,
+        )
+    if operator is not None and operator_digest is not None:
+        return (
+            operator,
+            _format_operator_source(operator_digest, operator_signers),
+            weakened_settings(operator),
         )
     if not ignore_project:
         unapplied = nearest_policy_file(Path(aibom_path).resolve().parent)
@@ -218,9 +307,11 @@ def _inventory_policy(
 def _gate_sources(
     policy: Policy, policy_source: str, threshold_from_cli: bool, fail_on_severity: str | None
 ) -> dict[str, str]:
-    """Where each effective risk-gate parameter came from: cli, project policy or built-in."""
+    """Where each effective risk-gate parameter came from: cli, operator, project policy or built-in."""
 
     def origin(name: str) -> str:
+        if policy_source.startswith("operator:"):
+            return "operator policy"
         if policy_source.startswith("project:") and name in policy.risk.model_fields_set:
             return "project policy"
         return "built-in"
@@ -453,6 +544,7 @@ def _get_scanners() -> dict[str, type]:
     return SCANNER_REGISTRY
 
 
+DETAILED_EXIT_KEY = "nexus_symbiote.detailed_exit_codes"
 _MODE_FLAGS = frozenset({"--offline", "--live"})
 # Click 8.2+ shows a group's own help, which carries no input, through this error.
 _HELP_ERRORS = tuple(
@@ -476,12 +568,167 @@ def supported_platform() -> bool:
     )
 
 
-def _neutralized(exc: click.ClickException) -> click.ClickException:
+class _CollectionClickException(click.ClickException):
+    """Collection, input, or internal failure under Decision 4 (--detailed-exit-codes -> 4)."""
+
+    exit_code = 4
+
+
+class _GateClickException(click.ClickException):
+    """Gate or verification failure under Decision 4 (--detailed-exit-codes -> 3)."""
+
+    exit_code = 3
+
+
+def _neutralized(exc: click.ClickException, *, detailed: bool = False) -> click.ClickException:
     """The same error with neutralized text: it can quote checkout or inventory text."""
     message = neutralize(exc.format_message())
     if isinstance(exc, click.UsageError):
         return click.UsageError(message, ctx=exc.ctx)
+    if detailed:
+        if isinstance(exc, _GateClickException) or exc.exit_code == 3:
+            return _GateClickException(message)
+        return _CollectionClickException(message)
     return click.ClickException(message)
+
+
+def _apply_exit_code_flags(detailed: bool, legacy: bool) -> bool:
+    if detailed and legacy:
+        raise click.UsageError(
+            "--detailed-exit-codes and --legacy-exit-codes contradict each other"
+        )
+    ctx = click.get_current_context(silent=True)
+    inherited = bool(ctx is not None and ctx.meta.get(DETAILED_EXIT_KEY))
+    if inherited and legacy:
+        raise click.UsageError(
+            "--detailed-exit-codes and --legacy-exit-codes contradict each other"
+        )
+    effective = (detailed or inherited) and not legacy
+    if ctx is not None:
+        ctx.meta[DETAILED_EXIT_KEY] = effective
+    return effective
+
+
+def _gate_exit(detailed: bool, *, collection_failed: bool = False) -> None:
+    from nexus_symbiote.operator_policy import EXIT_COLLECTION_FAILED, EXIT_GATE_FAILED
+
+    if detailed:
+        raise click.exceptions.Exit(
+            EXIT_COLLECTION_FAILED if collection_failed else EXIT_GATE_FAILED
+        )
+    raise click.exceptions.Exit(1)
+
+
+def _resolve_report_format(json_output: bool, report_format: str | None) -> str:
+    if json_output and report_format is not None and report_format != "json":
+        raise click.UsageError("--json-output and --report-format disagree; choose one format")
+    return "json" if json_output else (report_format or "text")
+
+
+def _emit_gate_report(
+    gate_name: str,
+    report_format: str,
+    document: dict[str, Any],
+    text_lines: Any,
+    *,
+    step_summary: Path | None = None,
+    operator_source: str | None = None,
+) -> None:
+    from nexus_symbiote.operator_policy import (
+        append_step_summary,
+        render_gate_junit,
+        render_gate_markdown,
+    )
+
+    if step_summary is not None:
+        append_step_summary(step_summary, render_gate_markdown(gate_name, document))
+    if report_format == "json":
+        click.echo(json_text(json.dumps(document, indent=2)))
+    elif report_format == "markdown":
+        click.echo(render_gate_markdown(gate_name, document), nl=False)
+    elif report_format == "junit":
+        click.echo(render_gate_junit(gate_name, document), nl=False)
+    else:
+        print_lines(text_lines())
+        if operator_source is not None and gate_name != "validate":
+            echo_line("  Policy: ", operator_source)
+
+
+_F = TypeVar("_F", bound=Callable[..., Any])
+
+
+def _apply_options(func: _F, *options: Callable[[_F], _F]) -> _F:
+    for opt in reversed(options):
+        func = opt(func)
+    return func
+
+
+def _exit_code_options(func: _F) -> _F:
+    return _apply_options(
+        func,
+        click.option(
+            "--detailed-exit-codes",
+            is_flag=True,
+            help="Use distinct exit codes: 0 passed, 2 usage, 3 gate failed, 4 collection/input failure.",
+        ),
+        click.option(
+            "--legacy-exit-codes",
+            is_flag=True,
+            help="Use legacy exit codes: 0 passed, 1 gate or input failure, 2 usage error.",
+        ),
+    )
+
+
+def _operator_policy_options(func: _F) -> _F:
+    return _apply_options(
+        func,
+        click.option(
+            "--operator-policy",
+            type=click.Path(exists=True, dir_okay=False, path_type=Path),
+            help="Signed operator policy YAML outside the scanned checkout; checkout policy may only narrow it.",
+        ),
+        click.option(
+            "--operator-policy-attestation",
+            type=click.Path(exists=True, dir_okay=False, path_type=Path),
+            help="DSSE attestation envelope (purpose 'policy') over --operator-policy.",
+        ),
+        click.option(
+            "--operator-policy-key",
+            type=click.Path(exists=True, dir_okay=False, path_type=Path),
+            multiple=True,
+            help="Trusted Ed25519 public key for --operator-policy-attestation (repeatable).",
+        ),
+        click.option(
+            "--allow-unsigned-operator-policy",
+            is_flag=True,
+            help="Accept --operator-policy without a verified DSSE signature envelope.",
+        ),
+        click.option(
+            "--operator-policy-max-age-days",
+            type=click.IntRange(min=0),
+            default=90,
+            show_default=True,
+            help="Maximum attestation age in days when --operator-policy-attestation is verified (0 disables).",
+        ),
+    )
+
+
+def _gate_report_options(func: _F) -> _F:
+    return _apply_options(
+        func,
+        click.option(
+            "--report-format",
+            type=click.Choice(["text", "json", "markdown", "junit"]),
+            default=None,
+            help="Gate report format (default: text, or json with --json-output).",
+        ),
+        click.option(
+            "--step-summary",
+            type=click.Path(dir_okay=False, path_type=Path),
+            default=None,
+            help="Write an injection-safe Markdown gate summary to this file (for example GITHUB_STEP_SUMMARY).",
+        ),
+    )
 
 
 def _declared_text_only(exc: click.ClickException) -> bool:
@@ -523,7 +770,7 @@ class _RootGroup(click.Group):
                     ctx=exc.ctx,
                 ) from None
             if exc.option_name not in _MODE_FLAGS:
-                raise _neutralized(exc) from None
+                raise _neutralized(exc, detailed=bool(ctx.meta.get(DETAILED_EXIT_KEY))) from None
             raise click.UsageError(
                 f"No such option: {exc.option_name}. Mode flags go before the command: "
                 f"nexus-symbiote {exc.option_name} <command> ...",
@@ -532,14 +779,19 @@ class _RootGroup(click.Group):
         except modes.LiveModeRequiredError as exc:
             raise click.UsageError(neutralize(exc)) from None
         except modes.OfflineViolation as exc:
-            raise click.ClickException(
+            err_cls: type[click.ClickException] = (
+                _CollectionClickException
+                if ctx.meta.get(DETAILED_EXIT_KEY)
+                else click.ClickException
+            )
+            raise err_cls(
                 f"offline mode blocked {neutralize(exc)} before the command completed. This "
                 "command never needs the network or a subprocess; please report this as a defect."
             ) from None
         except click.ClickException as exc:
             if isinstance(exc, _HELP_ERRORS) or _declared_text_only(exc):
                 raise
-            raise _neutralized(exc) from None
+            raise _neutralized(exc, detailed=bool(ctx.meta.get(DETAILED_EXIT_KEY))) from None
         except (click.exceptions.Exit, click.Abort):
             raise
         except Exception as exc:
@@ -552,7 +804,12 @@ class _RootGroup(click.Group):
             # request; the command still fails closed.
             if ctx.meta.get(DEBUG_KEY):
                 _print_traceback(exc)
-            raise click.ClickException(
+            internal_cls: type[click.ClickException] = (
+                _CollectionClickException
+                if ctx.meta.get(DETAILED_EXIT_KEY)
+                else click.ClickException
+            )
+            raise internal_cls(
                 f"internal error ({type(exc).__name__}); nothing was approved. Rerun with "
                 "--debug before the command to see where it was raised, and please report it."
             ) from None
@@ -584,6 +841,7 @@ class _RootGroup(click.Group):
         "functions) on standard error, without its message, which can quote input."
     ),
 )
+@_exit_code_options
 @click.option(
     limits.OPTION,
     "limit_settings",
@@ -601,6 +859,8 @@ def main(
     offline_flag: bool,
     live_flag: bool,
     debug_flag: bool,
+    detailed_exit_codes: bool = False,
+    legacy_exit_codes: bool = False,
     limit_settings: tuple[str, ...] = (),
 ) -> None:
     """Nexus SymBiote — Agent Bill of Materials for AI supply chain security.
@@ -616,6 +876,7 @@ def main(
     never change a limit.
     """
     ctx.meta[DEBUG_KEY] = debug_flag
+    _apply_exit_code_flags(detailed_exit_codes, legacy_exit_codes)
     if not supported_platform():
         raise click.ClickException(
             "unsupported platform: confined file access needs POSIX O_NOFOLLOW, O_DIRECTORY "
@@ -657,7 +918,14 @@ def _merge_scan_result(
             scan_failures.append(f"{name}: dependency endpoint was not imported")
 
 
-def _render_aibom(aibom: AIBOM, output_format: str, root: Path) -> str:
+def _render_aibom(
+    aibom: AIBOM,
+    output_format: str,
+    root: Path,
+    *,
+    operator_policy_digest: str | None = None,
+    operator_policy_signers: tuple[str, ...] = (),
+) -> str:
     if output_format == "cyclonedx":
         from nexus_symbiote.generators.cyclonedx import CycloneDXGenerator
 
@@ -671,7 +939,11 @@ def _render_aibom(aibom: AIBOM, output_format: str, root: Path) -> str:
 
         # Inventory paths are relative to the scanned root; SARIF URIs to the working
         # directory, or to the scanned root when the scan starts outside it.
-        return SARIFGenerator(scan_root=root).generate_json(aibom)
+        return SARIFGenerator(
+            scan_root=root,
+            operator_policy_digest=operator_policy_digest,
+            operator_policy_signers=operator_policy_signers,
+        ).generate_json(aibom)
     try:
         return aibom.to_native_json()
     except NativeFormatError as exc:
@@ -719,6 +991,7 @@ def _render_aibom(aibom: AIBOM, output_format: str, root: Path) -> str:
     type=click.Path(exists=True, path_type=Path),
     help="Explicit operator signer policy JSON",
 )
+@_operator_policy_options
 @click.option(
     "--no-project-policy",
     is_flag=True,
@@ -745,6 +1018,7 @@ def _render_aibom(aibom: AIBOM, output_format: str, root: Path) -> str:
         "required in CI."
     ),
 )
+@_exit_code_options
 def scan(
     project_path: str,
     output: str | None,
@@ -752,13 +1026,21 @@ def scan(
     scanners: tuple[str, ...],
     report_only: bool = False,
     signature_policy: Path | None = None,
+    operator_policy: Path | None = None,
+    operator_policy_attestation: Path | None = None,
+    operator_policy_key: tuple[Path, ...] = (),
+    allow_unsigned_operator_policy: bool = False,
+    operator_policy_max_age_days: int = 90,
     no_project_policy: bool = False,
     accept_project_policy: bool = False,
     check_only: bool = False,
     fail_on_unsigned_discovery: bool = False,
     allow_unsigned_discovery: bool = False,
+    detailed_exit_codes: bool = False,
+    legacy_exit_codes: bool = False,
 ) -> None:
     """Scan a project and generate an AIBOM."""
+    detailed = _apply_exit_code_flags(detailed_exit_codes, legacy_exit_codes)
     _unsigned_discovery_flags(fail_on_unsigned_discovery, allow_unsigned_discovery)
     if (fail_on_unsigned_discovery or allow_unsigned_discovery) and not check_only:
         raise click.UsageError(
@@ -778,8 +1060,21 @@ def scan(
     from nexus_symbiote.utils.confined import DEFAULT_EXCLUDES
     from nexus_symbiote.validators.risk import RiskScorer
 
+    op_policy, op_digest, op_signers = _resolve_operator_policy(
+        operator_policy,
+        root,
+        attestation_path=operator_policy_attestation,
+        trusted_keys=operator_policy_key,
+        allow_unsigned=allow_unsigned_operator_policy,
+        max_age_days=operator_policy_max_age_days,
+    )
     policy, policy_source, policy_weakened = _policy_with_source(
-        root, ignore_project=no_project_policy, allow_weakening=accept_project_policy
+        root,
+        ignore_project=no_project_policy,
+        allow_weakening=accept_project_policy,
+        operator=op_policy,
+        operator_digest=op_digest,
+        operator_signers=op_signers,
     )
     signature_policies = _signer_policies(signature_policy, root)
     output_format = output_format or policy.output.default_format
@@ -906,6 +1201,19 @@ def scan(
         failures_by[MANIFEST] = scan_failures[failure_count:]
     if len(surfaces_excluded) > exclusion_count:
         excluded_by[MANIFEST] = surfaces_excluded[exclusion_count:]
+    tp_failure_count, tp_exclusion_count = len(scan_failures), len(surfaces_excluded)
+    apply_text_poisoning_rules(
+        aibom,
+        root,
+        exclude_paths=policy.scan.exclude_paths,
+        failures=scan_failures,
+        exclusions=surfaces_excluded,
+        surfaces=surfaces_scanned,
+    )
+    if len(scan_failures) > tp_failure_count:
+        failures_by["text_poisoning"] = scan_failures[tp_failure_count:]
+    if len(surfaces_excluded) > tp_exclusion_count:
+        excluded_by["text_poisoning"] = surfaces_excluded[tp_exclusion_count:]
     graph_failures = validate_graph(aibom)
     scan_failures.extend(graph_failures)
     if graph_failures:
@@ -993,7 +1301,13 @@ def scan(
                 "or SPDX."
             )
         try:
-            out_data = _render_aibom(aibom, output_format, root)
+            out_data = _render_aibom(
+                aibom,
+                output_format,
+                root,
+                operator_policy_digest=op_digest,
+                operator_policy_signers=op_signers,
+            )
         except ContentSerialError as exc:
             raise click.ClickException(str(exc)) from exc
         except (ValueError, RecursionError) as exc:
@@ -1016,6 +1330,8 @@ def scan(
         click.echo(f"Risk warning: score {risk_report.overall_score:.1f}", err=True)
     if not scan_failures and passed:
         print_lines([("Scan gate passed", "green")], err=True)
+        if op_digest is not None:
+            echo_line("  Policy: ", policy_source, err=True)
         return
     if report_mode:
         heading = "Scan gate failed (report only: exit status 0)"
@@ -1038,8 +1354,10 @@ def scan(
         discovery=discovery_failures,
     )
     print_lines([(heading, "yellow" if report_mode else "red"), *gate], err=True)
+    if op_digest is not None:
+        echo_line("  Policy: ", policy_source, err=True)
     if not report_mode:
-        raise click.exceptions.Exit(1)
+        _gate_exit(detailed, collection_failed=bool(scan_failures))
 
 
 @main.command("import-shadowscan")
@@ -1442,6 +1760,7 @@ def verify_discovery(
     type=click.Path(exists=True, path_type=Path),
     help="Explicit operator signer policy JSON; requires --project",
 )
+@_operator_policy_options
 @click.option(
     "--no-project-policy",
     is_flag=True,
@@ -1464,6 +1783,7 @@ def verify_discovery(
     ),
 )
 @click.option("--json-output", is_flag=True, help="Print the validation report as JSON.")
+@_gate_report_options
 @click.option(
     "--require-discovery-signature",
     is_flag=True,
@@ -1482,17 +1802,27 @@ def verify_discovery(
     is_flag=True,
     help="Accept unverified discovery evidence explicitly (still warns); required in CI.",
 )
+@_exit_code_options
 def validate(
     aibom_path: str,
     project: str | None,
     signature_policy: Path | None = None,
+    operator_policy: Path | None = None,
+    operator_policy_attestation: Path | None = None,
+    operator_policy_key: tuple[Path, ...] = (),
+    allow_unsigned_operator_policy: bool = False,
+    operator_policy_max_age_days: int = 90,
     no_project_policy: bool = False,
     accept_project_policy: bool = False,
     skip_integrity: bool = False,
     json_output: bool = False,
+    report_format: str | None = None,
+    step_summary: Path | None = None,
     require_discovery_signature: bool = False,
     fail_on_unsigned_discovery: bool = False,
     allow_unsigned_discovery: bool = False,
+    detailed_exit_codes: bool = False,
+    legacy_exit_codes: bool = False,
 ) -> None:
     """Validate an AIBOM for completeness and integrity.
 
@@ -1500,7 +1830,14 @@ def validate(
     and its self-consistency. With --project the inventory is compared with a fresh
     local collection of that project, unless the policy skips the completeness check.
     """
+    detailed = _apply_exit_code_flags(detailed_exit_codes, legacy_exit_codes)
+    effective_format = _resolve_report_format(json_output, report_format)
     _unsigned_discovery_flags(fail_on_unsigned_discovery, allow_unsigned_discovery)
+    if require_discovery_signature and not project:
+        raise click.BadParameter(
+            "--require-discovery-signature requires --project",
+            param_hint="--require-discovery-signature",
+        )
     bom = _load_bom(aibom_path)
 
     from nexus_symbiote.validators.completeness import (
@@ -1512,21 +1849,27 @@ def validate(
     )
     from nexus_symbiote.validators.integrity import IntegrityValidator
 
-    if require_discovery_signature and not project:
-        raise click.BadParameter(
-            "--require-discovery-signature requires --project",
-            param_hint="--require-discovery-signature",
-        )
     root = _project_root(project, label="--project") if project else None
     if root is not None:
         _require_binding_key()
     signature_policies = _signer_policies(signature_policy, root)
+    op_policy, op_digest, op_signers = _resolve_operator_policy(
+        operator_policy,
+        root,
+        attestation_path=operator_policy_attestation,
+        trusted_keys=operator_policy_key,
+        allow_unsigned=allow_unsigned_operator_policy,
+        max_age_days=operator_policy_max_age_days,
+    )
     policy, policy_source, policy_weakened = _inventory_policy(
         root,
         aibom_path,
         ignore_project=no_project_policy,
-        warn=not json_output,
+        warn=(effective_format == "text"),
         allow_weakening=accept_project_policy,
+        operator=op_policy,
+        operator_digest=op_digest,
+        operator_signers=op_signers,
     )
     minimum = policy.validation.minimum_assurance_level
     if minimum == "verified":
@@ -1591,7 +1934,7 @@ def validate(
     # Graph integrity is structural and cannot be disabled by a coverage policy.
     graph_issues = validate_graph(bom)
     passed = passed and not assurance_errors and not graph_issues
-    document = {
+    document: dict[str, Any] = {
         "passed": passed,
         "assessment_basis": basis,
         "policy_source": policy_source,
@@ -1604,12 +1947,20 @@ def validate(
         "assurance_errors": assurance_errors,
         "graph_issues": graph_issues,
     }
-    if json_output:
-        click.echo(json_text(json.dumps(document, indent=2)))
-    else:
-        print_lines(validation_report_lines(document, project=root))
+    if op_digest is not None:
+        document["operator_policy_digest"] = op_digest
+        document["operator_policy_signers"] = list(op_signers)
+        document["clamped_project_settings"] = list(_LAST_CLAMPED_SETTINGS.get())
+    _emit_gate_report(
+        "validate",
+        effective_format,
+        document,
+        lambda: validation_report_lines(document, project=root),
+        step_summary=step_summary,
+        operator_source=policy_source if op_digest is not None else None,
+    )
     if not passed:
-        raise click.exceptions.Exit(1)
+        _gate_exit(detailed)
 
 
 @main.command()
@@ -1629,6 +1980,7 @@ def validate(
     ),
 )
 @click.option("--json-output", is_flag=True, help="Output as JSON")
+@_gate_report_options
 @click.option(
     "--project",
     type=click.Path(exists=True, file_okay=False, path_type=Path),
@@ -1642,6 +1994,7 @@ def validate(
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
     help="Explicit operator signer policy for model recollection; requires --project.",
 )
+@_operator_policy_options
 @click.option(
     "--fail-on-severity",
     type=click.Choice(["critical", "high", "medium", "low", "info", "none"]),
@@ -1679,11 +2032,19 @@ def validate(
     is_flag=True,
     help="Accept unverified discovery evidence explicitly (still warns); required in CI.",
 )
+@_exit_code_options
 def risk(
     aibom_path: str,
     threshold: float | None,
     json_output: bool,
     fail_on_severity: str | None,
+    report_format: str | None = None,
+    step_summary: Path | None = None,
+    operator_policy: Path | None = None,
+    operator_policy_attestation: Path | None = None,
+    operator_policy_key: tuple[Path, ...] = (),
+    allow_unsigned_operator_policy: bool = False,
+    operator_policy_max_age_days: int = 90,
     no_project_policy: bool = False,
     accept_project_policy: bool = False,
     fail_on_unsigned_discovery: bool = False,
@@ -1692,14 +2053,13 @@ def risk(
     signature_policy: Path | None = None,
     no_score_threshold: bool = False,
     require_discovery_signature: bool = False,
+    detailed_exit_codes: bool = False,
+    legacy_exit_codes: bool = False,
 ) -> None:
     """Score supply-chain risks in an AIBOM."""
+    detailed = _apply_exit_code_flags(detailed_exit_codes, legacy_exit_codes)
+    effective_format = _resolve_report_format(json_output, report_format)
     _unsigned_discovery_flags(fail_on_unsigned_discovery, allow_unsigned_discovery)
-    bom = _load_bom(aibom_path)
-
-    from nexus_symbiote.validators.completeness import carries_discovery_evidence
-    from nexus_symbiote.validators.risk import RiskReport, RiskScorer
-
     if no_score_threshold and threshold is not None:
         raise click.UsageError("--threshold and --no-score-threshold cannot be combined")
     if require_discovery_signature and project is None:
@@ -1707,28 +2067,49 @@ def risk(
             "--require-discovery-signature requires --project",
             param_hint="--require-discovery-signature",
         )
+    bom = _load_bom(aibom_path)
+
+    from nexus_symbiote.validators.completeness import carries_discovery_evidence
+    from nexus_symbiote.validators.risk import RiskReport, RiskScorer
+
     root = _project_root(project, label="--project") if project else None
     if root is not None:
         _require_binding_key()
     signature_policies = _signer_policies(signature_policy, root)
+    op_policy, op_digest, op_signers = _resolve_operator_policy(
+        operator_policy,
+        root,
+        attestation_path=operator_policy_attestation,
+        trusted_keys=operator_policy_key,
+        allow_unsigned=allow_unsigned_operator_policy,
+        max_age_days=operator_policy_max_age_days,
+    )
     policy, policy_source, policy_weakened = _inventory_policy(
         root,
         aibom_path,
         ignore_project=no_project_policy,
-        warn=not json_output,
+        warn=(effective_format == "text"),
         allow_weakening=accept_project_policy,
+        operator=op_policy,
+        operator_digest=op_digest,
+        operator_signers=op_signers,
     )
     threshold_from_cli = threshold is not None or no_score_threshold
     threshold = threshold if threshold is not None else policy.risk.fail_threshold
     if threshold <= 0 or not math.isfinite(threshold):
         raise click.BadParameter("threshold must be positive and finite", param_hint="--threshold")
     severity = fail_on_severity or policy.risk.fail_on_severity
-    context = {
+    context: dict[str, Any] = {
         "fail_on_severity": severity,
         "score_threshold": None if no_score_threshold else threshold,
         "policy_source": policy_source,
         "policy_weakened": policy_weakened,
     }
+    if op_digest is not None:
+        context["operator_policy_digest"] = op_digest
+        context["operator_policy_signers"] = list(op_signers)
+        context["clamped_project_settings"] = list(_LAST_CLAMPED_SETTINGS.get())
+    op_source_line = policy_source if op_digest is not None else None
     basis = "supplied-bom"
     supplier_claims: list[dict[str, str]] = []
     supplier_claims_omitted = 0
@@ -1779,11 +2160,15 @@ def risk(
                 "discovery_producer": producer,
                 **context,
             }
-            if json_output:
-                click.echo(json_text(json.dumps(failed, indent=2)))
-            else:
-                print_lines(risk_report_lines(failed))
-            raise click.exceptions.Exit(1)
+            _emit_gate_report(
+                "risk",
+                effective_format,
+                failed,
+                lambda: risk_report_lines(failed),
+                step_summary=step_summary,
+                operator_source=op_source_line,
+            )
+            _gate_exit(detailed)
         basis = checked.basis
         supplier_claims = [
             {"subject": c.subject, "kind": c.kind, "detail": c.detail}
@@ -1811,11 +2196,15 @@ def risk(
             "discovery_producer": producer,
             **context,
         }
-        if json_output:
-            click.echo(json_text(json.dumps(unsigned, indent=2)))
-        else:
-            print_lines(risk_report_lines(unsigned))
-        raise click.exceptions.Exit(1)
+        _emit_gate_report(
+            "risk",
+            effective_format,
+            unsigned,
+            lambda: risk_report_lines(unsigned),
+            step_summary=step_summary,
+            operator_source=op_source_line,
+        )
+        _gate_exit(detailed)
     scorer = RiskScorer.from_policy(
         policy.risk,
         # The scorer requires a finite threshold; none can be reached by a sum of weights.
@@ -1839,42 +2228,79 @@ def risk(
         "discovery_producer": producer,
         **context,
     }
-    if json_output:
-        click.echo(json_text(json.dumps(document, indent=2)))
-    else:
-        # Upstream's gate report lists the inventory's own collection failures.
-        coverage = bom.metadata.completeness
-        failures = list(coverage.scan_failures) if coverage else []
-        print_lines(risk_report_lines(document, failures=failures))
+    coverage = bom.metadata.completeness
+    failures = list(coverage.scan_failures) if coverage else []
+    _emit_gate_report(
+        "risk",
+        effective_format,
+        document,
+        lambda: risk_report_lines(document, failures=failures),
+        step_summary=step_summary,
+        operator_source=op_source_line,
+    )
     if not passed:
-        raise click.exceptions.Exit(1)
+        _gate_exit(detailed)
 
 
 @main.command()
 @click.argument("old_path", type=click.Path(exists=True))
 @click.argument("new_path", type=click.Path(exists=True))
 @click.option("--json-output", is_flag=True, help="Output as JSON")
+@_gate_report_options
+@click.option(
+    "--expect-upgrade",
+    type=click.Choice(["0.1.0", "0.2.0"]),
+    default=None,
+    help="Attribute documented serializer/profile transitions since FROM_VERSION to tool_upgrade_changes.",
+)
 @click.option(
     "--fail-on-alert/--no-fail-on-alert",
     default=True,
     show_default=True,
-    help="Exit with status 1 if the diff reports a security alert.",
+    help="Exit non-zero if the diff reports an active security alert.",
 )
-def diff(old_path: str, new_path: str, json_output: bool, fail_on_alert: bool = True) -> None:
+@_exit_code_options
+def diff(
+    old_path: str,
+    new_path: str,
+    json_output: bool,
+    report_format: str | None = None,
+    step_summary: Path | None = None,
+    expect_upgrade: str | None = None,
+    fail_on_alert: bool = True,
+    detailed_exit_codes: bool = False,
+    legacy_exit_codes: bool = False,
+) -> None:
     """Compare two AIBOM snapshots for supply-chain drift."""
+    detailed = _apply_exit_code_flags(detailed_exit_codes, legacy_exit_codes)
+    effective_format = _resolve_report_format(json_output, report_format)
     old_bom = _load_bom(old_path)
     new_bom = _load_bom(new_path)
 
     from nexus_symbiote.diff.differ import AIBOMDiffer
+    from nexus_symbiote.diff.upgrade_attribution import attribute_expected_upgrade
 
     result = AIBOMDiffer().diff(old_bom, new_bom)
     document = result.to_dict()
-    if json_output:
-        click.echo(json_text(json.dumps(document, indent=2)))
-    else:
-        print_lines(diff_report_lines(document))
-    if fail_on_alert and result.security_alerts:
-        raise click.exceptions.Exit(1)
+    if expect_upgrade is not None:
+        try:
+            document = attribute_expected_upgrade(
+                document,
+                expect_upgrade,
+                baseline_tool_version=old_bom.metadata.tool_version,
+            )
+        except ValueError as exc:
+            raise click.UsageError(str(exc)) from None
+    document_with_verdict = {**document, "passed": not bool(document.get("security_alerts"))}
+    _emit_gate_report(
+        "diff",
+        effective_format,
+        document if effective_format == "json" else document_with_verdict,
+        lambda: diff_report_lines(document),
+        step_summary=step_summary,
+    )
+    if fail_on_alert and document.get("security_alerts"):
+        _gate_exit(detailed)
 
 
 @main.command()

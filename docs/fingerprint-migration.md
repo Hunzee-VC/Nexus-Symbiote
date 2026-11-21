@@ -213,6 +213,68 @@ coverage was complete, `Collector 'mcp' coverage changed from complete to
 partial`; `validate` warns that its package version is not pinned although it names
 no package. Review them the same way.
 
+## Neutralized identifiers
+
+A component's `name`, `description` and `supplier`, and the tool names under an MCP
+server's `client_settings.auto_approved_tools` and `tool_filter_names`, are now
+neutralized where collector output is merged into the inventory, and on the
+repository agent and the components its `agent.yaml` declares: a tab, line break,
+form feed, backspace or delete becomes a space, so does the second `#` of a CI
+log-command introducer, and other C0 and C1 controls, ESC, bidirectional and other
+format characters become U+FFFD. Variation selectors and joiners in ordinary
+spelling, such as an emoji's U+FE0F or a Persian word's U+200C, are kept
+([known limitations](known-limitations.md#every-collector)). The SHA-256 of each
+field's raw text is recorded under the component's `neutralized_raw_sha256`
+property. A component whose name, description, supplier or nested tool names held a
+reported character carries a high `identifier_characters` finding
+([finding catalog](finding-catalog.md#categories)); a tab or line break in a
+description or supplier is replaced without one. The details and recommendations
+of every component's findings, and the text of `surfaces_excluded` and
+`scan_failures`, are neutralized the same way without a finding of their own, since
+they quote such names.
+
+A component whose fields and finding details held no such character is recorded
+exactly as before, so its content digest, its `bom_ref` and its findings are
+unchanged, and `diff` against an earlier baseline reports nothing for it. That
+includes a name whose words are in different scripts, such as `MCP сервер`, and a
+name spelled with an emoji's variation selector or a joiner in ordinary spelling.
+A component that held one records different text, the `neutralized_raw_sha256`
+property, and a new finding when the character was reported, so its content digest
+changes once, and so does that of a component whose name only mixes scripts within
+a word, or has a word of Latin lookalikes beside Latin text, which gains the finding: `diff` reports the change, and `validate --project`
+against a baseline collected by an earlier release reports it as a mismatch. An agent
+whose `agent.yaml` `purpose` is a block scalar whose parsed value keeps a line break,
+a literal one or a folded one without the strip indicator `-`, is one of these: its
+description held line breaks, which are now spaces. So is an agent whose `name` is a
+clip block scalar (`name: >` or `name: |`), now recorded without the line break YAML
+ends it with. Recollect that baseline and
+review the finding, which records the SHA-256 of each raw value, before approving
+it. A tool whose name changed keeps its `definition_hash` over the original
+descriptor, and its `redacted_definition_hash` is bound to the neutralized name, so
+integrity validation still verifies it.
+
+A finding's fingerprint covers its `detail`, so a suppression copied from an earlier
+release no longer matches a finding whose detail quotes a name that is now
+neutralized: the suppression is reported stale, under `suppressions_stale`, and the
+finding counts again. Review
+the finding and suppress it again under its new fingerprint, which `risk
+--json-output` prints.
+
+MCP server and tool references are digests of the raw name, so the raw text never
+appears in them and they are unchanged. A reference derived from an A2A card's or
+A2A client's name (`a2a-server:<name>`, `a2a-client:<name>`) or a RAG source's name
+(`rag:<name>`) now percent-encodes, as its UTF-8 bytes, each character that
+neutralization replaces in the name, so `a2a-server:browser<ESC>[2K` becomes
+`a2a-server:browser%1B[2K`. A name that is encoded, or that already holds a `%`
+and two hex digits, also has each `%` written `%25`, so a literal
+`browser%1B[2K` becomes `a2a-server:browser%251B[2K` and no two names share a
+reference; a name with neither is its own reference. Such a component has a new
+reference, which `diff` reports as one component removed and another added, and
+policy entries and suppressions that name the old reference no longer apply. References derived from a
+path, such as a prompt import's, keep the path as collected, as do `source_path`,
+evidence locators and `surfaces_scanned`
+([known limitations](known-limitations.md#every-collector)).
+
 ## SARIF rule identifiers
 
 0.1.0 keyed SARIF rules by category (`nexus_symbiote/<category>`) and raised a
@@ -332,3 +394,13 @@ wrote. The components, findings and relationships are otherwise the same. Re-bas
 `diff --fail-on-alert` against an older baseline reports the changed recommendation text on each
 such finding and nothing else.
 
+## Upgrade attribution (`--expect-upgrade`)
+
+When upgrading Nexus SymBiote across a documented profile transition (`0.1.0` or
+`0.2.0`), `nexus-symbiote diff baseline.json candidate.json --expect-upgrade FROM_VERSION`
+partitions alerts caused *exclusively* by the static list of serializer and profile
+transitions since `FROM_VERSION` into `tool_upgrade_changes` while keeping genuine
+supply-chain drift (added or removed components, changed commands or endpoints,
+altered tool definitions, or any component where a profile transition co-occurs
+with a content change) in `security_alerts`. Re-collect and re-approve the baseline
+once the upgrade diff has been reviewed.

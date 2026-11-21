@@ -133,6 +133,13 @@ SPECS: dict[str, LimitSpec] = {
             "Text files under prompts directories, and *.prompt.md, *.prompt.yaml and "
             "*.prompt.yml files, that the prompt collector records in one collection.",
         ),
+        LimitSpec(
+            "advisory-matches",
+            "count",
+            1_000_000_000,
+            "Advisory records `advisories --offline-db` matches to package versions in one "
+            "run, before aliases merge; evaluating a range with many events counts too.",
+        ),
     )
 }
 
@@ -153,6 +160,7 @@ class CollectionLimits:
     python_nodes: int = 200_000
     import_lookups: int = 5_000
     prompt_files: int = 5_000
+    advisory_matches: int = 2_000_000
 
     def value(self, name: str) -> int:
         value: int = getattr(self, SPECS[name].attribute)

@@ -81,7 +81,13 @@ key; it is counted under `spans_ignored`.
 Values must be strings (`stringValue`), except `server.port`, which may also be an
 `intValue`, written as a decimal string or a JSON number. A value is used only when it
 is a string of at most 512 characters. Surrounding spaces, tabs and line breaks are
-trimmed, and identifiers are reported and compared after trimming. A value that the
+trimmed, and identifiers are reported and compared after trimming. Names are compared
+by their raw text: an inventory name that collection
+[neutralized](known-limitations.md#every-collector) is matched only by a reported name
+whose raw text has the SHA-256 the inventory records for it, so a tool collected as
+`run<TAB>job` and recorded as `run job` matches a span that reports `run<TAB>job`, not
+one that reports `run job`. Both names are trimmed first, so a tool collected as
+`lookup<TAB>` matches a span that reports `lookup`. A value that the
 redactor would change (a known credential format, a credential assignment such as
 `token=...`, an authorization scheme such as `Bearer ...`, or a URL with user
 information, a path, a query or a fragment) is withheld. Such a value is never printed,
