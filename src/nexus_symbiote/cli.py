@@ -17,6 +17,7 @@ import click
 
 from nexus_symbiote import __version__, limits, modes
 from nexus_symbiote.attestation_cli import register_attestation_commands
+from nexus_symbiote.control_plane_cli import register_control_plane_commands
 from nexus_symbiote.core.aibom import AIBOM, ContentSerialError, NativeFormatError, prepare
 from nexus_symbiote.core.enums import AssuranceLevel
 from nexus_symbiote.core.models import (
@@ -26,6 +27,7 @@ from nexus_symbiote.core.models import (
 )
 from nexus_symbiote.crosswalk_cli import register_crosswalk_commands
 from nexus_symbiote.digest_cli import register_digest_commands, source_date_epoch
+from nexus_symbiote.export_standard_cli import register_export_standard_commands
 from nexus_symbiote.graph import validate_graph
 from nexus_symbiote.graph_cli import register_graph_commands
 from nexus_symbiote.inventory_export_cli import register_inventory_export_commands
@@ -2606,6 +2608,8 @@ register_crosswalk_commands(main)
 register_trace_commands(main)
 register_inventory_export_commands(main)
 register_minimum_elements_commands(main)
+register_export_standard_commands(main)
+register_control_plane_commands(main)
 
 if __name__ == "__main__":
     main()
