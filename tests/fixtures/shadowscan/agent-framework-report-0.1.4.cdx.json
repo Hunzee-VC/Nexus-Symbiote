@@ -1,0 +1,460 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.6",
+  "serialNumber": "urn:uuid:195d96fe-d641-5ec2-ae10-2f8935f6b911",
+  "version": 1,
+  "metadata": {
+    "tools": {
+      "components": [
+        {
+          "type": "application",
+          "name": "ShadowScan",
+          "version": "0.1.4",
+          "externalReferences": [
+            {
+              "type": "vcs",
+              "url": "https://github.com/Hunzee-VC/Nexus-ShadowScan"
+            }
+          ]
+        }
+      ]
+    },
+    "properties": [
+      {
+        "name": "shadowscan:scan:status",
+        "value": "complete"
+      },
+      {
+        "name": "shadowscan:scan:findings",
+        "value": "4"
+      },
+      {
+        "name": "shadowscan:scan:credential-findings-excluded",
+        "value": "0"
+      },
+      {
+        "name": "shadowscan:scan:connectors",
+        "value": "code.filesystem"
+      },
+      {
+        "name": "shadowscan:scan:inventory-size",
+        "value": "0"
+      }
+    ],
+    "timestamp": "2026-11-18T22:41:23Z"
+  },
+  "components": [
+    {
+      "bom-ref": "shadowscan:framework:coding-agent.claude-code",
+      "type": "framework",
+      "name": "Claude Code",
+      "publisher": "Anthropic",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://docs.anthropic.com/en/docs/claude-code"
+        }
+      ],
+      "properties": [
+        {
+          "name": "shadowscan:signature",
+          "value": "coding-agent.claude-code"
+        },
+        {
+          "name": "shadowscan:category",
+          "value": "coding-agent"
+        }
+      ]
+    },
+    {
+      "bom-ref": "shadowscan:framework:framework.langchain",
+      "type": "framework",
+      "name": "LangChain",
+      "publisher": "LangChain, Inc.",
+      "description": "LLM application framework with agents, tools, chains and integrations.",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://python.langchain.com"
+        }
+      ],
+      "properties": [
+        {
+          "name": "shadowscan:signature",
+          "value": "framework.langchain"
+        },
+        {
+          "name": "shadowscan:category",
+          "value": "framework"
+        }
+      ]
+    },
+    {
+      "bom-ref": "shadowscan:framework:protocol.mcp",
+      "type": "framework",
+      "name": "Model Context Protocol (MCP)",
+      "publisher": "Anthropic / Linux Foundation (Agentic AI Foundation)",
+      "description": "Standard for connecting agents to tools and data. Servers expose tools (often filesystem, shell, SaaS APIs); clients (Claude Desktop, Cursor, VS Code, custom agents) consume them.",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://modelcontextprotocol.io"
+        }
+      ],
+      "properties": [
+        {
+          "name": "shadowscan:signature",
+          "value": "protocol.mcp"
+        },
+        {
+          "name": "shadowscan:category",
+          "value": "protocol"
+        }
+      ]
+    },
+    {
+      "bom-ref": "shadowscan:model:8a43428062692d36",
+      "type": "machine-learning-model",
+      "name": "gpt-4o-mini"
+    },
+    {
+      "bom-ref": "ss-2b9f27def47cd7ed",
+      "type": "application",
+      "name": "LLM usage in services/summarizer: OpenAI",
+      "group": "code",
+      "description": "framework-usage discovered by code.filesystem",
+      "properties": [
+        {
+          "name": "shadowscan:finding-id",
+          "value": "ss-2b9f27def47cd7ed"
+        },
+        {
+          "name": "shadowscan:surface",
+          "value": "code"
+        },
+        {
+          "name": "shadowscan:kind",
+          "value": "framework-usage"
+        },
+        {
+          "name": "shadowscan:connector",
+          "value": "code.filesystem"
+        },
+        {
+          "name": "shadowscan:resource",
+          "value": "/work/agent-framework-demo/services/summarizer"
+        },
+        {
+          "name": "shadowscan:resource-type",
+          "value": "project"
+        },
+        {
+          "name": "shadowscan:provider",
+          "value": "filesystem"
+        },
+        {
+          "name": "shadowscan:heuristic-risk",
+          "value": "low"
+        },
+        {
+          "name": "shadowscan:heuristic-risk-score",
+          "value": "14"
+        },
+        {
+          "name": "shadowscan:confidence",
+          "value": "0.83"
+        },
+        {
+          "name": "shadowscan:likelihood",
+          "value": "likely"
+        },
+        {
+          "name": "shadowscan:threats",
+          "value": "maestro-2025:L3"
+        },
+        {
+          "name": "shadowscan:controls",
+          "value": "aiuc-1-2026q2:E, iso-iec-42001-2023:A.3.2, nist-ai-rmf-1.0:GOVERN-2.1"
+        }
+      ]
+    },
+    {
+      "bom-ref": "ss-4b5c35df41b6de30",
+      "type": "application",
+      "name": "Agent in repository root: LangChain, Model Context Protocol (MCP)",
+      "group": "code",
+      "description": "agent discovered by code.filesystem",
+      "properties": [
+        {
+          "name": "shadowscan:finding-id",
+          "value": "ss-4b5c35df41b6de30"
+        },
+        {
+          "name": "shadowscan:surface",
+          "value": "code"
+        },
+        {
+          "name": "shadowscan:kind",
+          "value": "agent"
+        },
+        {
+          "name": "shadowscan:connector",
+          "value": "code.filesystem"
+        },
+        {
+          "name": "shadowscan:resource",
+          "value": "/work/agent-framework-demo"
+        },
+        {
+          "name": "shadowscan:resource-type",
+          "value": "project"
+        },
+        {
+          "name": "shadowscan:provider",
+          "value": "filesystem"
+        },
+        {
+          "name": "shadowscan:heuristic-risk",
+          "value": "medium"
+        },
+        {
+          "name": "shadowscan:heuristic-risk-score",
+          "value": "35"
+        },
+        {
+          "name": "shadowscan:confidence",
+          "value": "0.99"
+        },
+        {
+          "name": "shadowscan:likelihood",
+          "value": "strong"
+        },
+        {
+          "name": "shadowscan:capabilities",
+          "value": "tool-use"
+        },
+        {
+          "name": "shadowscan:threats",
+          "value": "maestro-2025:L3"
+        },
+        {
+          "name": "shadowscan:controls",
+          "value": "aiuc-1-2026q2:E, iso-iec-42001-2023:A.3.2, iso-iec-42001-2023:A.6.2.6, nist-ai-rmf-1.0:GOVERN-2.1, nist-ai-rmf-1.0:MANAGE-4.1"
+        }
+      ]
+    },
+    {
+      "bom-ref": "ss-c2bdc0cdb8c35d84",
+      "type": "application",
+      "name": "Claude Code configured in repository root",
+      "group": "code",
+      "description": "agent-config discovered by code.filesystem",
+      "properties": [
+        {
+          "name": "shadowscan:finding-id",
+          "value": "ss-c2bdc0cdb8c35d84"
+        },
+        {
+          "name": "shadowscan:surface",
+          "value": "code"
+        },
+        {
+          "name": "shadowscan:kind",
+          "value": "agent-config"
+        },
+        {
+          "name": "shadowscan:connector",
+          "value": "code.filesystem"
+        },
+        {
+          "name": "shadowscan:resource",
+          "value": "/work/agent-framework-demo"
+        },
+        {
+          "name": "shadowscan:resource-type",
+          "value": "coding-agent-config"
+        },
+        {
+          "name": "shadowscan:provider",
+          "value": "filesystem"
+        },
+        {
+          "name": "shadowscan:heuristic-risk",
+          "value": "medium"
+        },
+        {
+          "name": "shadowscan:heuristic-risk-score",
+          "value": "38"
+        },
+        {
+          "name": "shadowscan:confidence",
+          "value": "0.90"
+        },
+        {
+          "name": "shadowscan:likelihood",
+          "value": "strong"
+        },
+        {
+          "name": "shadowscan:capabilities",
+          "value": "code-exec, tool-use"
+        },
+        {
+          "name": "shadowscan:threats",
+          "value": "maestro-2025:L3, mitre-atlas-2026.09:AML.T0050, owasp-asi-2026:ASI05, owasp-llm-2026:LLM03"
+        },
+        {
+          "name": "shadowscan:controls",
+          "value": "aiuc-1-2026q2:E, iso-iec-42001-2023:A.3.2, nist-ai-rmf-1.0:GOVERN-2.1"
+        }
+      ]
+    }
+  ],
+  "services": [
+    {
+      "bom-ref": "ss-28b79f22113f5685",
+      "name": "MCP configuration: .mcp.json",
+      "group": "code",
+      "description": "mcp-server discovered by code.filesystem",
+      "properties": [
+        {
+          "name": "shadowscan:finding-id",
+          "value": "ss-28b79f22113f5685"
+        },
+        {
+          "name": "shadowscan:surface",
+          "value": "code"
+        },
+        {
+          "name": "shadowscan:kind",
+          "value": "mcp-server"
+        },
+        {
+          "name": "shadowscan:connector",
+          "value": "code.filesystem"
+        },
+        {
+          "name": "shadowscan:resource",
+          "value": "/work/agent-framework-demo/.mcp.json"
+        },
+        {
+          "name": "shadowscan:resource-type",
+          "value": "mcp-config"
+        },
+        {
+          "name": "shadowscan:provider",
+          "value": "filesystem"
+        },
+        {
+          "name": "shadowscan:heuristic-risk",
+          "value": "medium"
+        },
+        {
+          "name": "shadowscan:heuristic-risk-score",
+          "value": "49"
+        },
+        {
+          "name": "shadowscan:confidence",
+          "value": "0.95"
+        },
+        {
+          "name": "shadowscan:likelihood",
+          "value": "strong"
+        },
+        {
+          "name": "shadowscan:capabilities",
+          "value": "tool-use, data-access"
+        },
+        {
+          "name": "shadowscan:threats",
+          "value": "maestro-2025:L2, maestro-2025:L3"
+        },
+        {
+          "name": "shadowscan:controls",
+          "value": "aiuc-1-2026q2:E, iso-iec-42001-2023:A.3.2, nist-ai-rmf-1.0:GOVERN-2.1"
+        }
+      ]
+    },
+    {
+      "bom-ref": "shadowscan:mcp:ff4ea92d134b29e9",
+      "name": "docs",
+      "group": "mcp-server",
+      "properties": [
+        {
+          "name": "shadowscan:mcp:transport",
+          "value": "stdio"
+        },
+        {
+          "name": "shadowscan:mcp:command",
+          "value": "npx"
+        },
+        {
+          "name": "shadowscan:mcp:disabled",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "bom-ref": "shadowscan:provider:provider.openai",
+      "name": "OpenAI",
+      "provider": {
+        "name": "OpenAI"
+      },
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://platform.openai.com"
+        }
+      ],
+      "properties": [
+        {
+          "name": "shadowscan:signature",
+          "value": "provider.openai"
+        }
+      ]
+    }
+  ],
+  "dependencies": [
+    {
+      "ref": "ss-28b79f22113f5685",
+      "dependsOn": [
+        "shadowscan:framework:protocol.mcp",
+        "shadowscan:mcp:ff4ea92d134b29e9"
+      ]
+    },
+    {
+      "ref": "ss-2b9f27def47cd7ed",
+      "dependsOn": [
+        "shadowscan:model:8a43428062692d36",
+        "shadowscan:provider:provider.openai"
+      ]
+    },
+    {
+      "ref": "ss-4b5c35df41b6de30",
+      "dependsOn": [
+        "shadowscan:framework:framework.langchain",
+        "shadowscan:framework:protocol.mcp"
+      ]
+    },
+    {
+      "ref": "ss-c2bdc0cdb8c35d84",
+      "dependsOn": [
+        "shadowscan:framework:coding-agent.claude-code"
+      ]
+    }
+  ],
+  "compositions": [
+    {
+      "aggregate": "unknown",
+      "assemblies": [
+        "shadowscan:framework:coding-agent.claude-code",
+        "shadowscan:framework:framework.langchain",
+        "shadowscan:framework:protocol.mcp",
+        "shadowscan:model:8a43428062692d36",
+        "ss-2b9f27def47cd7ed",
+        "ss-4b5c35df41b6de30",
+        "ss-c2bdc0cdb8c35d84",
+        "ss-28b79f22113f5685"
+      ]
+    }
+  ]
+}

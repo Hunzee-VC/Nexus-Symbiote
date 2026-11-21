@@ -332,7 +332,9 @@ def test_refused_servers_do_not_count_toward_the_file_secret_limit(tmp_path):
 def test_counted_values_are_those_of_admitted_servers():
     admitted = {"command": "env", "args": ["API_TOKEN=AdmittedValue001", "node"]}
     refused = {"command": "env", "args": ["API_TOKEN=RefusedValue0001", *["x"] * 1000]}
-    assert MCPScanner._file_secrets([("a", admitted), ("r", refused)]) == ["AdmittedValue001"]
+    assert MCPScanner._file_secrets([("a", admitted), ("r", refused)], "map") == [
+        "AdmittedValue001"
+    ]
 
 
 @pytest.mark.parametrize("field", ["env", "headers", "http_headers", "inline"])

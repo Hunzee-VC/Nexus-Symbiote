@@ -243,7 +243,7 @@ every rule.
 - `nist-ai-rmf-1.0`: Subcategory identifiers of the AI RMF Core, checked against secondary sources only. Titles are short summaries in this project's words, not the subcategory text.
 - `eu-ai-act-2024`: Regulation (EU) 2024/1689. An article is named where a finding can serve as evidence. Whether it applies depends on the system's risk class and the operator's role, which an inventory cannot establish. Titles are this project's words.
 - `iso-iec-42001-2023`: Control identifiers only: the standard's text is copyrighted and was not consulted, and the labels are this project's words.
-- `cwe`: Identifiers from the earlier SARIF catalog. The names of CWE-494, CWE-829 and CWE-1427 match CWE 4.20 as the OWASP Top 10 for LLM Applications 2026 cites them; the others were not checked against the CWE site for this release.
+- `cwe`: Identifiers from the earlier SARIF catalog, and CWE-798 for the credential exposure finding. The names of CWE-494, CWE-829 and CWE-1427 match CWE 4.20 as the OWASP Top 10 for LLM Applications 2026 cites them; the others were not checked against the CWE site for this release.
 
 ## Entries
 
@@ -252,6 +252,7 @@ every rule.
 | Id | Title |
 | --- | --- |
 | LLM01:2025 | Prompt Injection |
+| LLM02:2025 | Sensitive Information Disclosure |
 | LLM03:2025 | Supply Chain |
 | LLM04:2025 | Data and Model Poisoning |
 | LLM06:2025 | Excessive Agency |
@@ -262,6 +263,7 @@ every rule.
 | Id | Title |
 | --- | --- |
 | LLM01:2026 | Prompt Injection |
+| LLM02:2026 | Sensitive Information Disclosure |
 | LLM03:2026 | Excessive Agency |
 | LLM04:2026 | Supply Chain |
 | LLM05:2026 | Data and Model Poisoning |
@@ -333,6 +335,7 @@ every rule.
 | CWE-451 | User Interface (UI) Misrepresentation of Critical Information |
 | CWE-494 | Download of Code Without Integrity Check |
 | CWE-502 | Deserialization of Untrusted Data |
+| CWE-798 | Use of Hard-coded Credentials |
 | CWE-829 | Inclusion of Functionality from Untrusted Control Sphere |
 | CWE-1336 | Improper Neutralization of Special Elements Used in a Template Engine |
 | CWE-1427 | Improper Neutralization of Input Used for LLM Prompting |
@@ -427,6 +430,17 @@ every rule.
 | `nist-ai-rmf-1.0` | GOVERN-1.6 AI systems are inventoried | all | Records values the inventory cannot bind, identity fields it withholds, or an agent card without skills. |
 | `iso-iec-42001-2023` | A.4.2 Resources of the AI system are documented | all | Records information about a component that the inventory does not document. |
 
+### `credential_exposure`
+
+| Framework | Entry | Severities | Rationale |
+| --- | --- | --- | --- |
+| `owasp-llm-2025` | LLM02:2025 Sensitive Information Disclosure | all | A credential committed with the agent's configuration is disclosed to everyone who reads the repository. |
+| `owasp-llm-2026` | LLM02:2026 Sensitive Information Disclosure | all | A credential committed with the agent's configuration is disclosed to everyone who reads the repository. |
+| `owasp-asi-2026` | ASI03 Identity & Privilege Abuse | all | A committed credential lets whoever reads the repository act as the agent does. |
+| `nist-ai-rmf-1.0` | MEASURE-2.7 Security and resilience are evaluated | all | Records a security-relevant property of the configuration, an input to evaluating its security. |
+| `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | all | Records a property of the system that bears on its robustness and cybersecurity. |
+| `cwe` | CWE-798 Use of Hard-coded Credentials | all | The credential is written into the configuration rather than supplied at run time. |
+
 ### `credential_helper`
 
 | Framework | Entry | Severities | Rationale |
@@ -510,6 +524,21 @@ every rule.
 | `mitre-atlas-2026.10` | AML.T0142 Event Triggered Execution | all | Hooks that run commands on agent events are the mechanism this technique abuses. |
 | `nist-ai-rmf-1.0` | MEASURE-2.7 Security and resilience are evaluated | all | Records a security-relevant property of the configuration, an input to evaluating its security. |
 | `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | all | Records a property of the system that bears on its robustness and cybersecurity. |
+
+### `identifier_characters`
+
+| Framework | Entry | Severities | Rationale |
+| --- | --- | --- | --- |
+| `owasp-llm-2025` | LLM01:2025 Prompt Injection | all | A tool or server name that reads differently to a reviewer than to the model can carry injected text. |
+| `owasp-llm-2026` | LLM01:2026 Prompt Injection | all | A tool or server name that reads differently to a reviewer than to the model can carry injected text. |
+| `owasp-asi-2026` | ASI01 Agent Goal Hijack | all | Such text can redirect the agent's goal without a reviewer noticing. |
+| `mitre-atlas-2026.10` | AML.T0010.005 Supply Chain Compromise: AI Agent Tool | all | A tool whose name is disguised can stand in for a trusted agent tool. |
+| `mitre-atlas-2026.10` | AML.T0068 LLM Prompt Obfuscation | all | Hiding or disguising instruction text from human review is what this technique describes. |
+| `mitre-atlas-2026.10` | AML.T0074 Masquerading | all | A lookalike or hidden-character name is a form of name manipulation. |
+| `nist-ai-rmf-1.0` | MEASURE-2.7 Security and resilience are evaluated | all | Records a security-relevant property of the configuration, an input to evaluating its security. |
+| `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | all | Records a property of the system that bears on its robustness and cybersecurity. |
+| `cwe` | CWE-451 User Interface (UI) Misrepresentation of Critical Information | all | A name with control, format or lookalike characters displays differently from what the agent and the inventory compare. |
+| `cwe` | CWE-1427 Improper Neutralization of Input Used for LLM Prompting | all | A tool name reaches the model's context with characters that are not neutralized. |
 
 ### `instruction_layering`
 
