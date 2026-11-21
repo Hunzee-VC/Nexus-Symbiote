@@ -1177,9 +1177,11 @@ A way around a limit that its entry does not describe is worth a
   zero-width or bidirectional characters each separated by another byte, plane-14
   characters spread so that no 4,096 characters hold 16 of them, and a UTF-16 or
   UTF-32 file without a byte-order mark.
-- **Escapes are decoded only in prompt templates.** A JSON, YAML or TOML prompt
-  template, under a `prompts` directory or named `*.prompt.yaml` or `*.prompt.yml`,
-  and the YAML front matter of a Markdown one, is checked in what it decodes to as
+- **Escapes are decoded only in prompt templates and front matter.** A JSON, YAML or
+  TOML prompt template, under a `prompts` directory or named `*.prompt.yaml` or
+  `*.prompt.yml`, and the front matter of every Markdown instruction file, prompt
+  template and skill or command declaration, YAML unless its opening line names
+  `toml` or `json` (`---yaml`, `--- toml`), is checked in what it decodes to as
   well as in its raw text, also when a memory file imports it, so a hidden character
   written as an escape, such as `\udb40\udc49` in JSON or `"\U000E0049"` in YAML or
   TOML, is the same finding as one written raw. YAML of at most 20,000 parser events
@@ -1189,15 +1191,19 @@ A way around a limit that its entry does not describe is worth a
   comments, duplicate keys, large numbers or lone surrogates, and YAML or TOML that
   does not parse or is past those bounds, have each escape that an odd run of
   backslashes starts decoded by pattern: `\x`, `\u` and `\U` with their hexadecimal
-  digits, YAML's `\L`, `\P`, `\N` and `\_`, and `\e`. The pattern also decodes such
+  digits, YAML's `\L`, `\P`, `\N` and `\_`, and `\e`, and a backslash that ends a
+  line is removed with the line break and the indentation after it, as YAML and TOML
+  continue a string there, so an escaped surrogate pair split across lines is joined.
+  YAML or TOML decoded by pattern is a coverage gap, since the pattern can still read
+  an escape otherwise than a host does. The pattern also decodes such
   an escape in a YAML or TOML literal string or comment, which a host keeps as text,
   so it can only add findings, which may be false positives: in a Jinja-templated
   YAML file, or front matter that does not parse, a single-quoted Windows path or
   regular expression, such as `'C:\Logs\Pipeline'` (`\L` and `\P`, U+2028 and
   U+2029) or `'\P{L}+'` (`\P`, U+2029), is a low `line_separators` finding, while the
   same lines in YAML that parses give none. A character the file holds raw in a comment
-  and also spells in a parsed string is counted once. The same file in a rule, prompt,
-  subagent, skill or command
+  and also spells in a parsed string is counted once. A JSON, YAML or TOML file in a
+  rule, prompt, subagent, skill or command
   directory, or imported with `@path` from outside a `prompts` directory, is checked
   as raw text only, as are a Markdown body and templates in other formats, such as
   Jinja's `{{ "\u202e" }}`, which only rendering decodes.
@@ -1213,7 +1219,12 @@ A way around a limit that its entry does not describe is worth a
   forms that HTML parsers read as comments (`<! ...>`, `</ ...>`) in HTML blocks, link
   reference definitions that no link uses or that repeat a label, definitions written
   as comments, with a `#` or `<>` destination, used or not and also in HTML blocks,
-  and footnotes (`[^x]: ...`) that nothing references, which GitHub drops. Text that a
+  and footnotes (`[^x]: ...`) that nothing references or that repeat a label, which
+  GitHub drops. A file that opens with front matter (a `---` line, possibly naming a
+  language, to the next `---` or `...` line) is read both whole and without it, as
+  hosts read it, and what either reading hides is reported, as are the `@path`
+  imports either reading finds, so YAML in it that opens a code fence hides nothing
+  after it. Text that a
   rendered view hides in other ways is not reported: the title of a link or image,
   shown only on hover, whether written inline or in a definition with another
   destination that a link with visible text, or any image, uses, however short that
@@ -1255,8 +1266,10 @@ A way around a limit that its entry does not describe is worth a
   HTML tag that cannot interrupt a paragraph, even when that code ends with a heading
   or a closed fence, after which GitHub shows them. Where CommonMark readers
   disagree about the block structure, as when a line after the definitions that open
-  a paragraph is indented four columns or starts with `2.`, or a block quote is
-  followed by a `>` indented four columns, every line of the file that has the form of
+  a paragraph is indented four columns or starts with `2.`, a block quote is
+  followed by a `>` indented four columns, an HTML block start that cmark-gfm 0.29
+  does not read, such as a tag name followed by a no-break space or `<search>`, or a
+  setext heading whose paragraph holds a footnote, every line of the file that has the form of
   a definition or a footnote is counted as unused, used or not and in code and HTML
   blocks too, and so is every processing instruction, declaration, CDATA section and
   other form an HTML block can hide, even in prose or a code span, as in

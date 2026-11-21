@@ -23,7 +23,8 @@ returned as written too.
 
 :func:`hidden_text` reads the same blocks for what a rendered view shows nothing of:
 the link reference definitions that no link uses or that are written as comments, the
-footnotes that nothing references, and the raw HTML that HTML parsers read as comments.
+footnotes that nothing references or that repeat a label, and the raw HTML that HTML
+parsers read as comments.
 It errs the other way, toward reporting: a reference counts as a use only where every
 reader, GitHub's included, makes a link of it that shows.
 """
@@ -32,6 +33,7 @@ from __future__ import annotations
 
 import re
 from bisect import bisect_left
+from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
@@ -54,12 +56,6 @@ _LIST_STARTS = frozenset("*+-0123456789")
 _NON_SPACE = re.compile(r"[^ \t\f\v\r\n]")
 # Whitespace as the JavaScript readers that hosts use match it in HTML.
 _WHITESPACE = "[\t\n\x0b\x0c\r \xa0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]"
-_OPEN_TAG = (
-    rf"<[A-Za-z][A-Za-z0-9-]*(?:{_WHITESPACE}+[a-zA-Z_:][a-zA-Z0-9:._-]*"
-    rf"(?:{_WHITESPACE}*={_WHITESPACE}*(?:[^\"'=<>`\x00-\x20]+|'[^']*'|\"[^\"]*\"))?)*"
-    rf"{_WHITESPACE}*/?>"
-)
-_CLOSE_TAG = rf"</[A-Za-z][A-Za-z0-9-]*{_WHITESPACE}*>"
 _BLOCK_TAG_NAMES = (
     "address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd"
     "|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset"
@@ -67,16 +63,34 @@ _BLOCK_TAG_NAMES = (
     "|optgroup|option|p|param|search|section|summary|table|tbody|td|tfoot|th|thead|title"
     "|tr|track|ul"
 )
+
+
+def _html_block_starts(whitespace: str, tag_names: str) -> tuple[re.Pattern[str], ...]:
+    open_tag = (
+        rf"<[A-Za-z][A-Za-z0-9-]*(?:{whitespace}+[a-zA-Z_:][a-zA-Z0-9:._-]*"
+        rf"(?:{whitespace}*={whitespace}*(?:[^\"'=<>`\x00-\x20]+|'[^']*'|\"[^\"]*\"))?)*"
+        rf"{whitespace}*/?>"
+    )
+    close_tag = rf"</[A-Za-z][A-Za-z0-9-]*{whitespace}*>"
+    return (
+        re.compile(rf"<(?:pre|script|style|textarea)(?:{whitespace}|>|$)", re.I),
+        re.compile(r"<!--"),
+        re.compile(r"<\?"),
+        re.compile(r"<![A-Za-z]"),
+        re.compile(r"<!\[CDATA\["),
+        re.compile(rf"</?(?:{tag_names})(?:{whitespace}|/?>|$)", re.I),
+        re.compile(rf"(?:{open_tag}|{close_tag}){whitespace}*$"),
+    )
+
+
 # The seven start conditions of an HTML block, and the end conditions of the first five;
 # the last two end at a blank line.
-_HTML_BLOCK_STARTS = (
-    re.compile(rf"<(?:pre|script|style|textarea)(?:{_WHITESPACE}|>|$)", re.I),
-    re.compile(r"<!--"),
-    re.compile(r"<\?"),
-    re.compile(r"<![A-Za-z]"),
-    re.compile(r"<!\[CDATA\["),
-    re.compile(rf"</?(?:{_BLOCK_TAG_NAMES})(?:{_WHITESPACE}|/?>|$)", re.I),
-    re.compile(rf"(?:{_OPEN_TAG}|{_CLOSE_TAG}){_WHITESPACE}*$"),
+_HTML_BLOCK_STARTS = _html_block_starts(_WHITESPACE, _BLOCK_TAG_NAMES)
+# The same conditions as cmark-gfm 0.29, which GitHub renders with, reads them: only ASCII
+# whitespace ends a tag name, and `search` is no block tag. Where the two readings start
+# different blocks, a definition or footnote one of them hides can be text to the other.
+_ASCII_HTML_BLOCK_STARTS = _html_block_starts(
+    "[ \t\n\x0b\x0c\r]", _BLOCK_TAG_NAMES.replace("|search", "")
 )
 _HTML_BLOCK_ENDS: tuple[re.Pattern[str] | str, ...] = (
     re.compile(r"</(?:pre|script|style|textarea)>", re.I),
@@ -86,6 +100,15 @@ _HTML_BLOCK_ENDS: tuple[re.Pattern[str] | str, ...] = (
     "]]>",
 )
 """End conditions of HTML block types 1 to 5; types 2 to 5 end at a literal string."""
+
+
+def _ascii_html_block_agrees(kind: int, line: str, at: int, parent: str, lazy: bool) -> bool:
+    """Whether cmark-gfm starts an HTML block of the same kind at ``at``: one that ends
+    where a block of ``kind`` ends, the last two kinds both at a blank line."""
+    for ascii_kind, start in enumerate(_ASCII_HTML_BLOCK_STARTS, 1):
+        if start.match(line, at) and (ascii_kind < 7 or (parent != "paragraph" and not lazy)):
+            return ascii_kind == kind or min(ascii_kind, kind) >= 6
+    return False
 
 
 def _html_block_ends(kind: int, line: str, offset: int) -> bool:
@@ -113,6 +136,16 @@ _PLAIN_DESTINATION = re.compile(r"\([^\s()<>\[\]\\`\"']*\)")
 _TAKEN = re.compile(r"[`\]]")
 
 
+# Front matter, which hosts take out of a file before they read the rest as Markdown: a
+# `---` line that opens the file, possibly naming a language, to the next `---` or `...`
+# line. Where a reader keeps it, YAML in it can open a code fence that runs to the end.
+_FRONT_MATTER = re.compile(
+    r"\ufeff?---[ \t]*[A-Za-z]*[ \t]*(?:\r\n|\r|\n)(?:.*?(?:\r\n|\r|\n))??"
+    r"(?:---|\.\.\.)[ \t]*(?:\r\n|\r|\n|\Z)",
+    re.S,
+)
+
+
 class _AmbiguousError(Exception):
     """The block structure turns on what the reader does not model."""
 
@@ -133,13 +166,39 @@ class _Block:
     after_code: bool = False
 
 
+def _without_front_matter(text: str) -> str | None:
+    """``text`` after the front matter it opens with, or ``None`` when it has none."""
+    front = _FRONT_MATTER.match(text)
+    return None if front is None else text[front.end() :]
+
+
+def _union(first: tuple[str, ...] | list[str], second: tuple[str, ...] | list[str]) -> list[str]:
+    """``first``, then each item of ``second`` that it holds fewer times than ``second``."""
+    missing = Counter(second)
+    missing.subtract(first)
+    merged = list(first)
+    for item in second:
+        if missing[item] > 0:
+            missing[item] -= 1
+            merged.append(item)
+    return merged
+
+
 def text_outside_code(text: str) -> list[str]:
     """The parts of ``text`` that a CommonMark reader does not read as code.
 
     Each paragraph and heading is one part, with its code spans replaced by a space;
     an HTML block or indented code line is returned as written, and fenced code is left
-    out. A file whose reading this cannot settle is returned whole.
+    out. A file whose reading this cannot settle is returned whole. A file that opens
+    with front matter is read both whole and without it, and the parts of either
+    reading are returned.
     """
+    parts = _text_outside_code(text)
+    body = _without_front_matter(text)
+    return parts if body is None else _union(parts, _text_outside_code(body))
+
+
+def _text_outside_code(text: str) -> list[str]:
     lines = _LINE_END.split(text)
     if text.endswith("\n"):
         lines.pop()
@@ -395,6 +454,8 @@ class _Reader:
                     if start.match(line, at) and (
                         kind < 7 or (parent.kind != "paragraph" and not lazy)
                     ):
+                        if not _ascii_html_block_agrees(kind, line, at, parent.kind, lazy):
+                            raise _AmbiguousError
                         self._close_unmatched()
                         block = self._add_child("html")
                         block.html = kind
@@ -407,8 +468,9 @@ class _Reader:
             ):
                 self._close_unmatched()
                 content = "\n".join(parent.lines)
-                if _DEFINITION.match(content):
-                    # A paragraph of nothing but definitions is no heading.
+                if _DEFINITION.match(content) or _FOOTNOTE.search(content):
+                    # A paragraph of nothing but definitions is no heading, and cmark-gfm
+                    # ends the paragraph at a footnote, which then takes the underline.
                     raise _AmbiguousError
                 self.parts.append(_outside_spans(content))
                 if parent.after_code:
@@ -613,7 +675,7 @@ class HiddenText:
 
     definitions: tuple[str, ...]
     """Link reference definitions that no link uses, every later one of a label, those
-    written as comments, and footnotes that nothing references."""
+    written as comments, and footnotes that nothing references or that repeat a label."""
     html: tuple[str, ...]
     """Processing instructions, declarations, CDATA sections and, in HTML blocks, the
     other markup that HTML parsers read as comments; not ``<!--`` comments."""
@@ -647,8 +709,22 @@ def hidden_text(text: str) -> HiddenText:
     after that code that start no block. HTML comments are left to the caller. A file
     whose blocks this cannot settle is read line by line, inside every container and
     code block, and each of its definitions and footnotes is returned, a footnote with
-    each later run of lines that starts indented four columns.
+    each later run of lines that starts indented four columns. A file that opens with
+    front matter is read both whole and without it, and what either reading hides is
+    returned, each as often as the reading that holds it more often.
     """
+    hidden = _hidden_text(text)
+    body = _without_front_matter(text)
+    if body is None:
+        return hidden
+    in_body = _hidden_text(body)
+    return HiddenText(
+        tuple(_union(hidden.definitions, in_body.definitions)),
+        tuple(_union(hidden.html, in_body.html)),
+    )
+
+
+def _hidden_text(text: str) -> HiddenText:
     lines = _LINE_END.split(text)
     if text.endswith("\n"):
         lines.pop()
@@ -729,8 +805,19 @@ def hidden_text(text: str) -> HiddenText:
     used_folded: set[str] = set()
     used_lowered: set[str] = set()
     unreferenced: dict[str, list[_Footnote]] = {}
+    # GitHub renders only the first footnote of a label, so each later one is hidden
+    # whatever references it, and its own references are no uses.
+    repeated: list[_Footnote] = []
+    noted_folded: set[str] = set()
+    noted_lowered: set[str] = set()
     for note in notes:
-        unreferenced.setdefault(note.keys[0], []).append(note)
+        fold, lower = note.keys
+        if fold in noted_folded or lower in noted_lowered:
+            repeated.append(note)
+        else:
+            unreferenced.setdefault(fold, []).append(note)
+        noted_folded.add(fold)
+        noted_lowered.add(lower)
     queue = readings[::-1]
     while queue:
         for label in _references(queue.pop(), is_defined):
@@ -757,6 +844,7 @@ def hidden_text(text: str) -> HiddenText:
         seen_lowered.add(lower)
     hidden += comments
     hidden += ["\n".join(note.text) for waiting in unreferenced.values() for note in waiting]
+    hidden += ["\n".join(note.text) for note in repeated]
     return HiddenText(tuple(hidden), tuple(html))
 
 
