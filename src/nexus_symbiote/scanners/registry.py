@@ -29,6 +29,7 @@ from packaging.version import InvalidVersion, Version
 
 from nexus_symbiote.core.enums import AssuranceLevel, RiskSeverity, TrustTier
 from nexus_symbiote.core.hashing import extract_version_pin, hash_bytes, parse_json_strict
+from nexus_symbiote.core.identifiers import reference_text
 from nexus_symbiote.core.models import ClaimEvidence, RegistryEntryComponent, RiskAssessment
 from nexus_symbiote.scanners.base import Scanner, ScanResult
 from nexus_symbiote.scanners.credential_files import credential_gap, link_gap
@@ -1888,7 +1889,7 @@ class RegistryScanner(Scanner):
             # not read and an override each leave the version the spec names in doubt.
             package_url = self._npm_purl(package, version_range, None)
         return RegistryEntryComponent(
-            bom_ref=f"registry:npm/{redact_text(key)}",
+            bom_ref=f"registry:npm/{reference_text(redact_text(key))}",
             name=name,
             version=version or None,
             package_url=package_url,
@@ -3071,7 +3072,7 @@ class RegistryScanner(Scanner):
             # pip checks the artifact against these; a changed or removed hash is drift.
             properties["requirement_hashes"] = hashes
         return RegistryEntryComponent(
-            bom_ref=f"registry:pypi/{name}",
+            bom_ref=f"registry:pypi/{reference_text(name)}",
             name=name,
             version=chosen.spec,
             package_url=package_url,
@@ -4302,7 +4303,7 @@ class RegistryScanner(Scanner):
                 )
             )
         return RegistryEntryComponent(
-            bom_ref=f"registry:docker/{name}",
+            bom_ref=f"registry:docker/{reference_text(name)}",
             name=name,
             package_url=package_url,
             registry_type=registry_type,

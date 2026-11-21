@@ -60,7 +60,7 @@ Native documents are limited to 16 MiB. `scan`, `import-shadowscan` and `AIBOM.s
 
 ### Reserved types and fields
 
-`guardrail-policy`, `memory-store` and `data-source` components, `egress_domains` and `filesystem_paths` in capability declarations, `registry_source` on MCP servers, and the `huggingface`, `mcp-registry` and `skill-marketplace` registry types are defined for supplied inventories. No built-in collector emits them; their descriptions in the schema say so.
+`memory-store` and `data-source` components, every `guardrail-policy` field other than `guardrail_type` and `config_hash`, `egress_domains` and `filesystem_paths` in capability declarations, `registry_source` on MCP servers, and the `huggingface`, `mcp-registry` and `skill-marketplace` registry types are defined for supplied inventories. No built-in collector emits them; their descriptions in the schema say so. The `rag` collector emits `guardrail-policy` components for configuration files it recognises by name, bound by `config_hash` and never parsed ([collector reference](../docs/collectors.md)).
 
 When a model changes, regenerate the affected schema from it and review the diff together with the model change. These commands reproduce the committed files byte for byte:
 
