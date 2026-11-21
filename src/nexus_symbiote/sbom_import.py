@@ -511,7 +511,6 @@ def import_foreign_sbom(
         clean_purl = _clean_str(entry["purl"])[:512] if entry["purl"] else None
         sha256_val: str | None = entry["sha256"]
         eco = _ENTRY_ECO_MAP.get(entry["type"]) or _purl_eco(clean_purl) or "any"
-
         nm = _norm_pkg(_clean_str(raw_name))
         pk = [f"purl:{clean_purl.split('@')[0].lower()}"] if clean_purl else []
         cand_keys = pk + [f"name:{e}:{nm}" for e in (("*",) if eco == "any" else (eco, "any"))]
