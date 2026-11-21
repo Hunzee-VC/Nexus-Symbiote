@@ -1625,6 +1625,10 @@ def _curl_output(word: str, args: list[str], index: int) -> tuple[str | None, in
                 return None, 1
             if flag in _CURL_VALUE_FLAGS:
                 break
+        # The released reading, kept so no form is rated lower: a cluster that ends in `o`
+        # names its output in the next argument.
+        if word.endswith("o") and index + 1 < len(args):
+            return _decode_word(args[index + 1], drop_ifs=True), 2
     return None, 1
 
 
