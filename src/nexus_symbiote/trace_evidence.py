@@ -25,6 +25,7 @@ from urllib.parse import urlsplit
 from nexus_symbiote.core.aibom import AIBOM, MAX_NATIVE_BYTES
 from nexus_symbiote.core.content_digest import INVENTORY_CONTENT_PROFILE, inventory_content_digest
 from nexus_symbiote.core.hashing import hash_bytes, hash_canonical, parse_json_strict
+from nexus_symbiote.core.identifiers import name_key, recorded_name_key
 from nexus_symbiote.core.models import (
     AgentComponent,
     AnyComponent,
@@ -378,10 +379,13 @@ class _Inventory:
         groups: dict[str, dict[Any, list[AnyComponent]]] = defaultdict(lambda: defaultdict(list))
         endpoints: dict[str, tuple[str, int | None]] = {}
         remote_only: set[str] = set()
-        tools: list[tuple[str, ToolComponent]] = []
+        tools: list[tuple[tuple[str, str], ToolComponent]] = []
         self.declared: list[tuple[str, AnyComponent]] = []
         for component in bom.components:
-            name = _trimmed(component.name)
+            trimmed = _trimmed(component.name)
+            # Names are compared by raw text: a name collection neutralized is keyed by
+            # the digest it recorded, never by the text it reads as now.
+            name = None if trimmed is None else recorded_name_key(component, trimmed)
             if isinstance(component, MCPServerComponent):
                 self.declared.append(("mcp-server", component))
                 endpoint = _endpoint(component.endpoint_url)
@@ -405,7 +409,8 @@ class _Inventory:
                 if component.model_type == "hosted":
                     self.declared.append(("model", component))
                 provider = _trimmed(component.provider)
-                for key in {name, _trimmed(component.requested_alias)} - {None}:
+                alias = _trimmed(component.requested_alias)
+                for key in {name, None if alias is None else name_key(alias)} - {None}:
                     groups["models"][key].append(component)
                     if provider is None:
                         groups["models_open"][key].append(component)
@@ -449,7 +454,8 @@ class _Inventory:
         """The candidate lists for one item, each with the basis a match on it has."""
         texts = [_text(value) for value in values]
         if kind == "tool":
-            name, host, port, local = texts
+            raw, host, port, local = texts
+            name = None if raw is None else name_key(raw)
             if local is not None:
                 # A pipe or unix socket cannot reach a server that has only a remote endpoint.
                 return [(self._get("tools_local", name), "name")]
@@ -478,24 +484,26 @@ class _Inventory:
                 return [(exact, "host-and-port")]
             return [(self._get("servers_open", host), "host")]
         if kind == "model":
-            provider, model = texts
+            provider, raw = texts
+            model = None if raw is None else name_key(raw)
             if provider is None:
                 return [(self._get("models", model), "name")]
             if exact := self._get("models_for", (model, provider.lower())):
                 return [(exact, "name-and-provider")]
             return [(self._get("models_open", model), "name")]
         if kind == "agent":
-            ident, name = texts
+            ident, agent = texts
             if ident is not None and (
                 exact := self._get("agent_ids", _repository_agent_ref(ident))
             ):
                 return [(exact, "id")]
-            if name is not None:
+            if agent is not None:
                 # When both sides state an id, the ids decide.
                 table = "agents" if ident is None else "agents_unbound"
-                return [(self._get(table, name), "name")]
+                return [(self._get(table, name_key(agent)), "name")]
             return []
-        return [(self._get(kind, texts[0]), "name")]
+        named = texts[0]
+        return [(self._get(kind, None if named is None else name_key(named)), "name")]
 
 
 def _order(entry: Mapping[str, Any]) -> tuple[str, str]:

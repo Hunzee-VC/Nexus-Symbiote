@@ -13,3 +13,8 @@
 /pyproject.toml @aisecnomad
 /requirements-*.lock @aisecnomad
 /tests/conftest.py @aisecnomad
+
+# Detectors, validators, and standard export generators: queued for independent second-maintainer review (R1.0.0-2).
+/src/nexus_symbiote/scanners/ @aisecnomad
+/src/nexus_symbiote/validators/ @aisecnomad
+/src/nexus_symbiote/generators/ @aisecnomad
