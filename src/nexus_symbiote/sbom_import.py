@@ -830,6 +830,14 @@ def _npm_lock_packages(
     return {}
 
 
+def _enclosing_manifest(rel: str, paths: set[str], filenames: tuple[str, ...]) -> bool:
+    return any(
+        (parent / name).as_posix() in paths
+        for parent in Path(rel).parents[1:]
+        for name in filenames
+    )
+
+
 def _direct_toml_lock(
     files: ConfinedCollection, prefix: str, filename: str, project: Any
 ) -> dict[str, str]:
@@ -1023,6 +1031,9 @@ def _parse_nested_manifest(
             and prefix + "uv.lock" in path_set
             and prefix + "poetry.lock" not in path_set
             and prefix + "uv.toml" not in path_set
+            and not _enclosing_manifest(
+                rel_posix, path_set, ("pyproject.toml", "uv.toml", "uv.lock")
+            )
         ):
             py_locks = _direct_toml_lock(files, prefix, "uv.lock", proj_section.get("name"))
         proj = parsed_toml.get("project")
@@ -1045,6 +1056,14 @@ def _parse_nested_manifest(
             isinstance(manifest_package, dict)
             and not {"workspace", "patch", "replace"} & parsed_cargo.keys()
             and prefix + "Cargo.lock" in path_set
+            and not _enclosing_manifest(
+                rel_posix,
+                path_set,
+                ("Cargo.toml", "Cargo.lock", ".cargo/config.toml", ".cargo/config"),
+            )
+            and not any(
+                prefix + name in path_set for name in (".cargo/config.toml", ".cargo/config")
+            )
         ):
             cargo_locks = _direct_toml_lock(
                 files, prefix, "Cargo.lock", manifest_package.get("name")

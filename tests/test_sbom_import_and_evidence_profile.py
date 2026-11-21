@@ -1679,9 +1679,12 @@ def test_nested_manifest_does_not_bind_transitive_package_or_partial_oci_digest(
 
 
 @pytest.mark.parametrize(
-    "problem", ["wrong-version", "duplicate", "no-direct-edge", "different-source"]
+    "problem",
+    ["wrong-version", "duplicate", "no-direct-edge", "different-source", "enclosing-workspace"],
 )
 def test_nested_uv_lock_demands_applicable_unique_direct_registry_record(tmp_path, problem):
+    if problem == "enclosing-workspace":
+        (tmp_path / "pyproject.toml").write_text('[tool.uv.workspace]\nmembers = ["python"]\n')
     directory = tmp_path / "python"
     directory.mkdir()
     (directory / "pyproject.toml").write_text(
