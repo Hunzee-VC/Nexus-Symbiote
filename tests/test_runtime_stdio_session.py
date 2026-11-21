@@ -28,13 +28,21 @@ pytestmark = pytest.mark.usefixtures("nonisolated_pinned_fixtures")
 
 
 def launcher(
-    tmp_path: Path, *, altered: bool = False, missing: bool = False, mode: str = "normal"
+    tmp_path: Path,
+    *,
+    altered: bool = False,
+    missing: bool = False,
+    mode: str = "normal",
+    output_schema: dict | None = None,
+    tool_result: dict | None = None,
 ) -> tuple[Path, str, Path]:
     log = tmp_path / "calls.jsonl"
     path = tmp_path / "launcher"
     definition = dict(DEFINITION)
     if altered:
         definition["description"] = "changed after approval"
+    if output_schema is not None:
+        definition["outputSchema"] = output_schema
     script = f"""#!{sys.executable}
 import json, os, sys, time
 definition = {definition!r}
@@ -64,7 +72,7 @@ for line in sys.stdin:
     elif method == "tools/call":
         with open(log, "a") as f:
             f.write(json.dumps([method, int(os.readlink("/proc/self")), msg["params"]]) + "\\n")
-        result = {{"content": [{{"type": "text", "text": "ok"}}]}}
+        result = {tool_result!r} if {tool_result is not None!r} else {{"content": [{{"type": "text", "text": "ok"}}]}}
     else:
         raise SystemExit(1)
     reply_id = msg["id"] + 1 if method == "tools/list" and mode == "wrong-id" else msg["id"]
@@ -527,3 +535,31 @@ def test_a_launcher_over_the_byte_budget_is_denied_before_it_is_read_or_run(tmp_
         PinnedStdioSession(command=str(path), sha256=pin, server_id="server:mail"),
     ):
         pass
+
+
+@pytest.mark.parametrize(
+    ("result", "accepted"),
+    [
+        ({"structuredContent": {"count": 1}}, True),
+        ({"structuredContent": {"count": "one"}}, False),
+        ({"content": []}, False),
+        ({"isError": True, "content": []}, True),
+        ({"isError": "true", "content": []}, False),
+    ],
+)
+def test_stdio_checks_successful_structured_results(tmp_path, result, accepted):
+    call = fixture(tmp_path)[1]
+    schema = {
+        "type": "object",
+        "properties": {"count": {"type": "integer"}},
+        "required": ["count"],
+    }
+    path, pin, log = launcher(tmp_path, output_schema=schema, tool_result=result)
+    with PinnedStdioSession(command=str(path), sha256=pin, server_id="server:mail") as session:
+        session.describe("server:mail", "send")
+        if accepted:
+            assert session.execute(call) == result
+        else:
+            with pytest.raises(ExecutionOutcomeUnknown):
+                session.execute(call)
+    assert sum(record[0] == "tools/call" for record in launcher_log(log)) == 1
