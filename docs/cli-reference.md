@@ -652,6 +652,7 @@ nexus-symbiote import-sbom [OPTIONS] FOREIGN_BOM_PATH
 | `-o`, `--output` `PATH` | Write the resulting native AgentBOM JSON to this file (must lie outside `--project`). |
 | `--into` `PATH` | Existing native AgentBOM to merge imported SBOM claims into. |
 | `--project` `PATH` | Trusted project root for SHA-256 local file binding, nested manifests, and shape census. |
+| `--shareable` | Produce a standalone supplier export with keyed document, entry and identity bindings. Set `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` to a secret of at least 32 characters. Local inventory merging, checkout inputs, supplier filenames, and nonnumeric version labels are excluded from this mode. |
 | `--reveal-names` | Retain plain component names from the foreign SBOM instead of hashed names. |
 | `--walk-manifests` | Walk nested manifests below `--project`. Nested npm lock evidence requires an applicable v2 or v3 root lock record. Go versions describe requirements and remain manifest-only. |
 | `--census` | Count unread non-control-plane artifact shapes (`*.ipynb`, `n8n/*.json`, `*.tf`, `Chart.yaml`). |
