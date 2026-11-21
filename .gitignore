@@ -43,6 +43,10 @@ Thumbs.db
 # Security — never commit credentials
 *.pem
 *.key
+.env.*
+.envrc
+# Local assistant settings can hold tokens and machine paths
+.claude/settings.local.json
 
 # Built wheels
 *.whl

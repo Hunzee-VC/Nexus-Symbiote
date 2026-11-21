@@ -98,6 +98,7 @@ FRAMEWORKS: tuple[Framework, ...] = (
         ),
         entries=(
             Entry("LLM01:2025", "Prompt Injection"),
+            Entry("LLM02:2025", "Sensitive Information Disclosure"),
             Entry("LLM03:2025", "Supply Chain"),
             Entry("LLM04:2025", "Data and Model Poisoning"),
             Entry("LLM06:2025", "Excessive Agency"),
@@ -117,6 +118,7 @@ FRAMEWORKS: tuple[Framework, ...] = (
         ),
         entries=(
             Entry("LLM01:2026", "Prompt Injection"),
+            Entry("LLM02:2026", "Sensitive Information Disclosure"),
             Entry("LLM03:2026", "Excessive Agency"),
             Entry("LLM04:2026", "Supply Chain"),
             Entry("LLM05:2026", "Data and Model Poisoning"),
@@ -235,9 +237,10 @@ FRAMEWORKS: tuple[Framework, ...] = (
         source="https://cwe.mitre.org/",
         verification="secondary",
         note=(
-            "Identifiers from the earlier SARIF catalog. The names of CWE-494, CWE-829 and "
-            "CWE-1427 match CWE 4.20 as the OWASP Top 10 for LLM Applications 2026 cites "
-            "them; the others were not checked against the CWE site for this release."
+            "Identifiers from the earlier SARIF catalog, and CWE-798 for the credential "
+            "exposure finding. The names of CWE-494, CWE-829 and CWE-1427 match CWE 4.20 as "
+            "the OWASP Top 10 for LLM Applications 2026 cites them; the others were not "
+            "checked against the CWE site for this release."
         ),
         entries=(
             Entry("CWE-250", "Execution with Unnecessary Privileges"),
@@ -247,6 +250,7 @@ FRAMEWORKS: tuple[Framework, ...] = (
             Entry("CWE-451", "User Interface (UI) Misrepresentation of Critical Information"),
             Entry("CWE-494", "Download of Code Without Integrity Check"),
             Entry("CWE-502", "Deserialization of Untrusted Data"),
+            Entry("CWE-798", "Use of Hard-coded Credentials"),
             Entry("CWE-829", "Inclusion of Functionality from Untrusted Control Sphere"),
             Entry(
                 "CWE-1336", "Improper Neutralization of Special Elements Used in a Template Engine"
@@ -472,6 +476,32 @@ CROSSWALK: dict[str, tuple[Reference, ...]] = {
             "Records information about a component that the inventory does not document.",
         ),
     ),
+    "credential_exposure": (
+        _ref(
+            OWASP_LLM_2025,
+            "LLM02:2025",
+            "A credential committed with the agent's configuration is disclosed to everyone "
+            "who reads the repository.",
+        ),
+        _ref(
+            OWASP_LLM_2026,
+            "LLM02:2026",
+            "A credential committed with the agent's configuration is disclosed to everyone "
+            "who reads the repository.",
+        ),
+        _ref(
+            OWASP_ASI_2026,
+            "ASI03",
+            "A committed credential lets whoever reads the repository act as the agent does.",
+        ),
+        _ref(NIST_AI_RMF, "MEASURE-2.7", _EVALUATION),
+        _ref(EU_AI_ACT, "Art. 15", _RESILIENCE),
+        _ref(
+            CWE,
+            "CWE-798",
+            "The credential is written into the configuration rather than supplied at run time.",
+        ),
+    ),
     "credential_helper": (
         _ref(
             OWASP_ASI_2026,
@@ -575,12 +605,80 @@ CROSSWALK: dict[str, tuple[Reference, ...]] = {
         ),
         _ref(NIST_AI_RMF, "MEASURE-2.7", _EVALUATION),
     ),
+    "identifier_characters": (
+        _ref(
+            CWE,
+            "CWE-451",
+            "A name with control, format or lookalike characters displays differently from "
+            "what the agent and the inventory compare.",
+        ),
+        _ref(
+            CWE,
+            "CWE-1427",
+            "A tool name reaches the model's context with characters that are not neutralized.",
+        ),
+        _ref(
+            OWASP_LLM_2025,
+            "LLM01:2025",
+            "A tool or server name that reads differently to a reviewer than to the model can "
+            "carry injected text.",
+        ),
+        _ref(OWASP_ASI_2026, "ASI01", _HIDDEN_GOAL),
+        _ref(
+            OWASP_LLM_2026,
+            "LLM01:2026",
+            "A tool or server name that reads differently to a reviewer than to the model can "
+            "carry injected text.",
+        ),
+        _ref(
+            MITRE_ATLAS,
+            "AML.T0010.005",
+            "A tool whose name is disguised can stand in for a trusted agent tool.",
+        ),
+        _ref(MITRE_ATLAS, "AML.T0068", _HIDDEN_REVIEW),
+        _ref(
+            MITRE_ATLAS,
+            "AML.T0074",
+            "A lookalike or hidden-character name is a form of name manipulation.",
+        ),
+        _ref(NIST_AI_RMF, "MEASURE-2.7", _EVALUATION),
+        _ref(EU_AI_ACT, "Art. 15", _RESILIENCE),
+    ),
     "hook_commands": (
         _ref(OWASP_ASI_2026, "ASI05", "Commands run automatically on agent events."),
         _ref(
             MITRE_ATLAS,
             "AML.T0142",
             "Hooks that run commands on agent events are the mechanism this technique abuses.",
+        ),
+        _ref(NIST_AI_RMF, "MEASURE-2.7", _EVALUATION),
+        _ref(EU_AI_ACT, "Art. 15", _RESILIENCE),
+    ),
+    "instruction_injection": (
+        _ref(
+            CWE,
+            "CWE-1427",
+            "Prompt or instruction text carries injection or auditor-deception directives without neutralization.",
+        ),
+        _ref(
+            OWASP_LLM_2025,
+            "LLM01:2025",
+            "Prompt or instruction text contains override, exfiltration, or deception directives.",
+        ),
+        _ref(
+            OWASP_ASI_2026,
+            "ASI01",
+            "Injected directives in prompt or skill files can hijack the agent's goal.",
+        ),
+        _ref(
+            OWASP_LLM_2026,
+            "LLM01:2026",
+            "Prompt or instruction text contains override, exfiltration, or deception directives.",
+        ),
+        _ref(
+            MITRE_ATLAS,
+            "AML.T0068",
+            "Concealed or override directives disguise instructions to alter agent or auditor behavior.",
         ),
         _ref(NIST_AI_RMF, "MEASURE-2.7", _EVALUATION),
         _ref(EU_AI_ACT, "Art. 15", _RESILIENCE),
@@ -853,6 +951,37 @@ CROSSWALK: dict[str, tuple[Reference, ...]] = {
         _ref(EU_AI_ACT, "Art. 15", _RESILIENCE),
         _ref(ISO_42001, "A.10.3", _SUPPLIER),
     ),
+    "oversight_gap": (
+        _ref(CWE, "CWE-250", "A destructive or shell tool executes without human approval."),
+        _ref(
+            OWASP_LLM_2025,
+            "LLM06:2025",
+            "Auto-approving destructive tools grants excessive agency.",
+        ),
+        _ref(
+            OWASP_ASI_2026,
+            "ASI02",
+            "Destructive tool calls lack human-in-the-loop confirmation.",
+        ),
+        _ref(
+            OWASP_LLM_2026,
+            "LLM03:2026",
+            "Auto-approving destructive tools grants excessive agency.",
+        ),
+    ),
+    "subagent_inline_mcp_server": (
+        _ref(
+            OWASP_ASI_2026,
+            "ASI04",
+            "Inline subagent mcpServers bypass top-level MCP server inventory review.",
+        ),
+        _ref(
+            OWASP_LLM_2025,
+            "LLM03:2025",
+            "Unpinned inline MCP server declarations expand the agent supply chain.",
+        ),
+        _ref(NIST_AI_RMF, "MANAGE-3.1", _THIRD_PARTY),
+    ),
     "permission_scope": (
         _ref(CWE, "CWE-250", "The agent runs with permissions beyond what a task needs."),
         _ref(
@@ -1104,6 +1233,45 @@ CROSSWALK: dict[str, tuple[Reference, ...]] = {
         _ref(EU_AI_ACT, "Art. 15", _RESILIENCE),
     ),
     "tag_characters": _HIDDEN_CHARACTERS,
+    "tool_description_poisoning": (
+        _ref(
+            CWE,
+            "CWE-1427",
+            "Tool or schema description carries directive tags or exfiltration instructions into the model prompt.",
+        ),
+        _ref(
+            OWASP_LLM_2025,
+            "LLM01:2025",
+            "Poisoned tool descriptions act as indirect prompt injection inside tool metadata.",
+        ),
+        _ref(
+            OWASP_ASI_2026,
+            "ASI01",
+            "Hidden or coercive directives inside tool metadata can redirect agent execution.",
+        ),
+        _ref(
+            OWASP_ASI_2026,
+            "ASI02",
+            "Poisoned tool guidance steers agents toward unintended sensitive reads or exfiltration.",
+        ),
+        _ref(
+            OWASP_LLM_2026,
+            "LLM01:2026",
+            "Poisoned tool descriptions act as indirect prompt injection inside tool metadata.",
+        ),
+        _ref(
+            MITRE_ATLAS,
+            "AML.T0010.005",
+            "Local tool descriptors embed malicious behavioral instructions inside the agent tool chain.",
+        ),
+        _ref(
+            MITRE_ATLAS,
+            "AML.T0068",
+            "Markup blocks or hidden directives inside tool schemas disguise injected instructions.",
+        ),
+        _ref(NIST_AI_RMF, "MEASURE-2.7", _EVALUATION),
+        _ref(EU_AI_ACT, "Art. 15", _RESILIENCE),
+    ),
     "transport_ambiguity": (_ref(NIST_AI_RMF, "MEASURE-2.7", _EVALUATION),),
     "transport_security": (
         _ref(

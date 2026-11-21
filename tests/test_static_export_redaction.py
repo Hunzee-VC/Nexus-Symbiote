@@ -22,8 +22,9 @@ from nexus_symbiote.scanners.source_binding import SOURCE_BINDING_KEY_ENV
 
 HF_TOKEN = "hf_" + "A1" * 18
 NPM_TOKEN = "npm_" + "B2" * 18
+ANTHROPIC_TOKEN = "".join(("sk-ant-", "api03-", "0123456789abcdefABCDEF0123456789"))
 PASSWORD = "synthetic-static-password-12345"  # noqa: S105 - synthetic sentinel
-SECRET_TEXT = (HF_TOKEN, NPM_TOKEN, f"password: {PASSWORD}")
+SECRET_TEXT = (HF_TOKEN, NPM_TOKEN, ANTHROPIC_TOKEN, f"password: {PASSWORD}")
 MANIFEST_FIELDS = ("name", "version", "framework", "owner", "purpose")
 RAG_FIELDS = (
     "type",
@@ -67,7 +68,7 @@ def test_rag_identifiers_mask_recognized_credentials_and_report_unbound_values(
     assert any(risk.category == "completeness" for risk in component.risks)
 
 
-@pytest.mark.parametrize("token", [HF_TOKEN, NPM_TOKEN])
+@pytest.mark.parametrize("token", [HF_TOKEN, NPM_TOKEN, ANTHROPIC_TOKEN])
 def test_credential_shaped_plain_path_is_redacted(tmp_path, token):
     source = {"name": "knowledge", "source_uris": [token], "sanitization": True}
     (tmp_path / "rag_config.json").write_text(json.dumps(source))
@@ -210,7 +211,7 @@ def test_static_credentials_reach_no_cli_export(
                 "name": "knowledge",
                 "embedding_model": HF_TOKEN,
                 "namespace": f"password: {PASSWORD}",
-                "source_uris": [NPM_TOKEN],
+                "source_uris": [NPM_TOKEN, ANTHROPIC_TOKEN],
                 "sanitization": True,
             }
         )
@@ -222,7 +223,10 @@ def test_static_credentials_reach_no_cli_export(
     )
     assert result.exit_code == 0, result.output
     exported = output.read_text()
-    assert all(secret not in exported + result.output for secret in (HF_TOKEN, NPM_TOKEN, PASSWORD))
+    assert all(
+        secret not in exported + result.output
+        for secret in (HF_TOKEN, NPM_TOKEN, ANTHROPIC_TOKEN, PASSWORD)
+    )
     document = json.loads(exported)
     if output_format == "sarif":
         assert validate_sarif(document) == []
@@ -237,6 +241,6 @@ def test_static_credentials_reach_no_cli_export(
     rag = next(c for c in bom.components if isinstance(c, RAGSourceComponent))
     assert agent.description == "Authorization: Bearer ***"
     assert rag.embedding_model_name == "[redacted]"
-    assert rag.source_uris == ["[redacted]"]
+    assert rag.source_uris == ["[redacted]", "[redacted]"]
     assert rag.properties["source_values_bound"] is keyed
     assert any(risk.category == "completeness" for risk in rag.risks) is not keyed

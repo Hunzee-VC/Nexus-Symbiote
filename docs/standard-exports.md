@@ -14,7 +14,7 @@ One native AgentBOM projects to CycloneDX 1.7, SPDX 3.0.1, SARIF 2.1.0 and a Cyc
 
 ## Projection versions
 
-CycloneDX and SPDX exports embed the native document and declare which projection produced their standard fields in the `nexus-symbiote:projection` property: `cyclonedx-1.7/2` or `spdx-3.0.1/3`. Exports written by 0.1.0 carry no marker and use projection 1. SPDX projection 2 remains recoverable with its original relationship comments; projection 3 neutralizes those comments for display, with a character set the projection fixes, while preserving the original text in the embedded native document. Recovery (`CycloneDXGenerator.recover`, `SPDXGenerator.recover`) checks every standard field against the declared projection of the embedded document and rejects an unknown marker, a document that claims a projection it does not match, and any edit to a standard field. The one omission it accepts is a missing CycloneDX `compositions` array, which readers such as cyclonedx-python-lib drop, when the projection's only composition says `unknown`; a composition that is present must match exactly. [Fingerprint migration](fingerprint-migration.md#standard-projection-versions) lists what changed between the projections.
+CycloneDX and SPDX exports embed the native document and declare which projection produced their standard fields in the `nexus-symbiote:projection` property: `cyclonedx-1.7/2`, `cyclonedx-1.7/3`, `cyclonedx-1.6/3`, `spdx-3.0.1/3` or `spdx-3.0.1/4` (the last three from `export-standard`). Exports written by 0.1.0 carry no marker and use projection 1. SPDX projection 2 remains recoverable with its original relationship comments; projection 3 neutralizes those comments for display, with a character set the projection fixes, while preserving the original text in the embedded native document. Recovery (`CycloneDXGenerator.recover`, `SPDXGenerator.recover`) checks every standard field against the declared projection of the embedded document and rejects an unknown marker, a document that claims a projection it does not match, and any edit to a standard field. The one omission it accepts is a missing CycloneDX `compositions` array, which readers such as cyclonedx-python-lib drop, when the projection's only composition says `unknown`; a composition that is present must match exactly. Projection 3 likewise accepts the loss of every `modelCard`, which that library also drops, but not the loss or edit of only some. [Fingerprint migration](fingerprint-migration.md#standard-projection-versions) lists what changed between the projections.
 
 ## CycloneDX 1.7
 
@@ -41,7 +41,7 @@ Risk findings, capabilities, authorizations, trust tiers, assurance levels and d
 | Native | SPDX | Notes |
 | --- | --- | --- |
 | Inventory | `software_Sbom` | The document's root element. Its root is the repository agent of a scan, otherwise every agent. `software_sbomType` is `source` for a repository scan. |
-| Agents and models | `ai_AIPackage` | `software_primaryPurpose` is `application` or `model`; `ai_typeOfModel` carries a model's declared type and `ai_informationAboutApplication` an agent's description. |
+| Agents and models | `ai_AIPackage` | `software_primaryPurpose` is `application` or `model`; `ai_typeOfModel` carries a model's declared type, when the inventory records one, and `ai_informationAboutApplication` an agent's description. |
 | Memory, RAG and data sources | `dataset_DatasetPackage` | `dataset_datasetType` is `noAssertion`, the only property the class requires. |
 | Prompts | `software_File` | `verifiedUsing` carries the content digest. |
 | Everything else | `software_Package` | |
@@ -74,7 +74,7 @@ CycloneDX properties and SPDX `extension_CdxPropertyEntry` records use these nam
 | `nexus-symbiote:componentType`, `:trustTier`, `:assuranceLevel` | CycloneDX component | Native enumeration values. |
 | `nexus-symbiote:requestedVersion` | CycloneDX component | A declared version that is not exact. |
 | `nexus-symbiote:autonomyLevel`, `:framework`, `:modelRef`, `:toolRef` | CycloneDX agent | `autonomyLevel` is `unknown` when not declared; references repeat per target. |
-| `nexus-symbiote:modelType`, `:provider`, `:serializationFormat`, `:serializationSafety`, `:signingStatus`, `:trustRemoteCode` | CycloneDX model | `trustRemoteCode` is a declared setting. |
+| `nexus-symbiote:modelType`, `:provider`, `:serializationFormat`, `:serializationSafety`, `:signingStatus`, `:trustRemoteCode` | CycloneDX model | `trustRemoteCode` is a declared setting. `modelType` and `serializationFormat` are absent when the inventory records none, as for a model file whose [format was not established](model-integrity.md#format-and-model-type). |
 | `nexus-symbiote:definitionHash`, `:definitionHashVersion`, `:annotation.<name>` | CycloneDX tool | One annotation property per MCP annotation. |
 | `nexus-symbiote:transport`, `:toolCount`, `:versionPinned`, `:schemaHash` | CycloneDX MCP server | `toolCount` is written only when nonzero, because zero also means not observed. |
 | `nexus-symbiote:promptType`, `:contentHash` | CycloneDX prompt | |
@@ -106,6 +106,7 @@ Messages and recommendations are one line of plain text: control, bidirectional 
 | `capability_scope` | Destructive tool capability | none | LLM06:2025 | LLM03:2026 | ASI02 | AML.T0053 | MEASURE-2.7 |
 | `code_execution` | Remote code execution enabled | CWE-494, CWE-829 | LLM03:2025 | LLM04:2026 | ASI04, ASI05 | AML.T0011.000 | MANAGE-3.2 |
 | `completeness` | Incomplete declaration | none | none | none | none | none | GOVERN-1.6 |
+| `credential_exposure` | Literal credential in an MCP launch | CWE-798 | LLM02:2025 | LLM02:2026 | ASI03 | none | MEASURE-2.7 |
 | `credential_helper` | Credential helper command | none | none | none | ASI03, ASI05 | AML.T0142 | MEASURE-2.7 |
 | `custom_code` | Custom model code | CWE-829 | LLM03:2025 | LLM04:2026 | ASI04, ASI05 | AML.T0011.000 | MANAGE-3.2 |
 | `data_integrity` | Retrieval source integrity | CWE-319 (critical and high findings) | LLM04:2025, LLM08:2025 | LLM05:2026, LLM09:2026 | ASI06 | AML.T0070 | MEASURE-2.7 |
@@ -114,6 +115,8 @@ Messages and recommendations are one line of plain text: control, bidirectional 
 | `endpoint_identity` | Unestablished endpoint identity | none | none | none | ASI07 | none | MEASURE-2.7 |
 | `hidden_markup` | Comments in instructions | none | LLM01:2025 | LLM01:2026 | ASI01 | AML.T0068 | MEASURE-2.7 |
 | `hook_commands` | Hook commands | none | none | none | ASI05 | AML.T0142 | MEASURE-2.7 |
+| `identifier_characters` | Control, format or mixed-script characters in an identifier | CWE-451, CWE-1427 | LLM01:2025 | LLM01:2026 | ASI01 | AML.T0010.005, AML.T0068, AML.T0074 | MEASURE-2.7 |
+| `instruction_injection` | Injected instructions or deception in prompt files | CWE-1427 | LLM01:2025 | LLM01:2026 | ASI01 | AML.T0068 | MEASURE-2.7 |
 | `instruction_layering` | Layered instruction files | none | LLM01:2025 | LLM01:2026 | ASI01 | none | MEASURE-2.7 |
 | `invalid_safetensors` | Unverified SafeTensors structure | none | LLM03:2025 | LLM04:2026 | ASI04 | AML.T0011.000 | MANAGE-3.2 |
 | `invisible_characters` | Invisible characters in instructions | CWE-451, CWE-1427 | LLM01:2025 | LLM01:2026 | ASI01 | AML.T0068 | MEASURE-2.7 |
@@ -127,6 +130,7 @@ Messages and recommendations are one line of plain text: control, bidirectional 
 | `missing_lockfile_integrity` | Lockfile record without integrity | CWE-494 | LLM03:2025 | LLM04:2026 | ASI04 | AML.T0010.001 | MANAGE-3.1 |
 | `mutable_image_tag` | Mutable image tag | CWE-829 | LLM03:2025 | LLM04:2026 | ASI04 | AML.T0010.004 | MANAGE-3.1 |
 | `nonregistry_source` | Package from outside a registry | CWE-829 (high findings) | LLM03:2025 (high findings) | LLM04:2026 (high findings) | ASI04 (high findings) | AML.T0010.001 (high findings) | MANAGE-3.1 (high findings) |
+| `oversight_gap` | Destructive tool auto-approved | CWE-250 | LLM06:2025 | LLM03:2026 | ASI02 | none | none |
 | `package_alias` | Package alias | none | LLM03:2025 | LLM04:2026 | ASI04 | AML.T0074 | MANAGE-3.1 |
 | `package_source` | Non-default MCP package source | none | LLM03:2025 | LLM04:2026 | ASI04 | AML.T0010.005 | MANAGE-3.1 |
 | `permission_scope` | Unscoped agent permissions | CWE-250 | LLM06:2025 | LLM03:2026 | ASI02, ASI03 | AML.T0053, AML.T0105 (high findings) | MEASURE-2.7 |
@@ -141,7 +145,9 @@ Messages and recommendations are one line of plain text: control, bidirectional 
 | `shadowscan-heuristic` | Imported discovery risk | none | none | none | none | none | none |
 | `shadowscan-inventory-unmatched` | Imported unmatched discovery | none | none | none | none | none | GOVERN-1.6 |
 | `signing_status` | Unsigned model artifact | CWE-345 | LLM03:2025 | LLM04:2026 | ASI04 | AML.T0010.003 | MANAGE-3.2 |
+| `subagent_inline_mcp_server` | Subagent inline MCP server | none | LLM03:2025 | none | ASI04 | none | MANAGE-3.1 |
 | `tag_characters` | Unicode tag characters in instructions | CWE-451, CWE-1427 | LLM01:2025 | LLM01:2026 | ASI01 | AML.T0068 | MEASURE-2.7 |
+| `tool_description_poisoning` | Poisoned instructions in tool description or schema | CWE-1427 | LLM01:2025 | LLM01:2026 | ASI01, ASI02 | AML.T0010.005, AML.T0068 | MEASURE-2.7 |
 | `transitive_resolution` | Dependencies resolved at launch | CWE-829 | LLM03:2025 | LLM04:2026 | ASI04 | AML.T0109 | MANAGE-3.1 |
 | `transport_ambiguity` | Ambiguous MCP transport | none | none | none | none | none | MEASURE-2.7 |
 | `transport_security` | Transport security | CWE-319 (critical and high findings) | none | none | ASI07 | none | MEASURE-2.7 |
@@ -161,7 +167,7 @@ The exporter checks its output with a structural SARIF validator (required prope
 - Descriptions and details are neutralized like SARIF messages.
 - Findings on components imported from a ShadowScan report are omitted; the metadata property `nexus-symbiote:omittedImportedFindings` counts them.
 
-What it cannot express: every statement is `in_triage`; the command takes no triage decisions, so it never states `not_affected`, `exploitable`, `resolved` or a justification. `NEXUS-` identifiers name inventory findings, not entries in any vulnerability database, so tools that apply VEX statements to known vulnerabilities have nothing to apply them to. VEX output states no coverage.
+What it cannot express on its own: a statement is `in_triage` unless an unexpired `--decisions` entry sets its state and justification, or `--trace-evidence` reports that a component was declared but never loaded, which sets `not_affected` (`code_not_reachable`) except for critical findings, KEV-listed advisories and categories such as hook commands or credential exposure; trace evidence never sets `exploitable` or `resolved`. `NEXUS-` identifiers name inventory findings, not entries in any vulnerability database, so tools that apply VEX statements to known vulnerabilities have nothing to apply them to. VEX output states no coverage.
 
 ## Minimum elements
 

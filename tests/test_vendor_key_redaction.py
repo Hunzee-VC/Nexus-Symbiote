@@ -29,6 +29,17 @@ VENDOR_KEYS = {
     ),
     "tavily": "".join(("tv", "ly-", "dev-", "Qm3Xz7Lp1Rk9Tb5Vn2Wc8Yd4Hf6Jg0Ks")),
     "fireworks": "".join(("f", "w_", "3ZPvB4kQ9mN7xR2tL8wY5cH1")),
+    "digitalocean": "".join(("do", "p_v1_", "0a1b" * 16)),
+    "digitalocean-oauth": "".join(("do", "o_v1_", "2c3d" * 16)),
+    "linear": "".join(("lin", "_api_", "SENTINEL" * 5)),
+    "linear-oauth": "".join(("lin", "_oauth_", "SENTINEL" * 5)),
+    "atlassian": "".join(("ATA", "TT3", "xFfGF0", "SENTINEL" * 6, "0A1B2C3D")),
+    "age": "".join(("AGE-SECRET", "-KEY-1", ("SYNTHETC" * 8)[:58])),
+    "discord": "".join((("N0" + "SENTINEL" * 3)[:24], ".", "SENTNL", ".", ("SENTINEL" * 5)[:38])),
+    "discord-m": "".join(
+        (("MT" + "SENTINEL9" * 3)[:26], ".", "Gx-4Qz", ".", ("SENTINEL" * 4)[:27])
+    ),
+    "digitalocean-refresh": "".join(("do", "r_v1_", "4e5f" * 16)),
 }
 # Ordinary names that share a vendor prefix: model names, module names, short ids.
 ORDINARY_NAMES = [
@@ -42,6 +53,22 @@ ORDINARY_NAMES = [
     "pcsk_" + "a" * 12,
     "lsv2_pt_short",
     "lsv2_other_" + "a" * 30,
+    "dop_v1_" + "g" * 64,
+    "lin_api_short",
+    "ATATT3-short",
+    "AGE-SECRET-KEY-1" + "b" * 58,
+    # Dotted like a Discord token, but without a digit and a capital in its first part.
+    "abcdefghijklmnopqrstuvwx.abcdef." + "a" * 30,
+    "eyJ" + "a" * 21 + ".abcdef." + "b" * 30,
+    "AcmeMcpGatewayServer2024.plugin.RequestRouterImplementationV2",
+    "OrgAcmeMcpServerPlugin42.module.ServerFactoryImplementationClass",
+    "AcmeCorpAnalyticsService3.events.OrderPlacedEventHandlerVersion2",
+    "OrdersApiFunctionHandler1.handle.ProcessIncomingOrderRequestV2",
+    "AzureFunctionsWorkerHost2.worker.InvocationRequestDispatcherImpl",
+    "MyOrgMcpGatewayServer2024.Plugin.RequestRouterImplementationV2",
+    "m" + "s" * 22 + "1.Gx-4Qz." + "s" * 30,
+    "N0" + "S" * 19 + ".SENTNL." + "S" * 30,
+    "N0" + "S" * 22 + ".SENTNL." + "S" * 40,
 ]
 
 

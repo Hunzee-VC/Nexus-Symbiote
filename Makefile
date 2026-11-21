@@ -53,13 +53,18 @@ hygiene: ## Check tracked source, links, versions and vendor digests
 
 # ── Testing ──────────────────────────────────────────────────
 
+# One worker per core, as in CI. Each worker starts with a contiguous share of the suite in
+# collection order and an idle one takes tests from the longest queue, so slow files do not
+# hold a core idle. `make test PYTEST_PARALLEL=` runs the suite in one process.
+PYTEST_PARALLEL = -n auto --dist worksteal
+
 .PHONY: test
 test: ## Run the test suite; a skip other than a host file-system one (or a missing pip outside CI) fails it
-	python -m pytest --strict-skips
+	python -m pytest $(PYTEST_PARALLEL) --strict-skips
 
 .PHONY: test-verbose
 test-verbose: ## Run the test suite with verbose output
-	python -m pytest -vv --durations=20 --strict-skips
+	python -m pytest $(PYTEST_PARALLEL) -vv --durations=20 --strict-skips
 
 .PHONY: test-floor
 test-floor: ## Run the suite on Python 3.11 with each runtime dependency at its declared floor, without the locked_only tests
@@ -69,19 +74,27 @@ test-floor: ## Run the suite on Python 3.11 with each runtime dependency at its 
 	"$$floor_dir/bin/python" -m pip install --require-hashes --only-binary=:all: -r requirements-floor.lock; \
 	"$$floor_dir/bin/python" -m pip install --no-deps --no-build-isolation -e .; \
 	"$$floor_dir/bin/python" -m pip check; \
-	"$$floor_dir/bin/python" -m pytest --strict-skips -m "not locked_only"
+	"$$floor_dir/bin/python" -m pytest $(PYTEST_PARALLEL) --strict-skips -m "not locked_only"
 
 .PHONY: coverage
 coverage: ## Run tests with coverage reporting
-	python -m pytest --strict-skips --cov=nexus_symbiote --cov=scripts --cov-branch --cov-report=term-missing --cov-report=json:coverage.json
+	python -m pytest $(PYTEST_PARALLEL) --strict-skips --cov=nexus_symbiote --cov=scripts --cov-branch --cov-report=term-missing --cov-report=json:coverage.json
 	python scripts/check_coverage.py coverage.json
 
 .PHONY: security-regressions
 security-regressions: ## Run the committed security regression contracts
 	PYTHONPATH=src python scripts/check_security_regressions.py --out security-regressions.json
 
+.PHONY: precision
+precision: ## Run the precision and drift-regression gate against recorded class floors
+	PYTHONPATH=src python scripts/check_precision_gate.py --out precision-gate.json
+
+.PHONY: fuzz-smoke
+fuzz-smoke: ## Exercise bounded parser readers against the deterministic fuzz corpus
+	PYTHONPATH=src python scripts/fuzz_parsers.py --iterations 64
+
 .PHONY: check
-check: quality coverage security-regressions ## Run the offline subset of the required CI checks
+check: quality coverage security-regressions precision fuzz-smoke ## Run the offline subset of the required CI checks
 	$(MAKE) clean-dist
 	$(MAKE) build
 	$(MAKE) check-dist
@@ -118,7 +131,7 @@ clean: ## Remove build artifacts and caches
 	rm -rf build/ dist/ *.egg-info src/*.egg-info
 	find src tests scripts -type d -name __pycache__ -prune -exec rm -rf {} +
 	rm -rf .coverage .coverage.* htmlcov .hypothesis .mypy_cache .pytest_cache .ruff_cache
-	rm -f coverage.json security-regressions.json benchmark-results.json
+	rm -f coverage.json security-regressions.json precision-gate.json benchmark-results.json
 
 # ── Help ─────────────────────────────────────────────────────
 

@@ -17,6 +17,8 @@ nexus-symbiote [--offline | --live] [--debug] [--limit NAME=VALUE]... [--version
 | `--live` | Allow the network and process steps of `discover-mcp`, `advisories` and `verify-live`. Every other command stays offline. |
 | `--debug` | Print where a collector or internal error was raised on standard error: its class and the files, lines and functions of its traceback, without its message, which can quote project or inventory text. Without it, an unexpected error ends the command with `Error: internal error (<error class>)` and exit status 1, and a collector error is recorded by its diagnostic code only. |
 | `--limit` `NAME=VALUE` | Set one [collection limit](collection-limits.md) for this command, such as `entries=200000`, `model-bytes=128GiB` or `import-lookups=20000`. Repeatable; overrides `NEXUS_SYMBIOTE_LIMITS` for that name. |
+| `--detailed-exit-codes` | Use distinct exit codes for `scan`, `validate`, `risk`, and `diff`: `0` passed, `2` usage error, `3` gate or verification failed, `4` collection/input/internal failure. |
+| `--legacy-exit-codes` | Use legacy exit codes (`0` passed, `1` gate or input failure, `2` usage error; default). |
 | `--version` | Print the version and exit. |
 | `--help` | Print help and exit. |
 
@@ -53,12 +55,14 @@ change them. See [collection limits](collection-limits.md).
 | [`validate`](#validate) | offline | Check an AgentBOM's completeness and integrity, optionally against the project |
 | [`risk`](#risk) | offline | Score findings and apply the risk gate |
 | [`diff`](#diff) | offline | Compare two AgentBOMs and report security-relevant drift |
+| [`diff-instructions`](#diff-instructions) | offline | Compare instruction files between two trees for security-relevant CommonMark changes |
 | [`summary`](#summary) | offline | Print component and risk counts |
 | [`digest`](#digest) | offline | Print the digest of an AgentBOM's bytes, its canonical digest and its run-independent content digest |
 | [`blast-radius`](#blast-radius) | offline | List agents and components associated with one component |
 | [`graph`](#graph) | offline | Write a self-contained HTML or JSON view of an inventory's associations, risk classes and exposure paths |
 | [`baseline`](#baseline) | offline | Write an unsigned snapshot only if the scan gate passes |
-| [`vex`](#vex) | offline | Export findings as a VEX document with status `in_triage` |
+| [`vex`](#vex) | offline | Export schema-validated VEX findings with optional operator decisions, advisories and trace evidence |
+| [`trifecta`](#trifecta) | offline | Analyze an inventory offline for lethal trifectas, chained toxic flows and tool shadowing |
 | [`crosswalk`](#crosswalk) | offline | Map findings to OWASP, MITRE ATLAS, NIST AI RMF, EU AI Act, ISO/IEC 42001 and CWE entries |
 | [`minimum-elements`](#minimum-elements) | offline | Report which G7 AI SBOM minimum elements an AgentBOM's CycloneDX export carries, and how to supply the missing ones |
 | [`verify-artifact`](#verify-artifact) | offline | Check a file's SHA-256, and optionally its Sigstore bundle |
@@ -75,6 +79,8 @@ change them. See [collection limits](collection-limits.md).
 | [`attest`](#attest) | offline | Sign a file's exact bytes, usually an inventory or a baseline, for a stated purpose |
 | [`verify-attestation`](#verify-attestation) | offline | Check that trusted keys attested a file's bytes or inventory content for a purpose |
 | [`trace-diff`](#trace-diff) | offline | Compare the runtime use that OpenTelemetry traces report with an AgentBOM |
+| [`export-standard`](#export-standard) | offline | Export an AgentBOM to CycloneDX (1.6/1.7) or SPDX 3.0.1 with typed AI projections and producer declarations |
+| [`audit-control-plane`](#audit-control-plane) | offline | Audit hook targets, skill preambles, MCP bridges, steering surfaces, CI agents and identities |
 | [`discover-mcp`](#discover-mcp) | **live** | List the tools an HTTPS MCP server serves, without calling them |
 | [`advisories`](#advisories) | **live** | Query OSV for advisories affecting exact PyPI and npm package versions |
 | [`verify-live`](#verify-live) | **live** | Compare an AgentBOM with the tools that operator-pinned stdio servers serve |
@@ -148,6 +154,7 @@ What exit status 1 means for each gate:
 | `validate` | Completeness, integrity (including integrity that is only unknown), the discovery producer check, the minimum assurance level or the dependency graph failed, or unverified discovery evidence was gated (see below). |
 | `risk` | The risk gate failed, `--project` reconciliation failed, or unverified discovery evidence was gated (see below). |
 | `diff` | The diff reports a security alert; `--no-fail-on-alert` turns this gate off. |
+| `diff-instructions` | Any instruction surface or front-matter parse fails collection, or `--fail-on-change` is set and a security-relevant change or new excluded coverage gap is detected. |
 | `digest` | The file is a valid native inventory, but its canonical or content digest is undefined: the other values are printed, and the missing one as `unavailable` (`null` with `--json-output`). |
 | `graph` | The inventory's graph is invalid, `--focus` names no component, or the view would hold more components than `--max-nodes`. |
 | `minimum-elements` | `--fail-under` was given and fewer than that percentage of the assessable elements are present, or the inventory's CycloneDX export fails its checks. |
@@ -272,6 +279,7 @@ directory above the policy are owned by root or by you.
 | `validate --json-output` | `passed`; `assessment_basis` (`supplied-bom`, `project-reconciled`, `project-reconciled-with-supplier-claims`, `project-reconciliation-failed`, or `project-not-reconciled` when the project policy skips the completeness check); `policy_source` and `policy_weakened`; `completeness` and `integrity`, each with a `status` (`pass`, `fail`, `unknown` for integrity, or `skipped` with `skipped_by`) and the validator's report (its own `assessment_basis`, issues, `issues_omitted`; for completeness `supplier_claims` and `supplier_claims_omitted`; for integrity `bytes_charged`); `discovery_producer` (`null` without discovery evidence or a producer check, otherwise a `status` of `verified`, `failed`, `not-applicable` or `not-verified`, with `problems`); `unsigned_discovery` (`null`, or why unverified discovery evidence failed the run); `minimum_assurance_level`, `assurance_errors` and `graph_issues`. |
 | `risk --json-output` | `passed`; `overall_score` (`null` when the run is not scored: `--project` reconciliation or the discovery producer check failed, or unverified discovery evidence was gated); `risk_level`; `coverage_status` and `coverage_gaps`; `gate_reasons`; `gate` (the effective thresholds, cutoff, ignored categories and suppression count, each with a `*_source` of `cli`, `project policy` or `built-in`); `findings`, each with its `fingerprint`; `severity_counts`; `category_scores`; `ignored_findings`; `suppressed_findings`, `suppressions_expired`, `suppressions_unused` and `suppressions_stale`; `total_components` and `components_with_risks`; `warning_threshold_exceeded`; `assessment_basis` (`supplied-bom`, `project-reconciled`, `project-reconciled-with-supplier-claims`, `project-reconciliation-failed`, or `unsigned-discovery-evidence` when unverified discovery evidence fails the run); `supplier_claims` and `supplier_claims_omitted`; `discovery_producer` (`verified`, `failed`, `not-verified` or `not-applicable`); `score_threshold` (`null` with `--no-score-threshold`); `fail_on_severity`; `policy_source` and `policy_weakened`. A failed reconciliation has the same keys, with empty findings. |
 | `diff --json-output` | `has_changes`, `total_changes`, `components_added`, `components_removed`, `components_modified`, `dependencies_added`, `dependencies_removed` (each with its `severity` and `conditions`), `security_alerts`, `metadata_changes` and `notes`. |
+| `diff-instructions --json-output` | `format` (`nexus-symbiote/instruction-diff/v1`), `base_tree`, `head_tree`, `files_scanned`, `failures` (`base`, `head`), `excluded` (`base`, `head`), `changes` (each with `class`, `file`, `block_index`, `summary` and optional redacted `text`), and `summary` (`total_changes`, `total_failures`, `total_excluded`, `by_class`). |
 | `summary --json-output` | `total_components`, `component_types`, `total_dependencies`, `total_risks`, `risk_breakdown` and the inventory's `completeness` claim. |
 | `minimum-elements --format json` | `format` (`nexus-symbiote/minimum-elements/v1`), `edition`, `guidance`, `statement`, `evaluated` (the standard, the projection and the tool version), `subjects`, `coverage` (`present`, `assessable` and `percent`), `counts` per status, `gate` (`null` without `--fail-under`), `clusters` and `elements`; see [G7 AI SBOM minimum elements](minimum-elements.md#running-the-command). |
 | `blast-radius --json-output` | `subject`, `affected_agents`, `dependent_components`, `reachable_components`, `declared_principals`, `scope`, `effective_authority`, `linked` and `limitations`. |
@@ -335,6 +343,10 @@ nexus-symbiote advisories [OPTIONS] AIBOM_PATH
 | `--exclude` `NAME` | Never send this package name to OSV; a trailing `*` matches a prefix, and a `*` anywhere else is refused. Names are compared as PyPI normalizes them, and in any case (repeatable). |
 | `--exclude-private-origins` | Send only packages whose lockfile resolution records the public PyPI or npm registry. A Python package that no `uv.lock` or `poetry.lock` resolves has no recorded origin, so it is withheld; withhold private names with `--exclude` instead to keep public ones checked. |
 | `--dry-run` | List the package identities that would be sent, without contacting OSV (works offline). |
+| `--offline-db` `PATH` | Match exact pinned PyPI/npm packages offline against an OSV JSON bundle or directory without contacting `api.osv.dev`; deduplicates alias pairs and records bundle SHA-256 provenance. A directory is read flat, and one with a subdirectory is refused, as is a bundle with no records, with an entry that is not an OSV record, or with two different records under one id. A package whose ecosystem the bundle holds no record for is an error, so the report is not complete, as is a record for the package with malformed `affected` data or an unparsable `introduced` (at most 100 such errors are listed, then a count). A `fixed`, `last_affected` or `limit` the version parser rejects is not an error: the advisory matches unless the lower bound excludes the version, the version is at or above every `limit` while all limits parse and none is `*`, or a parsable bound does and event order puts no rejected bound in the version's interval, and when no exact `versions` entry or other range decides the match it carries `range_undecidable: true` and up to 16 `undecidable_bounds` (64 characters each). Like any match it fails this command; an operator decision passed to `vex --decisions` records its triage there, and the `vex` export marks it `rangeUndecidable`. Matching stops with one error, and exit status 1, past the [`advisory-matches`](collection-limits.md#limits) limit. |
+| `--kev` `PATH` | Offline CISA/ENISA KEV JSON catalog used with `--offline-db` to elevate matched advisories to `critical` with source provenance (repeatable). A catalog with no entries is refused. |
+| `--epss` `PATH` | Offline EPSS CSV/JSON catalog used with `--offline-db` to attach EPSS scores and percentiles. A catalog with no entries is refused. |
+| `--max-feed-age-days` `INTEGER RANGE` | With `--offline-db`, the report is incomplete (exit 1) when the bundle's newest record, a KEV catalog's `dateReleased` or the EPSS `score_date` is missing or more than this many days old (1 to 36500; default: 30). The check cannot be turned off. |
 
 The command sends each package's ecosystem, normalized name and exact version to
 `https://api.osv.dev/v1/querybatch`, including packages resolved from a private
@@ -351,6 +363,34 @@ nothing up, so `coverage` is `none`, and it exits 1 only when a package in scope
 no exact identity or more than 500 packages would be sent. A report keeps at most
 10,000 advisories per package and 20,000 in total; beyond that, lookups end with an
 error and `coverage` is `partial`.
+
+With `--offline-db`, the answer is only as recent as the files you supply, so the
+command reads the date each feed states about itself and records it under
+`provenance`: `db_newest_record` is the newest `modified` (or, for a record without
+one, `published`) among the bundle's records, each `kev_catalogs` entry has the
+catalog's `date_released` (its `dateReleased`), and `epss_catalog` has the
+`score_date` (the `score_date:` in the CSV's leading `#` comment, or a top-level
+`score_date` in the JSON form). A date-only value counts as midnight UTC.
+`max_feed_age_days` and `feed_age_evaluated_at` (the system clock, in UTC) record
+what the dates were compared with. File modification times are never used, because a
+checkout or a copy sets them.
+
+Each feed whose date is more than `--max-feed-age-days` whole UTC days before the
+run adds one error, such as `offline advisory DB is 412 days old (newest record
+2025-10-04); limit 30`, `KEV catalog kev.json is 412 days old (dateReleased
+2025-10-04); limit 30` or `EPSS catalog epss.csv is 412 days old (score_date
+2025-10-04); limit 30`. A feed that states no date adds `... carries no ..., so its
+age is unknown`, and its provenance date is `null`; a date more than one day after
+the run adds `... is in the future`. With any of these errors `complete` is `false`
+and the command exits 1, whether or not an advisory matched. A date that is present
+but is not an RFC 3339 date or date-time (`2025-10-04`, `2025-10-04T00:00:00Z`, or
+with a numeric offset) refuses the feed: the command exits 1 without a report. No
+value turns the check off, and 0 is a usage error; to accept an old feed
+deliberately, pass a larger number, which the report records. The dates are the
+feeds' own unauthenticated statements: they detect a forgotten or outdated file, not
+one whose dates were edited, and one recent record makes a bundle count as recent
+even when the rest is old. An EPSS JSON file without a top-level `score_date`, or a
+KEV catalog without `dateReleased`, counts as undated.
 
 ### `attest`
 
@@ -449,12 +489,33 @@ nexus-symbiote diff [OPTIONS] OLD_PATH NEW_PATH
 | Option | Description |
 |---|---|
 | `--json-output` | Output as JSON |
+| `--report-format` `text\|json\|markdown\|junit` | Gate report format (cannot disagree with `--json-output`; default: `text`). |
+| `--step-summary` `PATH` | Append a sanitized Markdown gate summary to this file (for example, `GITHUB_STEP_SUMMARY`). |
+| `--expect-upgrade` `FROM_VERSION` | Attribute documented profile/schema transitions from `FROM_VERSION` (`0.1.0` or `0.2.0`) into `tool_upgrade_changes` when `metadata.tool_version` matches; configuration/hash drift still alerts. |
 | `--fail-on-alert` / `--no-fail-on-alert` | Exit with status 1 if the diff reports a security alert (default: fail). |
+| `--detailed-exit-codes` | Use distinct exit codes (`0` passed, `2` usage, `3` gate failed, `4` input/internal failure). |
+| `--legacy-exit-codes` | Use legacy exit codes (`0` passed, `1` gate/input failed, `2` usage). |
 
 The report lists security alerts, notes (`[INFO]` metadata changes, and `[NOTE]` lines
 about the comparison itself, also after `No changes detected.`), and added, removed and
 modified components, and added and removed relationships, each with its severity and
 conditions.
+
+### `diff-instructions`
+
+Compare instruction files between `BASE_TREE` and `HEAD_TREE` across the same instruction, rule, prompt, steering, subagent, and skill declaration surfaces (plus recursive `@path` imports) that the `prompt` collector scans, through confined descriptor-relative reads, and report security-relevant CommonMark and front-matter changes (`tool_grant_changed`, `import_added`, `url_or_path_added`, `hidden_markup_added`, `scope_widened`).
+
+```text
+nexus-symbiote diff-instructions [OPTIONS] BASE_TREE HEAD_TREE
+```
+
+| Option | Description |
+|---|---|
+| `--show-text` | Include redacted, terminal-neutralized changed block text (withheld by default). |
+| `--json-output` | Print the instruction diff as JSON. |
+| `--fail-on-change` | Exit with status 1 if any security-relevant instruction change or new excluded agent-directory gap is detected. |
+
+Escaped, broken, credential-targeted, oversized, invalid UTF-8, or case-variant instruction surfaces, and malformed YAML front matter, are recorded under `failures` and exit 1 (fail closed) rather than silently reporting 0 changes; in-root symlinks to non-credential targets are read through their confined target and diffed. Changed text under `--show-text` masks multi-line PEM private keys and secrets across the whole block before terminal neutralization. A report shows at most 1 MiB of changed text; past that, each further change carries `[text withheld: --show-text output limit reached]` in place of its text. An instruction file that is in `BASE_TREE` only is reported as `tool_grant_changed` when it held tool grants or limits, and a rule that drops its `paths` front matter, or a negated glob, as `scope_widened`. A tool grant's argument, such as `Bash(...)` or `mcp__github__merge(...)`, runs to its balanced closing parenthesis, so a nested `$(...)` does not end it, or to the end of the line when it is not closed. An argument or MCP tool name longer than 512 characters is compared as the SHA-256 digest of its text, so any change to it is `tool_grant_changed` and it is never shown. The command judges no prose and does not recognize scheme-less hosts or UNC paths; see [its limits](known-limitations.md#instructions-and-ide-settings).
 
 ### `digest`
 
@@ -575,8 +636,9 @@ nexus-symbiote graph [OPTIONS] INVENTORY
 
 Exposure paths are the shortest recorded paths from agents and IDE agents to
 components with a `code-exec`, `exfil-capable`, `write-capable` or `secret-access`
-risk class or a high or critical finding: at most 200 agents are searched and 200
-paths kept, and the view reports how many were left out. Edges are static repository
+risk class or a high or critical finding: at most 200 agents and IDE agents are
+searched, those whose best path ranks highest, and the 200 best paths kept, and the view
+reports how many were left out. Edges are static repository
 associations; runtime use and effective authority are not observed. The HTML file
 loads nothing from outside, pins its one style block and one script with a
 Content-Security-Policy hash, and shows inventory text only escaped. A graph larger
@@ -657,6 +719,15 @@ nexus-symbiote risk [OPTIONS] AIBOM_PATH
 | `--require-discovery-signature` | Require the operator signature policy to verify any ShadowScan report the inventory records or the project contains, whatever the project policy says; requires --project. JSON output reports the result as `discovery_producer` |
 | `--fail-on-unsigned-discovery` | Exit with status 1 when the BOM's ShadowScan evidence is unverified |
 | `--allow-unsigned-discovery` | Accept unverified discovery evidence explicitly (still warns); required in CI |
+| `--report-format` `text\|json\|markdown\|junit` | Gate report format (cannot disagree with `--json-output`; default: `text`). |
+| `--step-summary` `PATH` | Append a sanitized Markdown gate summary to this file. |
+| `--operator-policy` `FILE` | Signed operator policy YAML outside the scanned checkout; checkout policy may only narrow it. |
+| `--operator-policy-attestation` `FILE` | DSSE attestation envelope (`purpose: policy`) over `--operator-policy`. |
+| `--operator-policy-key` `FILE` | Trusted Ed25519 public key for `--operator-policy-attestation` (repeatable). |
+| `--allow-unsigned-operator-policy` | Accept `--operator-policy` without a verified DSSE signature envelope. |
+| `--operator-policy-max-age-days` `INT` | Maximum attestation age in days when `--operator-policy-attestation` is verified (default: `90`; `0` disables). |
+| `--detailed-exit-codes` | Use distinct exit codes (`0` passed, `2` usage, `3` gate failed, `4` collection/input failure). |
+| `--legacy-exit-codes` | Use legacy exit codes (`0` passed, `1` gate/input failed, `2` usage). |
 
 The report gives the score, the assessment basis, coverage, the severity counts and
 the top 15 findings, each followed by its `fingerprint:` line (`--json-output` lists all). Under `Gate: PASSED` or
@@ -810,6 +881,13 @@ nexus-symbiote scan [OPTIONS] [PROJECT_PATH]
 | `--accept-project-policy` | In CI, accept a project policy that weakens the built-in gates explicitly; without it such a policy fails the command there (exit 1). Interactive runs only warn. |
 | `--fail-on-unsigned-discovery` | With `--check`, exit with status 1 when ShadowScan discovery evidence is unverified. |
 | `--allow-unsigned-discovery` | With `--check`, accept unverified ShadowScan discovery evidence explicitly (still warns); required in CI when no `--signature-policy` verifies the report. |
+| `--operator-policy` `FILE` | Signed operator policy YAML outside the scanned checkout; checkout policy may only narrow it. |
+| `--operator-policy-attestation` `FILE` | DSSE attestation envelope (`purpose: policy`) over `--operator-policy`. |
+| `--operator-policy-key` `FILE` | Trusted Ed25519 public key for `--operator-policy-attestation` (repeatable). |
+| `--allow-unsigned-operator-policy` | Accept `--operator-policy` without a verified DSSE signature envelope. |
+| `--operator-policy-max-age-days` `INT` | Maximum attestation age in days when `--operator-policy-attestation` is verified (default: `90`; `0` disables). |
+| `--detailed-exit-codes` | Use distinct exit codes (`0` passed, `2` usage, `3` gate failed, `4` collection/input failure). |
+| `--legacy-exit-codes` | Use legacy exit codes (`0` passed, `1` gate/input failed, `2` usage). |
 
 `PROJECT_PATH` is resolved before collection, because the collectors refuse a root
 reached through a symbolic link. When it resolves through a link, `scan` names the
@@ -905,6 +983,15 @@ nexus-symbiote validate [OPTIONS] AIBOM_PATH
 | `--require-discovery-signature` | Require the operator signature policy to verify any ShadowScan report the inventory records or the project contains, whatever the project policy says; requires --project |
 | `--fail-on-unsigned-discovery` | Exit with status 1 when the BOM's ShadowScan evidence is unverified |
 | `--allow-unsigned-discovery` | Accept unverified discovery evidence explicitly (still warns); required in CI |
+| `--report-format` `text\|json\|markdown\|junit` | Gate report format (cannot disagree with `--json-output`; default: `text`). |
+| `--step-summary` `PATH` | Append a sanitized Markdown gate summary to this file. |
+| `--operator-policy` `FILE` | Signed operator policy YAML outside the scanned checkout; checkout policy may only narrow it. |
+| `--operator-policy-attestation` `FILE` | DSSE attestation envelope (`purpose: policy`) over `--operator-policy`. |
+| `--operator-policy-key` `FILE` | Trusted Ed25519 public key for `--operator-policy-attestation` (repeatable). |
+| `--allow-unsigned-operator-policy` | Accept `--operator-policy` without a verified DSSE signature envelope. |
+| `--operator-policy-max-age-days` `INT` | Maximum attestation age in days when `--operator-policy-attestation` is verified (default: `90`; `0` disables). |
+| `--detailed-exit-codes` | Use distinct exit codes (`0` passed, `2` usage, `3` gate failed, `4` collection/input failure). |
+| `--legacy-exit-codes` | Use legacy exit codes (`0` passed, `1` gate/input failed, `2` usage). |
 
 Every report states its assessment basis. Without `--project` it is `supplied-bom`:
 only the inventory's own claims were checked, its coverage claim and its internal
@@ -1093,9 +1180,23 @@ and `stdio`, such as the `websocket` that the `mcp` collector records for a `ws:
 [launch policy](#launch-policy) section gives the policy's format and where it may be
 kept.
 
+### `trifecta`
+
+Analyze an inventory offline for lethal trifectas, chained toxic flows, and tool shadowing.
+
+```text
+nexus-symbiote trifecta [OPTIONS] AIBOM_PATH
+```
+
+| Option | Description |
+|---|---|
+| `-o`, `--output` `PATH` | Write the trifecta and toxic-flow report JSON to this file instead of standard output. |
+| `--fail-on-critical` / `--no-fail-on-critical` | Exit with status 1 when a critical lethal-trifecta finding is present (default: fail). |
+| `--fail-on-finding` / `--no-fail-on-finding` | Exit with status 1 when any trifecta, toxic-flow, or tool-shadowing finding is present (default: off). |
+
 ### `vex`
 
-Export schema-validated findings in triage, without asserting exploitability.
+Export schema-validated VEX findings with optional operator decisions, advisories, and trace evidence.
 
 ```text
 nexus-symbiote vex [OPTIONS] AIBOM_PATH
@@ -1104,3 +1205,55 @@ nexus-symbiote vex [OPTIONS] AIBOM_PATH
 | Option | Description |
 |---|---|
 | `-o`, `--output` `PATH` | Write the VEX document to this file instead of standard output. |
+| `--decisions` `PATH` | Operator-owned VEX decisions YAML/JSON stored outside the scanned project and enclosing git trees; expired decisions revert to `in_triage` against wall-clock UTC time. |
+| `--project-root` `PATH` | Scanned project root used to refuse policy and trace files stored inside the checkout. |
+| `--advisories` `PATH` | Link matched advisories from a live or offline `advisories` report JSON bound to this AIBOM's SHA-256 into the VEX document. |
+| `--trace-evidence` `PATH` | `trace-diff` or execution-evidence JSON bound to this AIBOM's SHA-256 (`unobserved` and `invoked` stay `in_triage`; critical, KEV, and static-execution findings cannot be suppressed without an expiring operator decision). Requires `--trace-attestation` with `--trusted-key` unless `--allow-unsigned-trace-evidence` is set. |
+| `--trace-attestation` `PATH` | Ed25519 DSSE attestation envelope authenticating `--trace-evidence`. |
+| `--trusted-key` `PATH` | Trusted Ed25519 public key PEM outside the scanned project (repeatable; used with `--trace-attestation`). |
+| `--allow-unsigned-trace-evidence` | Explicitly accept unsigned `--trace-evidence` without `--trace-attestation`. |
+
+### `export-standard`
+
+Export a native AgentBOM to CycloneDX (`1.6` or `1.7`) or SPDX `3.0.1` with typed AI and Dataset projections and optional `agent.yaml` 1.1 producer declarations.
+
+```text
+nexus-symbiote export-standard [OPTIONS] AIBOM_PATH
+```
+
+| Option | Description |
+|---|---|
+| `-f`, `--format` `cyclonedx\|spdx` | Target standard export format. (required) |
+| `-o`, `--output` `PATH` | Write the exported document to this file instead of standard output. |
+| `--cyclonedx-projection` `2\|3` | CycloneDX projection version (`3` default emits typed AI relationships, `services`, `modelCard`, `pedigree` and `licenses`). |
+| `--spec-version` `1.6\|1.7` | CycloneDX specification version when `--format cyclonedx` is selected (`1.7` default; `1.6` requires `--cyclonedx-projection 3`). |
+| `--spdx-projection` `3\|4` | SPDX 3.0.1 projection version (`4` default emits typed AI/Dataset `RelationshipType` values and conditional profile conformance). |
+| `--spdx-namespace` `URI` | Explicit HTTPS namespace base URI for SPDX 3.0.1 element IDs. |
+| `--author` `TEXT` | Repeatable operator-supplied author name recorded in CycloneDX `metadata.authors` or SPDX `Person` + `CreationInfo.createdBy` (with `--format spdx`, requires `--spdx-projection 4`). |
+| `--agent-yaml` `PATH` | Relative path under `--project` to an `agent.yaml` (`1.0` or `1.1`) producer declaration file; recorded at `declared` assurance (`declaration_conflict` on contradiction). |
+| `--project` `DIR` | Trusted project root used to confine `--agent-yaml` declarations (requires `--agent-yaml`). |
+
+`--agent-yaml` and `--project` must be passed together; `--project` alone never reads `agent.yaml` implicitly. Producer declarations (`schema_version`, `owner`, `version`, `automation_level`, `licenses`, `data_usage`, `compliance`, `allowed_regions`, `release_time`, `download_location`, `datasets[]`, and `models[]`) never overwrite observed collector fields (`version`, `supplier`, `autonomy_level`, and a dataset's `source_uri` and `license`); on observed components they are recorded under `declared_*` properties with per-field `declaration.<field>` claims, and a conflicting value raises `declaration_conflict` and is not stored. A `models[].training.datasets` entry adds a `trained-on` edge with `assurance_level: declared`, exported as a typed edge (CycloneDX `dependsOn` and `modelCard` datasets, SPDX `trainedOn`) whose native relationship keeps that assurance. Licences that do not parse as SPDX license expressions (listed licence ids with an optional `+`, `LicenseRef-`, `AND`, `OR`, parentheses, and `WITH` a listed exception id) export as SPDX `NoAssertion` and CycloneDX `license.name`; a licence taken from a declaration carries the comment `declared by producer`. A refused declared `download_location`, and an observed `source_uri` left out of the standard download fields (an unsupported scheme, credentials or a secret), are reported on standard error. Passing `--author` or `--agent-yaml` enriches the embedded native inventory inside the exported document, so the recovered inventory's content digest reflects those additions rather than an attestation signed over the unmodified input `AIBOM_PATH`.
+
+```bash
+nexus-symbiote scan examples/demo-agent -f json --report-only -o /tmp/demo-aibom.json
+nexus-symbiote export-standard /tmp/demo-aibom.json -f spdx --spdx-projection 4 -o /tmp/demo.spdx.json
+```
+
+### `audit-control-plane`
+
+Audit hook command targets outside `.claude/hooks` and `.cursor/hooks`, skill `!` shell preambles, in-project MCP launcher targets, MCP bridge packages (`mcp-remote`, `supergateway`, `mcp-proxy`), writable steering surfaces, CI agent workflow actions, provider-hosted tools, workload identities (SPIFFE, OAuth grants, service identities) and reach-rated diff alerts.
+
+```text
+nexus-symbiote audit-control-plane [OPTIONS] [PROJECT_PATH]
+```
+
+| Option | Description |
+|---|---|
+| `--claims` `PATH` | Optional imported CR-3/CR-6/CR-7 ShadowScan JSON claims file. |
+| `--baseline` `PATH` | Optional baseline project directory for reach-rated control-plane diff alerts. |
+| `--compromised-ref` `TEXT` | Component reference (`tool:exec` or `mcp-server:fs`) to compute reachable identities. |
+| `-o`, `--output` `PATH` | Write JSON audit report to a file path. |
+| `--json-output` | Emit JSON audit summary to standard output. |
+| `--fail-on-severity` `critical\|high\|medium\|low\|none` | Exit 1 when a finding or reach-rated diff alert meets or exceeds this severity, or when an input could not be read or parsed (`critical` by default). Unread inputs are printed as `[INCOMPLETE]` lines; `none` never fails. |
+

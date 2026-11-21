@@ -20,8 +20,9 @@ or `notify` command, or the arguments of a command, an HTTP header value or the 
 of a permission rule, which it keeps by shape only; see
 [source binding](verification-source-binding.md). None of those changes alters the
 record, so a record that holds such values without the key carries a low `completeness`
-finding saying its values are not bound in this inventory, and `diff` raises a medium
-alert for it on every comparison, changed or not. A keyless `diff --fail-on-alert`
+finding saying its values are not bound in this inventory, or, as a prompt template,
+shares one such finding with the other templates, and `diff` raises a medium alert for
+each such record on every comparison, changed or not. A keyless `diff --fail-on-alert`
 therefore fails on such a record; the alert says the values are unbound and records no
 value. The [known limitations](known-limitations.md) list those surfaces.
 
@@ -91,9 +92,9 @@ request with itself, and that gate can never fail.
   of 32 or more characters for the baseline and every candidate scan. Without it, the
   values described above cannot alert on a change: every record that carries the low
   `completeness` finding for unbound values, whether an MCP server, an IDE agent, a RAG
-  source, an A2A agent or client, a prompt file whose content hash is withheld, or the
-  repository agent when redaction changed an `agent.yaml` field,
-  raises a medium alert on every comparison instead, so `diff --fail-on-alert` fails on
+  source, an A2A agent or client, or the repository agent when redaction changed an
+  `agent.yaml` field, and every prompt file whose content hash is withheld, with or
+  without that finding, raises a medium alert on every comparison instead, so `diff --fail-on-alert` fails on
   it rather than reporting no change; the alert does not name the value. The same
   alert is raised when only one of the two scans has the key, and the digests of the
   IDE settings files digested as read then differ. With a different key, every MCP,
@@ -144,12 +145,12 @@ then notes, then the added, removed and modified components and relationships.
 | Component removed | high for MCP servers and clients, tools, models, instruction and skill files, guardrails, IDE agents and extensions, A2A clients and servers, and for any record that carried integrity evidence (file, content, definition or schema digest, exact package URL, version pin, lockfile integrity, static source binding); medium otherwise. Confirm it was deleted, not moved where no collector reads it |
 | MCP endpoint, transport, launch command, launcher package or static source binding changed; the served tool set, or the served instructions, prompts or resource templates, that a live observation recorded (`discover-mcp --record`, `verify-live --record`) changed | critical |
 | Tool definition, input schema, description or annotations changed; model serialization safety changed to an unsafe execution or template format; a model's `trust_remote_code` set to true | critical |
-| Security field changed (for example capabilities, authorizations, claims, endpoints, A2A card URL, package URL, provider, source URI, signing identity or key reference, permission mode, version pin), a `*_ref` or `*_refs` field changed, declared autonomy level changed, trust tier or signing status downgraded, a digest removed or changed | high |
+| Security field changed (for example capabilities, authorizations, claims, endpoints, A2A card URL, package URL, provider, source URI, signing identity or key reference, permission mode, version pin), a `*_ref` or `*_refs` field changed, declared autonomy level changed, trust tier or signing status downgraded, a digest removed or changed, including the `config_hash` of a guardrail or evaluation configuration file (`config_hash changed.`) | high |
 | Tool definition, content or file hash became available: the baseline carried no digest for content the new snapshot pins (`Tool definition hash became available — first binding of content the baseline never pinned.`, `Content hash became available — first binding of content the baseline never pinned.`, `File hash (sha256) became available — first binding of content the baseline never pinned.`). A baseline whose records carry no digest, such as a ShadowScan import or another lossy source, meets this once, when the next scan pins the content: review that snapshot and adopt it as the baseline | medium |
 | Trust tier or signing status raised | medium: a snapshot is written unsigned, so a raised label is a claim to review |
 | Risk findings added | the highest added severity, at least medium |
 | Risk findings removed; any other field changed, including snapshot metadata such as the producer's `tool_name` or `tool_vendor` | medium |
-| Values unbound in either snapshot: the record has no keyed binding (`static_value_binding`) and carries a `completeness` finding saying its values are not bound in this inventory, as MCP launch values, IDE agent settings values, RAG and A2A values and the content of a prompt file whose content hash is withheld, such as an `@path` import that is not Markdown, do without `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`. Raised on every comparison, changed or not, and names no value: `MCP server launch values are unbound in one snapshot; argument, environment and endpoint-path drift is undetectable. Set NEXUS_SYMBIOTE_SOURCE_BINDING_KEY during both collections.` for an MCP server, `Values are unbound in one snapshot without the binding key; a change to them is undetectable and no value is recorded. Set NEXUS_SYMBIOTE_SOURCE_BINDING_KEY during both collections.` for any other record | medium |
+| Values unbound in either snapshot: the record has no keyed binding (`static_value_binding`) and either carries a `completeness` finding saying its values are not bound in this inventory, as MCP launch values, IDE agent settings values and RAG and A2A values do without `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`, or has its content hash withheld, as a prompt file has without the key, such as an `@path` import that is not Markdown or a prompt template, which shares one such finding with the other templates. Raised on every comparison, changed or not, and names no value: `MCP server launch values are unbound in one snapshot; argument, environment and endpoint-path drift is undetectable. Set NEXUS_SYMBIOTE_SOURCE_BINDING_KEY during both collections.` for an MCP server, `Values are unbound in one snapshot without the binding key; a change to them is undetectable and no value is recorded. Set NEXUS_SYMBIOTE_SOURCE_BINDING_KEY during both collections.` for any other record | medium |
 | Relationship added | medium; high for `invokes`, `delegates-to` and `acts-as-identity` |
 | Relationship removed | medium; high for `uses-guardrail` and `approved-under` |
 | Relationship kept but its assurance or conditions changed | high |
@@ -158,6 +159,7 @@ then notes, then the added, removed and modified components and relationships.
 | A collector first recorded as anything but `complete`, such as `failed` or `partial`, when the baseline's completeness claim never recorded it (`Collector 'model' is now recorded as failed; the baseline does not show this gap predates the change.`); first recorded as `complete`, it is an improvement | high |
 | ShadowScan: report content changed; report bytes changed without comparable content digests; source status worse; more unmapped entries; new projection limitations; a lossy format | high |
 | The new snapshot has graph problems the baseline did not (dangling or mistyped references), the snapshots differ in `spec_version`, or either snapshot uses a `spec_version` this release does not support | high |
+| IDE settings guardrail removed or widened on a retained `ide-agent` component: a `deny_rules` matcher removed (`deny_rule_removed`), a `sandbox.network.allowedDomains` host added (`sandbox_egress_widened`), a rule/subagent activation scope changed to `always_apply` or gained globs (`scope_widened`), or malformed settings metadata prevents verification (`malformed_settings_metadata`) | high |
 
 A relationship to a component that was itself added or removed is listed but alerts
 through that component, unless its own rating is high.
