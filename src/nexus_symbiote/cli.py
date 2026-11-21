@@ -186,6 +186,45 @@ _LAST_CLAMPED_SETTINGS: contextvars.ContextVar[tuple[str, ...]] = contextvars.Co
 )
 
 
+def _policy_lookup_incomplete(exc: BaseException) -> bool:
+    """A policy file may exist, but the root could not be listed far enough to say."""
+    text = str(exc)
+    return "entries limit" in text or "cannot be listed" in text
+
+
+def _warn_unapplied_project_policy(root: Path) -> None:
+    """Say that a checkout policy exists and was left unused.
+
+    Applying it is opt-in. A file that is not a safe regular policy is named only as
+    invalid: its error text can quote the checkout.
+    """
+    from nexus_symbiote.policy import PolicyError, find_policy_path
+
+    try:
+        path = find_policy_path(root)
+    except PolicyError as exc:
+        if _policy_lookup_incomplete(exc):
+            raise _failure(exc) from exc
+        echo_line(
+            "WARNING: a project policy file in ",
+            root,
+            " was not applied because it is invalid or unsafe to read. Pass "
+            "--accept-project-policy to apply a project policy, or --no-project-policy "
+            "to keep the built-in policy without this warning.",
+            err=True,
+        )
+        return
+    if path is None:
+        return
+    echo_line(
+        "WARNING: project policy ",
+        path,
+        " was not applied. Pass --accept-project-policy to apply it, or "
+        "--no-project-policy to keep the built-in policy without this warning.",
+        err=True,
+    )
+
+
 def _policy_with_source(
     root: Path,
     *,
@@ -196,7 +235,12 @@ def _policy_with_source(
     operator_digest: str | None = None,
     operator_signers: tuple[str, ...] = (),
 ) -> tuple[Policy, str, list[str]]:
-    """Load the governing policy and say where it came from and what it relaxes."""
+    """Load the governing policy and say where it came from and what it relaxes.
+
+    A project policy is applied only with ``allow_weakening`` (``--accept-project-policy``).
+    Otherwise the built-in policy, or the operator policy alone, is used. CI is not
+    treated as a trust signal.
+    """
     from nexus_symbiote.operator_policy import narrow_policy
     from nexus_symbiote.policy import (
         PolicyError,
@@ -206,9 +250,12 @@ def _policy_with_source(
     )
 
     _LAST_CLAMPED_SETTINGS.set(())
+    apply_project = allow_weakening and not ignore_project
     if operator is not None and operator_digest is not None:
         op_label = _format_operator_source(operator_digest, operator_signers)
-        if ignore_project:
+        if not apply_project:
+            if not ignore_project and warn:
+                _warn_unapplied_project_policy(root)
             return operator, op_label, weakened_settings(operator)
         try:
             loaded_proj = load_policy_file(root)
@@ -229,7 +276,9 @@ def _policy_with_source(
             )
         return narrowed, op_label, weakened_settings(narrowed)
 
-    if ignore_project:
+    if not apply_project:
+        if not ignore_project and warn:
+            _warn_unapplied_project_policy(root)
         return default_policy(), "built-in", []
     try:
         loaded = load_policy_file(root)
@@ -244,12 +293,6 @@ def _policy_with_source(
         # the cursor or start a new line that hides this warning or forges a CI command.
         echo_line(
             "WARNING: policy ", path, " weakens the built-in gates: ", "; ".join(weaker), err=True
-        )
-    if _gate_weakenings(weaker) and not allow_weakening and _running_in_ci():
-        raise click.ClickException(
-            "The project policy weakens the built-in gates and this run looks like CI. Pass "
-            "--no-project-policy to ignore the checkout's policy, or --accept-project-policy "
-            "to accept it explicitly."
         )
     return policy, f"project:{path}", weaker
 
@@ -986,8 +1029,9 @@ def _render_aibom(
     "--accept-project-policy",
     is_flag=True,
     help=(
-        "In CI, accept a project policy that weakens the built-in gates explicitly; without "
-        "it such a policy fails the command there. Interactive runs only warn."
+        "Apply the checkout's project policy. Without this flag the built-in policy is "
+        "used and a policy file in the checkout is not applied. --no-project-policy "
+        "selects the built-in policy and suppresses that warning."
     ),
 )
 @click.option(
@@ -1755,8 +1799,9 @@ def verify_discovery(
     "--accept-project-policy",
     is_flag=True,
     help=(
-        "In CI, accept a project policy that weakens the built-in gates explicitly; without "
-        "it such a policy fails the command there. Interactive runs only warn."
+        "Apply the checkout's project policy. Without this flag the built-in policy is "
+        "used and a policy file in the checkout is not applied. --no-project-policy "
+        "selects the built-in policy and suppresses that warning."
     ),
 )
 @click.option(
@@ -1995,8 +2040,9 @@ def validate(
     "--accept-project-policy",
     is_flag=True,
     help=(
-        "In CI, accept a project policy that weakens the built-in gates explicitly; without "
-        "it such a policy fails the command there. Interactive runs only warn."
+        "Apply the checkout's project policy. Without this flag the built-in policy is "
+        "used and a policy file in the checkout is not applied. --no-project-policy "
+        "selects the built-in policy and suppresses that warning."
     ),
 )
 @click.option(
