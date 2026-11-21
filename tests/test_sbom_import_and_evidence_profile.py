@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import time
 import tracemalloc
 from pathlib import Path
 
@@ -40,6 +39,7 @@ from nexus_symbiote.sbom_import import (
     walk_nested_manifests,
 )
 from nexus_symbiote.signature_policy import load_signature_policies
+from tests.support import scaling_ratio
 
 
 def _sample_aibom() -> AIBOM:
@@ -376,13 +376,30 @@ def test_import_sbom_10000_same_name_components_is_linear_time_and_memory(
         ),
         encoding="utf-8",
     )
-    t0 = time.monotonic()
     summary = import_foreign_sbom(sbom_10k, reveal_names=False)
-    elapsed = time.monotonic() - t0
 
     assert summary.imported_count == MAX_FOREIGN_COMPONENTS
     assert summary.conflict_count == MAX_FOREIGN_COMPONENTS - 1
-    assert elapsed < 3.5, f"10k same-name import took {elapsed:.2f}s (expected < 3.5s)"
+
+    # Growth, not a wall-clock bound, which coverage tracing and a busy runner move:
+    # four times the same-name components cost about four times as much if linear.
+    sized = {}
+    for scale in (1, 4):
+        path = tmp_path / f"same-name-{scale}.cdx.json"
+        count = MAX_FOREIGN_COMPONENTS * scale // 4
+        components = [
+            {"type": "library", "name": "same-pkg", "version": f"1.0.{i}"} for i in range(count)
+        ]
+        path.write_text(
+            json.dumps({"bomFormat": "CycloneDX", "specVersion": "1.6", "components": components}),
+            encoding="utf-8",
+        )
+        sized[scale] = path
+
+    def run(scale: int) -> None:
+        import_foreign_sbom(sized[scale], reveal_names=False)
+
+    assert scaling_ratio(run) < 10
 
     # Also verify peak allocation stays bounded on a 2,000-entry slice under tracemalloc.
     sbom_2k = tmp_path / "two_thousand.cdx.json"
