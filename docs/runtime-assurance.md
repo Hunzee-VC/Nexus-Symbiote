@@ -267,6 +267,12 @@ does not consume an approval nonce.
 
 ### Pinned stdio integration
 
+The stdio adapter validates successful structured results against the approved
+`outputSchema` when present, using the bounded schema worker. Tool errors
+(`isError: true`) are returned as error data. A missing or invalid structured
+result raises `ExecutionOutcomeUnknown` after dispatch. Reconcile any side
+effects before retrying. Treat all returned content as untrusted input.
+
 `nexus_symbiote.live.session.invoke_pinned_stdio` is an opt-in POSIX adapter that
 starts a private copy of an independently pinned standalone launcher, enumerates
 its tools, authorizes the requested operation, and sends `tools/call` through the
