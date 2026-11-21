@@ -83,6 +83,8 @@ _HIDDEN = re.compile(
     "\U00013430-\U0001343f\U0001bca0-\U0001bca3\U0001d173-\U0001d17a"
     f"\U000e0000-\U000e007f\U000e0100-\U000e01ef{_UNASSIGNED_IGNORABLE}]"
 )
+# The text-poisoning rules remove these before matching.
+HIDDEN_CHARACTERS = _HIDDEN
 _ZWJ = "\u200d"
 _PRESENTATION_SELECTORS = frozenset({"\ufe0e", "\ufe0f"})
 _SKIN_TONES = range(0x1F3FB, 0x1F400)
