@@ -1162,7 +1162,8 @@ def _argument_hits(
     its flag and the one after it as the rest of ``NAME=<scheme>``. One with white space
     (a command line, an inline script) is read whole for what holds whatever names it,
     as a header line, for credential-named assignments and as its flag's value; its
-    shell words are then read one by one, so ``-c "API_TOKEN=${API_TOKEN} exec ..."`` is never a ``NAME=value`` or a literal.
+    shell words are then read one by one, so ``-c "API_TOKEN=${API_TOKEN} exec ..."``
+    is never a ``NAME=value`` or a literal.
     """
     if not any(char.isspace() for char in argument):
         return _word_hits(previous, argument, following, fetcher)
