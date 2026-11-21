@@ -9,8 +9,8 @@ import click
 
 from nexus_symbiote.core.aibom import AIBOM, ContentSerialError, NativeFormatError
 from nexus_symbiote.policy import PolicyError
+from nexus_symbiote.runtime_cli import _refuse_source_overwrite
 from nexus_symbiote.spdx_profiles import _clean_url, apply_agent_yaml_declarations
-from nexus_symbiote.supply_chain_cli import _refuse_source_overwrite
 from nexus_symbiote.utils.secrets import redact_text
 from nexus_symbiote.utils.terminal import echo_line, json_text, neutralize, write_cli_output
 
