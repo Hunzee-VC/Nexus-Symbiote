@@ -110,6 +110,16 @@ RULES: dict[str, RuleInfo] = {
         "An IDE agent configuration skips or relaxes approval prompts, turns off the "
         "sandbox, or allows tools without scoping them to resources.",
     ),
+    "oversight_gap": RuleInfo(
+        "Destructive tool auto-approved",
+        "A destructive or shell-capable tool resolves to automatic approval without "
+        "human-in-the-loop oversight under the declared settings precedence.",
+    ),
+    "subagent_inline_mcp_server": RuleInfo(
+        "Subagent inline MCP server",
+        "A subagent markdown front-matter block declares inline mcpServers outside the "
+        "top-level .mcp.json inventory.",
+    ),
     "capability_scope": RuleInfo(
         "Destructive tool capability",
         "A tool declares destructive or financial side effects, or is declared read-only "
