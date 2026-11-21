@@ -1058,3 +1058,11 @@ def test_offline_advisories_bound_the_errors_from_malformed_records(tmp_path):
     res = CliRunner().invoke(main, ["advisories", str(bom_path), "--offline-db", str(db_file)])
     assert res.exit_code == 1
     assert len(json.loads(res.output)["errors"]) == 101
+
+
+def test_offline_feed_bounds_directory_entries_before_sorting(tmp_path, monkeypatch):
+    monkeypatch.setattr(offline_advisories, "MAX_DB_FILES", 2)
+    for filename in ("first.txt", "second.txt", "third.txt"):
+        (tmp_path / filename).touch()
+    with pytest.raises(ValueError, match="2 directory entries"):
+        offline_advisories.load_offline_advisory_db(tmp_path)
