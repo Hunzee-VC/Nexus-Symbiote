@@ -991,3 +991,28 @@ def test_a_baseline_with_an_import_content_hash_alerts_once_as_documented(
         assert "`Content hash removed`" in flat
         assert "`project-reconciliation-failed`" in flat
         assert "`@prompts/system.txt`" in flat
+
+
+def test_a_source_file_beyond_the_path_limit_is_scanned_without_an_internal_error(tmp_path):
+    """The text-poisoning pass asks whether a source path is a directory through the
+    confined collection, never by its full path.
+
+    A path-based stat of a collected file fails with ENAMETOOLONG once the path passes the
+    system limit (1,024 bytes on macOS, 4,096 on Linux), and ``scan`` ended with
+    "internal error (OSError)" on a checkout the collectors themselves had read.
+    """
+    limit = os.pathconf(tmp_path, "PC_PATH_MAX")
+    levels = (limit + 600) // 201 + 1
+    deep = "/".join(
+        [".claude/rules", *(chr(ord("a") + level % 26) * 200 for level in range(levels))]
+    )
+    project = tmp_path / "project"
+    project.mkdir()
+    _write(project, f"{deep}/aa", "Be kind.\n")
+    _write(project, "CLAUDE.md", f"@{deep}/aa\n")
+    assert len(os.fsencode(project / deep / "aa")) > limit
+    output = tmp_path / "bom.json"
+    result = _scan(project, output, "--report-only")
+    assert result.exit_code == 0, result.output[-400:]
+    assert "internal error" not in result.output
+    assert any(c.bom_ref.endswith("/aa") for c in AIBOM.load(output).components)

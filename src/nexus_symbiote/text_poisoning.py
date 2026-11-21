@@ -1031,7 +1031,7 @@ def apply_text_poisoning_rules(
         ) as files:
             for rel_path in _source_candidates(components_by_path):
                 # A collector may record a directory of rules; its files are their own sources.
-                if files.excluded(rel_path) or (root / rel_path).is_dir():
+                if files.excluded(rel_path) or files.is_directory(rel_path):
                     continue
                 raw = files.read_bytes(rel_path, missing_ok=True)
                 if raw is None:
