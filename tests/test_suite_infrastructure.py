@@ -261,20 +261,27 @@ def test_each_ci_suite_dumps_tracebacks_only_just_before_its_test_timeout():
 
     ini = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     options = ini["tool"]["pytest"]["ini_options"]
-    workflow = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8"))
+    suites = {
+        "ci.yml": ("test", "floor", "coverage"),
+        "dependencies.yml": ("fuzz",),
+    }
     checked = 0
-    for job in ("test", "floor", "coverage"):
-        for step in workflow["jobs"][job]["steps"]:
-            run = step.get("run", "")
-            if "pytest" not in run:
-                continue
-            limit = re.search(r"-o test_timeout=(\d+)", run)
-            dump = re.search(r"-o faulthandler_timeout=(\d+)", run)
-            test_timeout = int(limit.group(1) if limit else options["test_timeout"])
-            faulthandler = int(dump.group(1) if dump else options["faulthandler_timeout"])
-            assert 0.9 * test_timeout <= faulthandler <= test_timeout, (job, run)
-            checked += 1
-    assert checked == 3
+    for workflow_name, jobs in suites.items():
+        workflow = yaml.safe_load(
+            (ROOT / ".github/workflows" / workflow_name).read_text(encoding="utf-8")
+        )
+        for job in jobs:
+            for step in workflow["jobs"][job]["steps"]:
+                run = step.get("run", "")
+                if "pytest" not in run:
+                    continue
+                limit = re.search(r"-o test_timeout=(\d+)", run)
+                dump = re.search(r"-o faulthandler_timeout=(\d+)", run)
+                test_timeout = int(limit.group(1) if limit else options["test_timeout"])
+                faulthandler = int(dump.group(1) if dump else options["faulthandler_timeout"])
+                assert 0.9 * test_timeout <= faulthandler <= test_timeout, (job, run)
+                checked += 1
+    assert checked == 4
 
 
 def test_the_time_limit_and_the_isolation_hold_in_a_parallel_worker(suite, monkeypatch):

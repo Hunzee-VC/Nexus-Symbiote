@@ -66,10 +66,11 @@ def _reference_range_matches(
     below any limit is in range), or past a parsable bound of an interval with none unparsable.
     """
     raw_type = rng.get("type")
-    if raw_type is not None and (
-        not isinstance(raw_type, str) or raw_type.upper() not in _SUPPORTED_RANGE_TYPES
-    ):
-        return False, [], []
+    if raw_type is not None:
+        if not isinstance(raw_type, str) or raw_type.upper() not in offline._KNOWN_RANGE_TYPES:
+            raise ValueError("OSV range type is not recognised")
+        if raw_type.upper() not in _SUPPORTED_RANGE_TYPES:
+            return False, [], []
     events = rng.get("events")
     if not isinstance(events, list):
         raise ValueError("OSV range events are not a list")
@@ -92,6 +93,8 @@ def _reference_range_matches(
             ordered.append((kind, raw.strip()))
         else:
             raise ValueError("OSV range event cannot be parsed")
+    if not has_zero_intro and not found["introduced"]:
+        raise ValueError("OSV range has no introduced event")
     intros, fixed_versions, last_affected, limits = found.values()
 
     cmp(version, version)
@@ -113,11 +116,16 @@ def _reference_range_matches(
         decided = not open_interval and bound not in unparsed
         return decided and (best_intro is None or cmp(best_intro, bound) <= 0)
 
-    owner: str | None = None  # the introduced an event follows; None before the first
+    # The run of consecutive introduced events a bound follows; empty before the first. Two
+    # introduced with no bound between them open one interval, whatever their order.
+    run: list[str] = []
+    after_intro = False
     open_interval = False  # an unparsable bound may close the version's interval
     for kind, value in ordered:
-        owner = value if kind == "introduced" else owner
-        held = owner is None or cmp(owner, best_intro or "0") == 0
+        if kind == "introduced":
+            run = [*run, value] if after_intro else [value]
+        after_intro = kind == "introduced"
+        held = not run or any(cmp(intro, best_intro or "0") == 0 for intro in run)
         open_interval |= held and kind in ("fixed", "last_affected") and value in unparsed
     if (
         all(x != "*" and x not in unparsed and cmp(version, x) >= 0 for x in limits or ["*"])
@@ -373,6 +381,8 @@ def test_the_indexed_matcher_reports_what_pairwise_matching_reported(ecosystem):
         "OSV range events are not a list",
         "OSV range event cannot be parsed",
         "OSV range version cannot be compared",
+        "OSV range type is not recognised",
+        "OSV range has no introduced event",
     }
 
 

@@ -145,6 +145,7 @@ jobs:
       - name: Explore new inputs with the randomized Hypothesis profile
         run: >-
           python -m pytest -vv --strict-skips --hypothesis-profile=fuzz -o test_timeout=1800
+          -o faulthandler_timeout=1620
           --hypothesis-show-statistics
           tests/test_properties.py
           tests/test_parser_properties.py
