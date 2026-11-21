@@ -304,6 +304,7 @@ _ASSIGNMENT = re.compile(
 _NETRC_WORDS = frozenset({"password", "passwd"})
 _BASE64 = re.compile(r"[A-Za-z0-9+/]{40,}={0,2}")
 _ENCODED_LIMIT = 65536
+_ASCII_SPACE = re.compile(r"[ \t\n\r\f\v]+")
 JSON_LIMIT = 65536
 JSON_DEPTH = 8
 
@@ -616,11 +617,12 @@ def _private_key(value: str) -> bool:
         return "..." not in value and "…" not in value
     if _putty_key(value):
         return True
-    encoded = _BASE64.fullmatch(value.strip())
-    if encoded is None or len(value) > _ENCODED_LIMIT:
+    # base64 and openssl wrap their output at 76 and 64 columns by default.
+    compact = _ASCII_SPACE.sub("", value)
+    if len(compact) > _ENCODED_LIMIT or _BASE64.fullmatch(compact) is None:
         return False
     try:
-        decoded = base64.b64decode(value.strip() + "=" * (-len(value.strip()) % 4))
+        decoded = base64.b64decode(compact + "=" * (-len(compact) % 4))
     except (binascii.Error, ValueError):
         return False
     text = decoded.decode("utf-8", "replace")

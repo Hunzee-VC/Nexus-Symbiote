@@ -208,3 +208,65 @@ def test_a_field_too_large_to_walk_withholds_the_failing_servers_name(tmp_path: 
     )
     assert WORDS not in shown
     assert "invalid tool definition for server '[withheld]'" in shown
+
+
+OAUTH = "ZqOAx7Wv3Lp9Rk2Tm5Yn"
+URL_PASSWORD = "ZqURx7Wv3Lp9Rk2Tm5Yn"  # noqa: S105 - synthetic sentinel
+ARGUMENT = "ZqARx7Wv3Lp9Rk2Tm5Yn"
+SETTING = "ZqSEx7Wv3Lp9Rk2Tm5Yn"
+
+
+def _echo(*values: str) -> dict[str, object]:
+    description = "Uses " + " and ".join(values)
+    tool = {"name": "t", "description": description, "inputSchema": {"type": "object"}}
+    return {"command": "node", "args": ["srv.js"], "tools": [tool]}
+
+
+def _scan_file(root: Path, relative: str, data: object) -> str:
+    path = root / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data))
+    result = MCPScanner().scan(root)
+    return AIBOM(components=result.components).model_dump_json() + "\n".join(
+        [*result.scan_failures, *result.surfaces_excluded]
+    )
+
+
+def test_a_refused_servers_auth_url_and_arguments_are_scrubbed_from_its_siblings(
+    tmp_path: Path,
+) -> None:
+    refused = {
+        "command": "node",
+        "url": f"https://u:{URL_PASSWORD}@mcp.example.com/mcp",
+        "oauth": {"clientSecret": OAUTH},
+        "args": ["--api-key", ARGUMENT, 1],
+    }
+    shown = _scan(tmp_path, {"a": refused, "b": _echo(OAUTH, URL_PASSWORD, ARGUMENT)})
+    assert ".mcp.json: invalid server configuration" in shown
+    assert [value for value in (OAUTH, URL_PASSWORD, ARGUMENT) if value in shown] == []
+
+
+def test_a_refused_zed_servers_settings_are_scrubbed_from_its_siblings(tmp_path: Path) -> None:
+    refused = {"command": "node", "args": [1], "settings": {"api_key": SETTING}}
+    data = {"context_servers": {"a": refused, "b": _echo(SETTING)}}
+    shown = _scan_file(tmp_path, ".zed/settings.json", data)
+    assert "invalid server configuration" in shown
+    assert SETTING not in shown
+
+
+def test_a_server_discarded_as_a_duplicate_is_scrubbed_from_its_siblings(tmp_path: Path) -> None:
+    data = {
+        "mcpServers": {"x": {"command": "node", "args": ["a.js"]}, "b": _echo(SETTING)},
+        "servers": {"x": {"command": "node", "env": {"API_TOKEN": SETTING}}},
+    }
+    shown = _scan_file(tmp_path, ".mcp.json", data)
+    assert "MCP server declared under more than one server map" in shown
+    assert SETTING not in shown
+
+
+def test_a_gemini_server_replaced_by_the_server_command_is_scrubbed(tmp_path: Path) -> None:
+    servers = {"mcp": {"command": "node", "env": {"API_TOKEN": SETTING}}, "b": _echo(SETTING)}
+    data = {"mcpServerCommand": "node m.js", "mcpServers": servers}
+    shown = _scan_file(tmp_path, ".gemini/settings.json", data)
+    assert "Uses ***" in shown or "Uses [" in shown
+    assert SETTING not in shown

@@ -1153,17 +1153,19 @@ def _word_hits(
     return hits
 
 
-def _argument_hits(previous: str | None, argument: str, fetcher: bool = False) -> list[Hit]:
+def _argument_hits(
+    previous: str | None, argument: str, fetcher: bool = False, following: str | None = None
+) -> list[Hit]:
     """The hits of a launch argument.
 
     An argument without white space is one word, read with the argument before it as
-    its flag. One with white space (a command line, an inline script) is read whole
+    its flag and the one after it as the rest of ``NAME=<scheme>``. One with white space (a command line, an inline script) is read whole
     for what holds whatever names it, as a header line, for credential-named
     assignments and as its flag's value; its shell words are then read one by one,
     so ``-c "API_TOKEN=${API_TOKEN} exec ..."`` is never a ``NAME=value`` or a literal.
     """
     if not any(char.isspace() for char in argument):
-        return _word_hits(previous, argument, None, fetcher)
+        return _word_hits(previous, argument, following, fetcher)
     flagged = previous is not None and _flag_value(previous, argument)
     hits = value_hits(previous if flagged and previous else "", argument)
     hits.extend(_header_line_hits(argument, explicit=_explicit_header(previous, argument)))
@@ -1205,7 +1207,9 @@ def _credential_hits(
     previous: str | None = None
     for index, argument in enumerate(args, start=1):
         if isinstance(argument, str):
-            yield ("argument", str(index), _argument_hits(previous, argument, fetcher))
+            after = args[index] if index < len(args) else None
+            following = after if isinstance(after, str) else None
+            yield ("argument", str(index), _argument_hits(previous, argument, fetcher, following))
             previous = argument
         else:
             previous = None
@@ -2851,11 +2855,11 @@ class MCPScanner(Scanner):
 
         One server's tool text or name may repeat a value that another server's
         environment, headers or launcher holds, so the file's values are scrubbed
-        from each. A server that _server_problem refuses is never parsed, but its
-        `env`, `headers` and `http_headers` still count, as they did before launcher
-        values were added: refusing it must not publish what its siblings repeat. Only
-        its launcher is not analysed: its arguments are read for the names they withhold. Each
-        server's launch positions are read once, into ``server_hits`` by the server's identity.
+        from each. A server that _server_problem refuses is never parsed, but every value
+        _server_secrets reads for a parsed one still counts: refusing it must not publish
+        what its siblings repeat. Only its launcher is not analysed, and the arguments of
+        one past an argument limit are read only for the names they withhold. Each server's
+        launch positions are read once, into ``server_hits`` by the server's identity.
         """
         values: list[str] = []
         for _, config in entries:
@@ -2863,12 +2867,16 @@ class MCPScanner(Scanner):
                 continue
             values.extend(_shape_credentials(config, shape))
             if cls._server_problem(config, shape) is not None:
-                for field in ("env", "headers", "http_headers"):
-                    mapping = config.get(field)
-                    if isinstance(mapping, dict):
-                        values.extend(secret_values(mapping))
                 hits = _declared_hits(config)
-                values.extend(_literals([hit for hit in hits if hit[0] != "argument"]))
+                declared, read = config, hits
+                args = config.get("args")
+                if isinstance(args, list) and len(args) > min(MAX_ARGUMENTS, MAX_LIST_ENTRIES):
+                    # A server refused for its argument count must not fill the file's
+                    # credential limit and so withhold every sibling from the inventory.
+                    declared = {field: item for field, item in config.items() if field != "args"}
+                    read = [hit for hit in hits if hit[0] != "argument"]
+                # _server_secrets reads each field only when it has the type it expects.
+                values.extend(_server_secrets(declared, Launch(), read))
                 if server_hits is not None:
                     server_hits[id(config)] = hits
                 continue
@@ -3030,6 +3038,8 @@ class MCPScanner(Scanner):
                     result.scan_failures.append(
                         f"{dialect.path}: MCP server declared under more than one server map"
                     )
+                    if isinstance(config, dict):
+                        dropped.append(_normalized_server(dialect.shape, config).config)
                     continue
                 if dialect.shape != "map" and isinstance(config, dict):
                     normalized = _normalized_server(dialect.shape, config)
@@ -3069,6 +3079,8 @@ class MCPScanner(Scanner):
         elif commands:
             command, *arguments = commands[0].split()
             # The client replaces a server map entry of the same name.
+            if isinstance(replaced := entries.get("mcp"), dict):
+                dropped.append(replaced)
             entries["mcp"] = {"command": command, "args": arguments}
         tools = [
             tool
@@ -3325,7 +3337,9 @@ class MCPScanner(Scanner):
         recorded = (
             {"-y", "--yes", *(package.spec for package in packages)} if launcher_package else set()
         )
-        unbound = self._unbound_values(args, env, headers, endpoint_url, command, launch, recorded)
+        unbound = self._unbound_values(
+            args, env, headers, endpoint_url, command, launch, recorded, identity
+        )
         unbound.extend(
             self._unbound_client_values(
                 config, dialect.shape, nested=nested, redacted=tool_lists_redacted
@@ -3788,11 +3802,18 @@ class MCPScanner(Scanner):
         command: str,
         launch: Launch,
         recorded: set[str],
+        identity: _Identity,
     ) -> list[str]:
         """Values only the keyed binding covers, named by kind."""
         unbound = []
         if command and (re.search(r"[\\/]", command) or launch.wrappers):
             unbound.append("command path")
+        elif command and identity.command != command.strip():
+            # A redacted command, or one exported case-folded or without its Windows
+            # suffix: MCPServer and mcpserver are different files on POSIX.
+            unbound.append("command")
+        if identity.endpoint == "[redacted]":
+            unbound.append("endpoint")
         if any(arg not in recorded for arg in args):
             unbound.append("launch arguments")
         if any(env.values()):
