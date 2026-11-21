@@ -64,7 +64,7 @@ def _sign_trace_file(trace_path: Path, att_path: Path, pub_path: Path) -> None:
 
 
 def test_execution_bound_vex_yields_distinct_outcomes_and_keeps_unobserved_in_triage(tmp_path):
-    """declared_never_loaded clears non-critical dynamic risk, while unobserved stays in_triage."""
+    """Trace observations retain triage for every outcome."""
     bom = _three_component_bom()
     bom.components.append(
         ToolComponent(
@@ -104,10 +104,10 @@ def test_execution_bound_vex_yields_distinct_outcomes_and_keeps_unobserved_in_tr
         "tool:shadowed",
     }
 
-    # 1. Explicit declared_never_loaded on non-critical dynamic finding -> not_affected.
+    # 1. A component absent from these observations stays in triage.
     never = by_comp["tool:never-loaded"]["analysis"]
-    assert never["state"] == "not_affected"
-    assert never["justification"] == "code_not_reachable"
+    assert never["state"] == "in_triage"
+    assert "justification" not in never
 
     # 2. Real trace-diff unobserved -> MUST remain in_triage (absence of spans proves nothing).
     unobs = by_comp["tool:unobserved"]["analysis"]
@@ -233,6 +233,8 @@ decisions:
     state: "not_affected"
     justification: "protected_at_runtime"
     detail: "Blocked by gateway policy"
+    inventory_sha256: "{hash_bytes(bom.to_native_json().encode())}"
+    deployment_id: "prod"
     owner: "secops@example.com"
     expires_at: "2027-01-01T00:00:00Z"
   - id: "{fid_expired}"
@@ -246,13 +248,22 @@ decisions:
     )
     loaded = load_vex_decisions(decisions_file)
     ref_time = datetime(2026, 11, 19, 0, 0, tzinfo=UTC)
-    doc = VEXGenerator(decisions=loaded, reference_time=ref_time).generate(bom)
+    generator = VEXGenerator(decisions=loaded, reference_time=ref_time, deployment_id="prod")
+    doc = generator.generate(bom)
 
     by_comp = {v["affects"][0]["ref"]: v for v in doc["vulnerabilities"]}
     assert by_comp["tool:never-loaded"]["analysis"]["state"] == "not_affected"
     assert by_comp["tool:invoked"]["analysis"]["state"] == "in_triage"
     meta_props = {p["name"]: p["value"] for p in doc["metadata"].get("properties", [])}
     assert meta_props["nexus-symbiote:expiredVexDecisions"] == "1"
+
+    ref_changed = VEXGenerator(decisions=loaded, reference_time=ref_time, deployment_id="staging")
+    wrong_deployment = ref_changed.generate(bom)
+    bom.components[0].hashes["sha256"] = "sha256:" + "a" * 64
+    changed_inventory = generator.generate(bom)
+    for result in (wrong_deployment, changed_inventory):
+        entry = next(v for v in result["vulnerabilities"] if v["id"] == fid_active)
+        assert entry["analysis"]["state"] == "in_triage"
 
     # Conflicting / duplicate (id, component_ref) decisions must be refused.
     dup_file = tmp_path / "dup-decisions.yaml"
