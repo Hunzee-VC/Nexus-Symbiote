@@ -456,9 +456,12 @@ def evaluate_environment(environment: Any, policies: Any, *, name: str, branch: 
         and rule.get("type") == "required_reviewers"
         and isinstance(rule.get("reviewers"), list)
         and rule["reviewers"]
+        and rule.get("prevent_self_review") is True
         for rule in rules
     ):
-        errors.append(f"the {name} environment requires no reviewer")
+        errors.append(
+            f"the {name} environment requires an independent reviewer with Prevent self-review enabled"
+        )
     policy = environment.get("deployment_branch_policy")
     entries = policies.get("branch_policies") if isinstance(policies, dict) else None
     total = policies.get("total_count") if isinstance(policies, dict) else None
