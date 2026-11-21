@@ -199,8 +199,7 @@ def register_supply_chain_commands(main: click.Group) -> None:
             "where one can be created, which cleanup also kills; the server then fails "
             "with isolation-teardown-failed, unless the launcher runs as root or holds "
             "CAP_SYS_PTRACE or CAP_SYS_ADMIN, which can hide the escape. Never opt out as "
-            "root. Elsewhere cleanup is best effort, and each server whose launcher ran "
-            "is reported with teardown unverified. This is not a namespace or sandbox."
+            "root. Elsewhere cleanup is best effort. This is not a namespace or sandbox."
         ),
     )
     def verify_live(
@@ -224,11 +223,7 @@ def register_supply_chain_commands(main: click.Group) -> None:
         modes.require_live("verify-live")
         from nexus_symbiote.core.hashing import hash_bytes, open_regular_file, parse_json_strict
         from nexus_symbiote.live.pinned_process import isolation_off
-        from nexus_symbiote.live.verify import (
-            TEARDOWN_UNVERIFIED,
-            record_candidate,
-            verify_mcp_servers,
-        )
+        from nexus_symbiote.live.verify import record_candidate, verify_mcp_servers
 
         if record and json_output:
             raise click.UsageError("choose a candidate BOM or a JSON verification report")
@@ -267,8 +262,7 @@ def register_supply_chain_commands(main: click.Group) -> None:
                 "one can be created, which cleanup also kills; the server then fails with "
                 "isolation-teardown-failed, unless the launcher runs as root or holds "
                 "CAP_SYS_PTRACE or CAP_SYS_ADMIN, which can hide the escape. Never opt out as "
-                "root. Elsewhere cleanup is best effort, and each server whose launcher ran "
-                "is reported with teardown unverified. This is not a namespace or sandbox.",
+                "root. Elsewhere cleanup is best effort. This is not a namespace or sandbox.",
                 err=True,
             )
             if _running_as_root():
@@ -283,13 +277,6 @@ def register_supply_chain_commands(main: click.Group) -> None:
             "inventory_sha256": hash_bytes(inventory_bytes),
             "launch_policy_sha256": hash_bytes(policy_bytes),
         }
-        for result in report.results:
-            if result.teardown == "unverified":
-                echo_line(
-                    "Server ",
-                    f"{result.server_ref}: teardown-unverified: {TEARDOWN_UNVERIFIED}",
-                    err=True,
-                )
         if record:
             try:
                 record_candidate(bom, report)
