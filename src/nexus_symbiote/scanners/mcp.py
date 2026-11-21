@@ -1159,8 +1159,8 @@ def _argument_hits(
     """The hits of a launch argument.
 
     An argument without white space is one word, read with the argument before it as
-    its flag and the one after it as the rest of ``NAME=<scheme>``. One with white space (a command line, an inline script) is read whole
-    for what holds whatever names it, as a header line, for credential-named
+    its flag and the one after it as the rest of ``NAME=<scheme>``. One with white space
+    (a command line, an inline script) is read whole for what holds whatever names it, as a header line, for credential-named
     assignments and as its flag's value; its shell words are then read one by one,
     so ``-c "API_TOKEN=${API_TOKEN} exec ..."`` is never a ``NAME=value`` or a literal.
     """
