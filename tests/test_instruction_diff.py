@@ -727,7 +727,7 @@ def test_front_matter_after_a_byte_order_mark_is_read(tmp_path: Path) -> None:
     _write(
         head,
         ".cursor/rules/a.mdc",
-        '﻿---\nglobs: "**/*"\nalwaysApply: true\ntools: Bash\n---\nBody.\n',
+        '\ufeff---\nglobs: "**/*"\nalwaysApply: true\ntools: Bash\n---\nBody.\n',
     )
     assert _classes(base, head) == ["scope_widened", "scope_widened", "tool_grant_changed"]
 
