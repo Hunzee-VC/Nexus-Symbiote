@@ -1422,6 +1422,16 @@ def test_container_context_variants(options, flag):
     assert launch.context.get(flag), launch.context
 
 
+def test_volume_sources_split_in_linear_time():
+    from nexus_symbiote.scanners.mcp_launch import _volume_source_end
+
+    def run(scale: int) -> None:
+        # Closed variables, then unterminated ones, before the only colon.
+        _volume_source_end("." + ("${a}" + "${") * (20_000 * scale) + ":/x")
+
+    assert scaling_ratio(run) < 10
+
+
 def test_a_named_volume_is_not_a_host_mount():
     options = ["--mount", "type=volume,source=data,target=/data,volume-opt=o=size=1g"]
     assert "host_mounts" not in analyze("docker", ["run", *options, IMAGE]).context

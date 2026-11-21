@@ -3113,14 +3113,16 @@ def _mount_fields(spec: str) -> dict[str, str]:
 
 def _volume_source_end(spec: str) -> int:
     """Where a -v source ends: the first colon outside a client ``${...}`` variable."""
-    index = 0
-    while index < len(spec):
-        if spec.startswith("${", index) and (close := spec.find("}", index)) >= 0:
-            index = close + 1
-        elif spec[index] == ":":
-            return index
-        else:
-            index += 1
+    # Each search starts past the last one, so the scan is linear in the spec.
+    index, colon = 0, spec.find(":")
+    while colon >= 0:
+        opened = spec.find("${", index, colon)
+        close = spec.find("}", opened) if opened >= 0 else -1
+        if close < 0:
+            return colon
+        index = close + 1
+        if colon < index:
+            colon = spec.find(":", index)
     return -1
 
 
