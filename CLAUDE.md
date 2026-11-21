@@ -29,6 +29,7 @@ src/nexus_symbiote/
   modes.py                             — Offline by default; live mode is opt-in
   reporting.py                         — Neutralized text and JSON gate reporting
   scanner_catalog.py                   — Built-in collector universe for coverage checks
+  text_poisoning.py                    — Deterministic O(N) text-poisoning and injection rules
   cli.py, live_cli.py, runtime_cli.py, supply_chain_cli.py — Click CLI entrypoints
 ```
 
@@ -39,7 +40,7 @@ Match CI by installing the hash-locked environment first:
 ```bash
 make install-locked   # hash-locked CI environment plus an editable install
 make quality          # ruff, format check, mypy strict, workflow and hygiene checks
-make test             # full pytest suite; `make coverage` enforces the CI floors
+make test             # full pytest suite, one worker per core; `make coverage` enforces the CI floors
 make check            # offline subset of the required CI checks
 ```
 

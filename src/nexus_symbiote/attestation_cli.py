@@ -34,7 +34,7 @@ from nexus_symbiote.utils.terminal import echo_line, json_text, write_cli_output
 
 MAX_SUBJECT_BYTES = 64 * 1024 * 1024
 MAX_AGE_DAYS = 36500
-_PURPOSES = ["generated", "reviewed"]
+_PURPOSES = ["generated", "reviewed", "policy"]
 _REVISION = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
 T = TypeVar("T")
 
@@ -46,7 +46,17 @@ class _AttestationFailure(click.ClickException):
         self.detail = detail
 
 
+class _AttestationGateError(_AttestationFailure):
+    exit_code = 3
+
+
 def _failure(operation: str, reason: str, detail: str) -> _AttestationFailure:
+    if operation == "verification" and reason not in {
+        "key-invalid",
+        "input-too-large",
+        "input-unreadable",
+    }:
+        return _AttestationGateError(operation, reason, detail)
     return _AttestationFailure(operation, reason, detail)
 
 
@@ -90,7 +100,7 @@ def _check_trust_anchors(keys: tuple[Path, ...], inputs: tuple[Path, ...]) -> No
     "--purpose",
     type=click.Choice(_PURPOSES),
     required=True,
-    help="generated: you produced SUBJECT; reviewed: you reviewed SUBJECT as a baseline.",
+    help="generated: you produced SUBJECT; reviewed: you reviewed SUBJECT as a baseline; policy: you approved SUBJECT as an operator policy.",
 )
 @click.option(
     "--out",

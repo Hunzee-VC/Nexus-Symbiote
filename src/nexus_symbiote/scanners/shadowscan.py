@@ -7,6 +7,7 @@ attestation occurs here. Report bytes remain a separate sensitive artifact.
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from collections import Counter, deque
 from dataclasses import dataclass, field, replace
@@ -14,27 +15,52 @@ from pathlib import Path
 from typing import Any
 
 from nexus_symbiote.core.aibom import AIBOM, DependencyEdge
+from nexus_symbiote.core.collection import CITED_EVIDENCE_CLAIM, IMPORTED_MODE
 from nexus_symbiote.core.enums import AssuranceLevel, RiskSeverity, TrustTier
 from nexus_symbiote.core.hashing import hash_canonical, parse_json_strict
 from nexus_symbiote.core.models import (
     AgentComponent,
     AIBOMMetadata,
     AnyComponent,
+    ClaimEvidence,
     CompletenessClaim,
     DiscoveryVerification,
+    IDEAgentComponent,
     MCPServerComponent,
     ModelComponent,
     RiskAssessment,
     ToolComponent,
 )
-from nexus_symbiote.scanners.base import Scanner, ScanResult
+from nexus_symbiote.scanners.base import Scanner, ScanResult, SourceBudget
+from nexus_symbiote.scanners.credential_files import credential_gap
 from nexus_symbiote.utils.confined import ConfinedCollection
+from nexus_symbiote.utils.secrets import redact_text
 from nexus_symbiote.utils.terminal import UNSAFE_TEXT
 
 MAX_REPORT_BYTES = 16 * 1024 * 1024
 MAX_FINDINGS = 10_000
 MAX_DEPENDENCIES = 10_000
-PROJECTION_PROFILE = "nexus-symbiote/shadowscan-projection/v4"
+MAX_MODEL_CITATIONS = 10_000
+MAX_CITED_PATH_CHARS = 256
+MAX_CITED_LINE_CHARS = 4_096
+# The redactor costs about a microsecond a character, so the lines it checks are bounded.
+MAX_REDACTED_CHARS = 1024 * 1024
+CITED_LINES_GAP = (
+    "ShadowScan cited lines exceed the text checked for credentials; the rest were not confirmed"
+)
+MAX_EVIDENCE_LOCATIONS = 16
+# The listed locations of one model as the inventory writes them: room for sixteen paths
+# of full length in ASCII, fewer when the writer escapes them, since a character of a
+# path can take twelve bytes there. One location always fits.
+MAX_LISTED_LOCATION_BYTES = MAX_EVIDENCE_LOCATIONS * (MAX_CITED_PATH_CHARS + 10)
+MAX_EVIDENCE_SIGNALS = 16
+# With the bounds above, the named models of one report stay under 6 MiB of inventory.
+MAX_NAMED_MODELS = 500
+# How many lines above a value the scan looks for the key that opens it.
+MAX_KEY_LOOKBACK = 8
+PROJECTION_PROFILE = "nexus-symbiote/shadowscan-projection/v6"
+EVIDENCE_CLAIM = CITED_EVIDENCE_CLAIM
+MODEL_REF_PREFIX = "shadowscan:model:"
 CONTENT_PROFILE = "nexus-symbiote/shadowscan-content/v1"
 # The fields that only record when a collection run happened. The list is closed:
 # any other field, including one a later ShadowScan release adds, stays content,
@@ -51,9 +77,99 @@ REPORT_PATHS = (".shadowscan/report.json", "shadowscan-report.json", "shadowscan
 _ALLOWED_SURFACES = frozenset(
     {"code", "identity", "gateway", "lowcode", "saas", "cloud", "endpoint", "network", "runtime"}
 )
-_PROJECTED_KINDS = frozenset({"agent", "mcp-server", "local-model", "model"})
+# Other ShadowScan connectors use these kinds for a lockfile, a platform setting or a
+# registry skill, so each is projected for one resource type only.
+_RESOURCE_BOUND_KINDS = {"agent-config": "coding-agent-config", "framework-usage": "project"}
+_PROJECTED_KINDS = frozenset(
+    {"agent", "mcp-server", "local-model", "model", *_RESOURCE_BOUND_KINDS}
+)
+# The kinds of ShadowScan 0.1.4. An unmapped entry is named from this list and never by
+# the report's own text.
+_SOURCE_KINDS = frozenset(
+    {
+        "agent",
+        "agent-config",
+        "ai-app",
+        "bot-app",
+        "cloud-resource",
+        "framework-usage",
+        "gateway-caller",
+        "iam-grant",
+        "infra",
+        "local-model",
+        "mcp-server",
+        "network-contact",
+        "oauth-grant",
+        "runtime-process",
+        "secret",
+        "service-identity",
+        "token",
+        "workflow",
+    }
+)
 _RISK_LEVELS = frozenset(level.value for level in RiskSeverity)
+UNMAPPED_ENTRIES_GAP = "ShadowScan report contains unmapped entries"
 UNRECOGNIZED_VALUES_GAP = "ShadowScan report contains values the projection does not recognize"
+# A source-reported label such as ``model:provider.aws-bedrock``: short parts only.
+_MODEL_SIGNAL = re.compile(r"model:[a-z0-9]{1,24}(?:[.-][a-z0-9]{1,24}){0,3}", re.ASCII)
+_MODEL_LITERAL = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,126}[A-Za-z0-9]", re.ASCII)
+# An Amazon Bedrock resource name states its kind after the account, and a report can
+# label any of them as model evidence. Only these kinds identify a model.
+_BEDROCK_NAME = re.compile(r"arn:aws[a-z-]{0,16}:bedrock:", re.ASCII | re.IGNORECASE)
+_BEDROCK_MODEL_NAME = re.compile(
+    r"arn:aws[a-z-]{0,16}:bedrock:[a-z0-9-]{0,32}:[0-9]{0,12}:"
+    r"(?:foundation-model|(?:application-)?inference-profile|provisioned-model"
+    r"|custom-model|imported-model)/",
+    re.ASCII,
+)
+_CITED_LINE = re.compile(r"[1-9][0-9]{0,6}", re.ASCII)
+# A JSON file with one of these top-level keys is a bill of materials or a scan report
+# (CycloneDX, SPDX 2 and 3, SARIF, a ShadowScan report, a native inventory or risk report).
+_RESTATED_KEYS = frozenset({"bomFormat", "spdxVersion", "@graph", "runs", "findings", "components"})
+# In a top-level array only the names no ordinary file uses count: a row of a benchmark
+# matrix has `runs`, and a list of screens has `components`.
+_RESTATED_IN_ARRAY = frozenset({"bomFormat", "spdxVersion", "@graph"})
+# One token of text that starts as JSON: one of those names written as a key (group 1
+# for the three above, group 2 for the others), any other string, a bracket (groups 3
+# and 4), or a run of other characters.
+_LOOSE_JSON = re.compile(
+    rb'(?:"(?:(bomFormat|spdxVersion|@graph)|(runs|findings|components))"\s*+:)'
+    rb'|"(?:[^"\\\n]|\\.)*+"?|([{\[])|([}\]])|[^\s"{}\[\]]++',
+    re.ASCII,
+)
+# A key and its mark at the start of a line: `password:`, `"credentials":`, `API_KEY=`,
+# `- token:`, `export TOKEN=`, `{"token":`. Group 1 is the key with its mark, group 2 the mark.
+_KEY = re.compile(
+    r"""\s*+(?:[\[({]\s*+)?(?:[-*]\s++)?(?:(?:export|const|let|var|val|final)\s++){0,2}+"""
+    r"""(["']?[\w./@-]{1,128}+["']?\s*+([:=]{1,2}+>?+))"""
+)
+# What may follow the mark on a line that opens a value written below it: a YAML anchor
+# or tag, a block indicator, an opening bracket or a shell line continuation, and a comment.
+_OPENS_BELOW = re.compile(
+    r"\s*+(?:[&!][^\s#]*+\s*+){0,2}+(?:[>|][-+0-9]{0,2}+|[\[({\\])?\s*+(?:(?:#|//).*+)?"
+)
+# A line that only opens a bracket, as `[` below `"password":`.
+_BRACKET_LINE = re.compile(r"\s*+[\[({]++\s*+")
+# A line that starts or opens a bracket, as `{"values": [`: a key it opens is nested in
+# the value of a key above it, so the search for that key goes on.
+_NESTED_LINE = re.compile(r"\s*+[\[({].*+|(?:(?!#|//).)*?[\[({]\s*+(?:(?:#|//).*+)?")
+# After `=`, what a value that ends in base64 padding leaves on its line.
+_PADDING_TAIL = re.compile(r"""["'\],\s]*+""")
+_COMMENT_LINE = re.compile(r"\s*+(?:#|//)")
+_WHITE_SPACE = re.compile(r"\s")
+
+
+@dataclass(frozen=True)
+class ModelCitation:
+    """One report evidence entry that names a model identifier at a file and line.
+
+    Every field is the report's assertion until a scan reads the cited line itself.
+    """
+
+    signal: str
+    path: str
+    line: int
+    literal: str
 
 
 @dataclass
@@ -66,6 +182,8 @@ class ImportedReport:
     source_status: str = "unknown"
     unmapped_count: int = 0
     unmapped_indexes: list[int] = field(default_factory=list)
+    # Unmapped entries by the label the projection gives them, never the report's text.
+    unmapped_kinds: Counter[str] = field(default_factory=Counter)
     limitations: list[str] = field(default_factory=list)
     unrecognized: Counter[str] = field(default_factory=Counter)
     # Signature-verification outcome for this report, recorded in the BOM.
@@ -75,6 +193,11 @@ class ImportedReport:
     # read from outside a project root; ``None`` for parsed bytes. Never an
     # absolute local path: that would leak the operator's filesystem layout.
     source_path: str | None = None
+    model_citations: list[ModelCitation] = field(default_factory=list)
+    # Model evidence that names no usable file, line and identifier, or lies past the bound.
+    uncited_model_evidence: int = 0
+    # Model evidence entries whose identifier and label the redactor has read.
+    checked_model_evidence: int = 0
 
     def with_verification(self, verification: DiscoveryVerification) -> ImportedReport:
         """Return this report carrying a verified discovery record.
@@ -184,6 +307,15 @@ def _unrecognized(
     return found
 
 
+def _unmapped_label(kind: str) -> str:
+    """How an unmapped entry is named: a constant of this module, whatever the report says."""
+    if kind in _PROJECTED_KINDS:
+        return kind + " (unprojected form)"
+    if kind in _SOURCE_KINDS:
+        return kind
+    return "unrecognized kind" if kind else "no kind"
+
+
 def _clean_binding(value: Any) -> str | None:
     """One binding value from a report, or ``None`` when it is absent or unsafe.
 
@@ -199,6 +331,199 @@ def _clean_binding(value: Any) -> str | None:
     if UNSAFE_TEXT.search(value):
         return None
     return value
+
+
+def _cited_path(value: str) -> str | None:
+    """A cited file as a project-relative POSIX path, or ``None`` when it is not one."""
+    if len(value) > MAX_CITED_PATH_CHARS or value.startswith("/") or "\\" in value:
+        return None
+    if _clean_binding(value) is None or any(part in {"", ".", ".."} for part in value.split("/")):
+        return None
+    return value
+
+
+def _model_citation(item: dict[str, Any]) -> ModelCitation | None:
+    """The citation a model evidence entry carries, or ``None`` when it cannot be re-read.
+
+    The identifier must be the entry's own ``attributes.value``, in the characters model
+    identifiers use: a report cannot make a scan record text the report does not state.
+    An Amazon Bedrock resource name must be a model's: a guardrail or an agent that a
+    report labels as model evidence is not named as one. ``_reads_as_credential`` is the
+    other half of the check, kept apart because only it costs redactor work.
+    """
+    signal, location, attributes = item["signal"], item.get("location"), item.get("attributes")
+    literal = attributes.get("value") if isinstance(attributes, dict) else None
+    if not isinstance(location, str) or not isinstance(literal, str):
+        return None
+    cited, _, line = location.rpartition(":")
+    path = _cited_path(cited)
+    if (
+        path is None
+        or not _CITED_LINE.fullmatch(line)
+        or not _MODEL_SIGNAL.fullmatch(signal)
+        or not _MODEL_LITERAL.fullmatch(literal)
+        or not any(char.isalpha() for char in literal)
+        or (_BEDROCK_NAME.match(literal) and not _BEDROCK_MODEL_NAME.match(literal))
+    ):
+        return None
+    return ModelCitation(signal, path, int(line), literal)
+
+
+def _reads_as_credential(citation: ModelCitation) -> bool:
+    """Whether the redactor changes the identifier or the signal label of a citation."""
+    return (
+        redact_text(citation.literal) != citation.literal
+        or redact_text(citation.signal) != citation.signal
+    )
+
+
+def names_whole_identifier(line: str, literal: str) -> bool:
+    """Whether ``literal`` occurs in ``line`` as a complete identifier, not inside a longer one.
+
+    Identifier text may not continue it on either side. ``/`` and ``:`` before it are
+    namespace separators (``anthropic/<model>``, ``openai:<model>``); after it they
+    continue the name (``<org>/<model>``, ``<model>:<tag>``).
+    """
+    whole = rf"(?<![\w.@+-]){re.escape(literal)}(?![\w@+/-]|[.:]\w)"
+    return re.search(whole, line) is not None
+
+
+def _restated_in_tokens(text: bytes) -> bool:
+    """The same test as below on text that is not one JSON value, read token by token."""
+    depth, outer = 0, b""
+    for token in _LOOSE_JSON.finditer(text):
+        distinct, generic, opening, closing = token.groups()
+        if opening:
+            outer = outer[:depth] + opening if depth < 2 else outer
+            depth += 1
+        elif not depth:
+            # Text after a value that does not open another: this is no run of documents.
+            return False
+        elif closing:
+            depth -= 1
+        elif ((distinct or generic) and (depth, outer[:depth]) == (1, b"{")) or (
+            distinct and (depth, outer[:depth]) == (2, b"[{")
+        ):
+            return True
+    return False
+
+
+def _restates_a_scan(raw: bytes) -> bool:
+    """Whether a file is a bill of materials or a scan report, by where its JSON names a key.
+
+    It is one when its top-level object has one of the keys above, or an object directly
+    in its top-level array has one of the three that only a bill of materials uses. Such
+    a file repeats the identifiers a scan found. It is not where the repository states
+    them, so an inventory or report kept in the tree cannot keep a model named. Text that
+    starts as JSON and is not one JSON value is read for the same keys in the same
+    places, so a duplicate key, a trailing comma, a comment or a second document does not
+    make a report confirm what it restates, and a key nested deeper in an ordinary file
+    does not make that file a report.
+    """
+    text = raw.lstrip(b"\xef\xbb\xbf \t\r\n")
+    if not text.startswith((b"{", b"[")):
+        return False
+    if len(text) > MAX_REPORT_BYTES:
+        return _restated_in_tokens(text)
+    try:
+        data = json.loads(text)
+    except (ValueError, RecursionError):
+        return _restated_in_tokens(text)
+    if isinstance(data, list):
+        return any(
+            isinstance(item, dict) and not _RESTATED_IN_ARRAY.isdisjoint(item) for item in data
+        )
+    return isinstance(data, dict) and not _RESTATED_KEYS.isdisjoint(data)
+
+
+def _cited_lines(files: ConfinedCollection, budget: SourceBudget, path: str) -> list[str]:
+    """The lines of a cited file that may confirm an identifier; none when it is not read.
+
+    Not read: a file named as holding credentials, by its own name or its link target,
+    so that no line of it reaches the inventory; a file over the file limit; a bill of
+    materials or scan report, which the report itself is under any name; and text that
+    is not UTF-8.
+    """
+    found = None if budget.exhausted else files.regular_file(path)
+    if (
+        found is None
+        or credential_gap(path, found[0].as_posix()) is not None
+        or found[1] > files.max_file_bytes
+        or not budget.admit(found[1], path)
+    ):
+        return []
+    raw = files.read_bytes(path, missing_ok=True)
+    if raw is None or _restates_a_scan(raw):
+        return []
+    try:
+        return raw.decode("utf-8").split("\n")
+    except UnicodeDecodeError:
+        return []
+
+
+def _line_parts(line: str) -> tuple[str | None, str | None]:
+    """The key with which a line opens a value written below it, and the one value it holds.
+
+    `password: >-`, `"credentials": [` and `token =  # rotated` open a value. `gpt-4o`,
+    `- "gpt-4o",` and `openai:gpt-4o` are one value. A line with a key and a value of its
+    own (`model: x`, `MODEL:=x`) and a line of several words are neither. `NAME=` with
+    nothing after it is both: an empty assignment, or a value that ends in base64 padding.
+    """
+    token: str | None = line.strip().strip("\"',-[] \t")
+    if not token or _WHITE_SPACE.search(token):
+        token = None
+    found = _KEY.match(line)
+    if found is not None:
+        mark, rest = found.group(2), line[found.end() :]
+        quoted = found.group(1)[: -len(mark)].rstrip().endswith(('"', "'"))
+        if mark in {"=", "=="} and _PADDING_TAIL.fullmatch(rest) is not None:
+            return found.group(1), token
+        opens = _OPENS_BELOW.fullmatch(rest) is not None
+        if not opens and token is not None and line.lstrip()[:1] in "[({":
+            # A compact entry such as `{"type":"basic"},` is one value, not a key line.
+            return None, token
+        if "=" in mark or quoted or not rest or rest[0].isspace():
+            return (found.group(1) if opens else None), None
+    return None, token
+
+
+def _credential_readings(
+    lines: list[str], index: int, parts: dict[int, tuple[str | None, str | None]]
+) -> list[str]:
+    """The texts in whose last line the redactor must leave a cited identifier standing.
+
+    A line with a key of its own, or of several words, is read alone. A line that is one
+    value is read below the line before it, as a value follows `Authorization: Bearer`. It
+    is also read as the value of each key that opens it within ``MAX_KEY_LOOKBACK`` lines,
+    with blank lines, comments, lines that only open a bracket, keys nested in a bracket
+    (`{"values": [`) and other single values in between: after `password: >-`,
+    `password: &anchor`, `export TOKEN=\\`, `"credentials": [` or a key and a comment the
+    redactor would take the block indicator, the bracket or the comment for the value. What
+    the lines hold decides this, not which identifier a report cites there.
+    """
+
+    def kind(number: int) -> tuple[str | None, str | None]:
+        if number not in parts:
+            parts[number] = _line_parts(lines[number])
+        return parts[number]
+
+    line = lines[index]
+    token = kind(index)[1]
+    if token is None:
+        return [f"\n{line}"]
+    above = lines[index - 1][-MAX_CITED_LINE_CHARS:] if index else ""
+    keys = []
+    for back in range(index - 1, max(index - 1 - MAX_KEY_LOOKBACK, -1), -1):
+        other = lines[back]
+        if not other.strip() or _COMMENT_LINE.match(other) or _BRACKET_LINE.fullmatch(other):
+            continue
+        key, value = kind(back)
+        if key is not None:
+            keys.append(key)
+        if value is None and (key is None or _NESTED_LINE.fullmatch(other) is None):
+            break
+    quoted = token.replace("\\", "\\\\").replace('"', '\\"')
+    return [f"{above}\n{line}", *(f'{key}\n"{quoted}"' for key in keys)]
 
 
 def _report_time(value: Any) -> str | None:
@@ -318,6 +643,9 @@ def _make_component(
         cdx_mcp and kind not in {"", "mcp-server"}
     ):
         return None
+    bound = _RESOURCE_BOUND_KINDS.get(kind)
+    if bound is not None and resource_type != bound:
+        return None
     is_mcp_tool = kind == "mcp-server" and resource_type == "mcp-tool"
     identity_hash = _short_hash(source_id)
     ref = "shadowscan:" + identity_hash
@@ -348,13 +676,68 @@ def _make_component(
     if is_mcp_tool:
         props["shadowscan:resource-type"] = "mcp-tool"
         return ToolComponent(**common)
+    if bound is not None:
+        props["shadowscan:resource-type"] = bound
     if kind == "mcp-server" or cdx_mcp:
         return MCPServerComponent(**common)
     if kind in {"local-model", "model"} or cdx_model:
         return ModelComponent(**common)
-    if kind == "agent":
+    if kind == "agent-config":
+        return IDEAgentComponent(**common)
+    # One finding id moves between framework-usage and agent as ShadowScan sees agent
+    # indicators, so both are one component type and a promotion is not a new component.
+    if kind in {"agent", "framework-usage"}:
         return AgentComponent(autonomy_level=None, **common)
     return None
+
+
+def _model_component(
+    literal: str, locations: set[tuple[str, int]], signals: set[str]
+) -> ModelComponent:
+    listed: list[str] = []
+    written = 0
+    for path, line in sorted(locations)[:MAX_EVIDENCE_LOCATIONS]:
+        location = f"{path}:{line}"
+        written += len(json.dumps(location))
+        if written > MAX_LISTED_LOCATION_BYTES:
+            break
+        listed.append(location)
+    labels = sorted(signals)[:MAX_EVIDENCE_SIGNALS]
+    # No source_path: for a model that names the weight file, and the cited file is not one.
+    return ModelComponent(
+        bom_ref=MODEL_REF_PREFIX + _short_hash(literal),
+        name=literal,
+        trust_tier=TrustTier.UNKNOWN,
+        assurance_level=AssuranceLevel.DECLARED,
+        properties={
+            "collection_mode": IMPORTED_MODE,
+            "shadowscan:projection-profile": PROJECTION_PROFILE,
+            "shadowscan:kind": "model",
+            "shadowscan:signals": labels,
+            **(
+                {"shadowscan:signals-unlisted": len(signals) - len(labels)}
+                if len(signals) > len(labels)
+                else {}
+            ),
+            **(
+                {"shadowscan:evidence-unlisted": len(locations) - len(listed)}
+                if len(locations) > len(listed)
+                else {}
+            ),
+        },
+        claims={
+            # An identifier in a source line is a declaration, as a hosted-model alias in
+            # agent.yaml is: reading it measures no model, so the import raises no assurance.
+            EVIDENCE_CLAIM: ClaimEvidence(
+                assurance=AssuranceLevel.DECLARED,
+                method="cited-line-reread",
+                scope="repository",
+                collector="shadowscan",
+                locator=listed[0],
+                evidence_refs=listed,
+            )
+        },
+    )
 
 
 class ShadowScanImporter(Scanner):
@@ -364,6 +747,7 @@ class ShadowScanImporter(Scanner):
 
     def scan(self, project_root: Path) -> ScanResult:
         result = ScanResult(scanner_name=self.name)
+        report: ImportedReport | None = None
         with self._collection(
             project_root,
             result,
@@ -417,8 +801,12 @@ class ShadowScanImporter(Scanner):
                 result.discovery_verification = imported.discovery_verification
                 result.surfaces_scanned.extend(("shadowscan:report", relative))
                 result.source_projection_limitations = list(imported.limitations)
+                report = imported
                 if imported.unmapped_count:
-                    result.surfaces_excluded.append("ShadowScan report contains unmapped entries")
+                    # Kinds without counts: the gap changes only when the set of kinds does.
+                    result.surfaces_excluded.append(
+                        f"{UNMAPPED_ENTRIES_GAP}: {', '.join(sorted(imported.unmapped_kinds))}"
+                    )
                 if imported.unrecognized:
                     result.surfaces_excluded.append(UNRECOGNIZED_VALUES_GAP)
                 if imported.source_format == "shadowscan-cyclonedx":
@@ -430,6 +818,8 @@ class ShadowScanImporter(Scanner):
                         "ShadowScan source report is incomplete or has unknown status"
                     )
                 break
+        if report is not None:
+            self._name_cited_models(project_root, report, result)
         if (
             not result.source_report_digest
             and not result.scan_failures
@@ -437,6 +827,76 @@ class ShadowScanImporter(Scanner):
         ):
             result.surfaces_scanned.append("shadowscan-report (no report found)")
         return result
+
+    def _name_cited_models(
+        self, project_root: Path, imported: ImportedReport, result: ScanResult
+    ) -> None:
+        """Name the models whose identifier this scan reads at the line the report cites.
+
+        The report says where an identifier is; the name recorded is what the scan read
+        there, as a whole identifier outside any text the redactor withholds. A cited
+        file is read once with the confined reader under the operator's source limit.
+        Evidence the scan could not confirm stays in the report and is counted.
+        """
+        unconfirmed = imported.uncited_model_evidence
+        by_path: dict[str, list[ModelCitation]] = {}
+        for citation in imported.model_citations:
+            by_path.setdefault(citation.path, []).append(citation)
+        locations: dict[str, set[tuple[str, int]]] = {}
+        signals: dict[str, set[str]] = {}
+        budget = SourceBudget("ShadowScan cited files", result)
+        unchecked = MAX_REDACTED_CHARS
+        # A file the report cites and the scan does not read is evidence left unconfirmed,
+        # counted below; it is not a failure of this collection.
+        with ConfinedCollection(
+            project_root, [], exclude_paths=self._exclude_paths, max_total_bytes=budget.bound
+        ) as files:
+            for path in sorted(by_path):
+                lines = _cited_lines(files, budget, path)
+                redacted: dict[int, tuple[str, ...]] = {}
+                parts: dict[int, tuple[str | None, str | None]] = {}
+                for citation in by_path[path]:
+                    index = citation.line - 1
+                    line = lines[index] if index < len(lines) else ""
+                    held = len(line) <= MAX_CITED_LINE_CHARS and names_whole_identifier(
+                        line, citation.literal
+                    )
+                    # A line that already holds an identifier is checked once, whichever
+                    # identifiers are cited there and in whatever order: what the redactor
+                    # reads depends on the file alone. Its text is what the bound counts.
+                    if held and citation.line not in redacted and unchecked >= 0:
+                        texts = _credential_readings(lines, index, parts)
+                        unchecked -= sum(map(len, texts)) - len(texts)
+                        if unchecked < 0:
+                            result.scan_failures.append(CITED_LINES_GAP)
+                        else:
+                            redacted[citation.line] = tuple(
+                                text.rpartition("\n")[2] if "\n" in text else ""
+                                for text in map(redact_text, texts)
+                            )
+                    if held and all(
+                        names_whole_identifier(text, citation.literal)
+                        for text in redacted.get(citation.line, ("",))
+                    ):
+                        locations.setdefault(citation.literal, set()).add((path, citation.line))
+                        signals.setdefault(citation.literal, set()).add(citation.signal)
+                    else:
+                        unconfirmed += 1
+        named = sorted(locations)[:MAX_NAMED_MODELS]
+        result.components.extend(
+            _model_component(literal, locations[literal], signals[literal]) for literal in named
+        )
+        limitations = result.source_projection_limitations
+        if unconfirmed and limitations is not None:
+            limitations.append(
+                f"{unconfirmed} model evidence entries were not confirmed at a cited file and "
+                "line; they are not named"
+            )
+        if len(locations) > len(named) and limitations is not None:
+            limitations.append(
+                f"{len(locations) - len(named)} confirmed model identifiers past the bound of "
+                f"{MAX_NAMED_MODELS} are not named"
+            )
 
     def import_report(self, report_path: Path, root: Path | None = None) -> ImportedReport:
         """Import components together with mandatory coverage and provenance."""
@@ -494,8 +954,12 @@ class ShadowScanImporter(Scanner):
             "Names, detailed evidence, and unmapped relationships remain in the source report"
         )
         if result.unmapped_count:
+            kinds = "; ".join(
+                f"{label}: {count}" for label, count in sorted(result.unmapped_kinds.items())
+            )
             result.limitations.append(
-                f"{result.unmapped_count} source entries were not mapped into BOM components"
+                f"{result.unmapped_count} source entries were not mapped into BOM components "
+                f"({kinds})"
             )
         for value, count in sorted(result.unrecognized.items()):
             result.limitations.append(
@@ -580,8 +1044,23 @@ class ShadowScanImporter(Scanner):
             if comp is None:
                 result.unmapped_count += 1
                 result.unmapped_indexes.append(index)
+                result.unmapped_kinds[_unmapped_label(kind)] += 1
             else:
                 result.components.append(comp)
+            evidence = finding.get("evidence")
+            for item in evidence if isinstance(evidence, list) else ():
+                signal = item.get("signal") if isinstance(item, dict) else None
+                if not isinstance(signal, str) or not signal.startswith("model:"):
+                    continue
+                # Every entry the redactor reads counts, kept or not, so its work is
+                # bounded; an entry without a usable location or identifier costs nothing.
+                citation = _model_citation(item)
+                if citation is not None and result.checked_model_evidence < MAX_MODEL_CITATIONS:
+                    result.checked_model_evidence += 1
+                    if not _reads_as_credential(citation):
+                        result.model_citations.append(citation)
+                        continue
+                result.uncited_model_evidence += 1
 
     @staticmethod
     def _check_native_breakdowns(summary: dict[str, Any], findings: list[Any]) -> None:
@@ -780,6 +1259,7 @@ class ShadowScanImporter(Scanner):
             if comp is None:
                 result.unmapped_count += 1
                 result.unmapped_indexes.append(index)
+                result.unmapped_kinds[_unmapped_label(kind)] += 1
             else:
                 result.components.append(comp)
                 mapped_refs[ref] = comp.bom_ref

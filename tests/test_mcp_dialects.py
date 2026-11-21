@@ -116,12 +116,11 @@ def test_jsonc_crlf_line_comments_are_read(tmp_path):
     assert not result.scan_failures and set(servers(result)) == {"safe"}
 
 
-def test_unparsed_client_with_ambiguous_line_ends_is_still_a_gap(tmp_path):
+def test_zed_settings_with_ambiguous_line_ends_are_a_failure(tmp_path):
     text = '{"theme": "x" // c\r, "context_servers": {"evil": {}}\n}'
     result = scan(tmp_path, {".zed/settings.json": text})
-    assert result.surfaces_excluded == [
-        ".zed/settings.json: MCP client configuration not inventoried"
-    ]
+    assert result.scan_failures == [".zed/settings.json: invalid JSON or duplicate keys"]
+    assert not servers(result) and not result.surfaces_excluded
 
 
 @pytest.mark.parametrize("unit", ["/*", "//\n", '"a",'])
@@ -218,24 +217,11 @@ def test_other_project_client_files_are_inventoried(tmp_path, path, host):
     )
 
 
-@pytest.mark.parametrize(
-    "files,expected",
-    [
-        ({".zed/settings.json": '{"context_servers": {"x": {}}}'}, ".zed/settings.json"),
-        ({"opencode.json": '{"mcp": {"x": {"type": "local"}}}'}, "opencode.json"),
-        ({".continue/mcpServers/server.yaml": "name: x"}, ".continue/mcpServers"),
-        ({".junie/mcp/mcp.json": "{}"}, ".junie/mcp/mcp.json"),
-        ({".zed/settings.json": "{not json"}, ".zed/settings.json"),
-    ],
-)
-def test_recognised_client_files_that_are_not_parsed_are_gaps(tmp_path, files, expected):
-    result = scan(tmp_path, files)
-    assert result.surfaces_excluded == [f"{expected}: MCP client configuration not inventoried"]
-
-
-def test_unrelated_editor_settings_are_not_gaps(tmp_path):
+def test_editor_settings_without_servers_are_scanned_and_create_no_client(tmp_path):
     result = scan(tmp_path, {".zed/settings.json": '{"tab_size": 2}', "opencode.json": "{}"})
-    assert not result.surfaces_excluded
+    assert not result.surfaces_excluded and not result.scan_failures
+    assert not result.components
+    assert result.surfaces_scanned == [".zed/settings.json", "opencode.json"]
 
 
 @pytest.mark.parametrize(

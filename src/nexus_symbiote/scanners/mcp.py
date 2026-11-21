@@ -2,17 +2,21 @@
 
 Discovers MCP server configurations in the project-level client files listed in
 ``MCP_DIALECTS`` (Claude Code, Claude Desktop, Cursor, VS Code, Gemini CLI, Roo Code,
-Kiro, Amazon Q, Windsurf, Cline and Codex), in the configuration names of
-``MCP_CONFIG_NAMES`` anywhere below the root, and MCP server source written in the
-supported SDK forms. Each launch command is classified without being executed
-(``scanners/mcp_launch.py``); declared tools are fingerprinted; unpinned packages,
-redirected package sources, launch context and endpoint transport are reported.
-Client files that are recognised but not parsed, and launchers or endpoints that
-cannot be classified, are coverage gaps rather than silence.
+Kiro, Amazon Q, Windsurf, Cline, Codex, Zed, opencode, Continue and Junie), in the
+configuration names of ``MCP_CONFIG_NAMES`` anywhere below the root, and MCP server
+source written in the supported SDK forms. Each client's own server shape is
+normalised to one form before parsing (``_normalized_server``), so every launch
+command is classified without being executed (``scanners/mcp_launch.py``) and every
+environment value is redacted the same way; declared tools are fingerprinted;
+unpinned packages, redirected package sources, launch context and endpoint transport
+are reported. Servers whose launch a client file does not hold, and launchers or
+endpoints that cannot be classified, are coverage gaps rather than silence.
 """
 
 from __future__ import annotations
 
+import bisect
+import copy
 import hmac
 import ipaddress
 import json
@@ -21,7 +25,9 @@ import os
 import posixpath
 import re
 import shlex
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from array import array
+from bisect import bisect_left
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, replace
 from itertools import pairwise
 from pathlib import Path
@@ -58,6 +64,17 @@ from nexus_symbiote.scanners.base import (
     SourceBudget,
     sanitized_origin,
     source_collection_bytes,
+)
+from nexus_symbiote.scanners.mcp_credentials import (
+    NAMED_CLASS,
+    SHAPE_CLASS,
+    Hit,
+    assignment_hits,
+    credential_name,
+    endpoint_hits,
+    literal_value,
+    strongest,
+    value_hits,
 )
 from nexus_symbiote.scanners.mcp_launch import (
     NPM_CONFIG_FLAGS,
@@ -101,6 +118,17 @@ class McpDialect:
     url_transport: str | None = None
     # Settings that hold one command line the client starts as the server ``mcp``.
     server_commands: tuple[tuple[str, ...], ...] = ()
+    # The client's own server shape, which ``_normalized_server`` reads into the
+    # common form; ``map`` is a map of server objects in that form already.
+    shape: str = "map"
+    # Set on a directory the client reads one server file at a time: the suffixes of
+    # the files it reads there, each a document in the dialect's syntax.
+    members: tuple[str, ...] = ()
+    # The suffixes of files below such a directory that the client may read and the
+    # collector does not read there: in a deeper directory, or not among ``members``.
+    member_gaps: tuple[str, ...] = ()
+    # The client whose file this is, when no host directory or file name names it.
+    host: str | None = None
 
 
 # Every MCP configuration file is read for both server maps, whichever its client
@@ -127,8 +155,41 @@ MCP_DIALECTS = (
     McpDialect(".windsurf/mcp.json", "json", _SERVER_MAPS),
     McpDialect(".cline/mcp.json", "json", _SERVER_MAPS),
     McpDialect(".codex/config.toml", "toml", ("mcp_servers",)),
+    McpDialect(".zed/settings.json", "jsonc", ("context_servers",), shape="zed", host="zed"),
+    # opencode reads comments and trailing commas in both names.
+    McpDialect("opencode.json", "jsonc", ("mcp",), shape="opencode"),
+    McpDialect("opencode.jsonc", "jsonc", ("mcp",), shape="opencode"),
+    McpDialect(".continue/config.yaml", "yaml", ("mcpServers",), shape="continue", host="continue"),
+    McpDialect(
+        ".continue/mcpServers",
+        "yaml",
+        ("mcpServers",),
+        shape="continue",
+        members=(".yaml", ".yml"),
+        member_gaps=(".json", ".yaml", ".yml"),
+        host="continue",
+    ),
+    # Continue's local agent configurations, each in the config.yaml format; the
+    # assistants and configs directories are the names it also reads them from.
+    *(
+        McpDialect(
+            f".continue/{name}",
+            "yaml",
+            ("mcpServers",),
+            shape="continue",
+            members=(".yaml", ".yml"),
+            member_gaps=(".yaml", ".yml"),
+            host="continue",
+        )
+        for name in ("agents", "assistants", "configs")
+    ),
+    McpDialect(".junie/mcp/mcp.json", "json", _SERVER_MAPS, host="junie"),
+    # Continue merges a workspace .continuerc.json onto its global config.json, whose
+    # experimental.modelContextProtocolServers the collector does not read: a gap.
+    McpDialect(".continuerc.json", "jsonc", (), shape="continuerc", host="continue"),
 )
-MCP_CONFIG_FILES = [dialect.path for dialect in MCP_DIALECTS]
+MCP_CONFIG_FILES = [dialect.path for dialect in MCP_DIALECTS if not dialect.members]
+MCP_CONFIG_DIRECTORIES = [dialect.path for dialect in MCP_DIALECTS if dialect.members]
 _ROOT_CLIENT_FILES = frozenset(MCP_CONFIG_FILES)
 
 # The same names below the root: a package's own configuration, and the files
@@ -162,36 +223,61 @@ _CLIENTS_BY_NAME = {
     ".mcp.json": "claude-code",
     "claude_desktop_config.json": "claude-desktop",
     "cline_mcp_settings.json": "cline",
+    "opencode.json": "opencode",
+    "opencode.jsonc": "opencode",
 }
 _FOLDED_CONFIG_NAMES = {fold_name(name): name for name in MCP_CONFIG_NAMES}
 _FOLDED_HOST_DIRECTORIES = {fold_name(name): name for name in _HOST_DIRECTORIES}
 # Longest first, so the first match is the dialect _template picks for the exact spelling.
 _FOLDED_TEMPLATES = sorted(
     (
-        (tuple(fold_name(part) for part in dialect.path.split("/")), dialect.path.split("/"))
+        (
+            tuple(fold_name(part) for part in dialect.path.split("/")),
+            dialect.path.split("/"),
+            dialect.members,
+        )
         for dialect in MCP_DIALECTS
     ),
     key=lambda template: -len(template[0]),
 )
+# Files below a server directory that the client does not read there, or whose reading
+# there is not confirmed, are gaps rather than silence.
+_DIRECTORY_DIALECTS = {
+    tuple(fold_name(part) for part in dialect.path.split("/")): dialect
+    for dialect in MCP_DIALECTS
+    if dialect.members
+}
+_DIRECTORY_GAP = "file below an MCP server directory that the collector does not read there"
 
 
 def _client_spelling(path: Path) -> str | None:
     """The client file a host opens as the walked ``path`` on a case-insensitive file
     system, or ``None`` when it is none the collector reads.
 
-    That is a name that folds to one of ``MCP_CONFIG_NAMES``, or a dialect path such
-    as ``.gemini/settings.json``, at the root or nested as :func:`_template` reads it. The dialect path it ends in, the host directories
-    just above a name that ends none, and any host directory above a name that does not
-    name its client take the spelling the collector reads: they decide the dialect,
-    launch directory and client of the exact spelling (:func:`_template`,
-    :func:`_launch_directory`, ``_detect_host_from_config``).
+    That is a name that folds to one of ``MCP_CONFIG_NAMES``, a dialect path such as
+    ``.gemini/settings.json``, or a member of a server directory such as
+    ``.continue/mcpServers/x.yaml``, at the root or nested as :func:`_template` reads
+    it. The dialect path it ends in, the host directories just above a name that ends
+    none, and any host directory above a name that does not name its client take the
+    spelling the collector reads: they decide the dialect, launch directory and client
+    of the exact spelling (:func:`_template`, :func:`_launch_directory`,
+    ``_detect_host_from_config``). A member keeps its own name: the client reads every
+    file of the suffix.
     """
     parts = list(path.parts)
     folded = [fold_name(part) for part in parts]
     name = _FOLDED_CONFIG_NAMES.get(folded[-1])
-    for template, spelling in _FOLDED_TEMPLATES:
+    for template, spelling, members in _FOLDED_TEMPLATES:
         size = len(template)
-        if size <= len(parts) and tuple(folded[-size:]) == template:
+        if members:
+            if (
+                size < len(parts)
+                and tuple(folded[-size - 1 : -1]) == template
+                and folded[-1].endswith(members)
+            ):
+                parts[-size - 1 : -1] = spelling
+                break
+        elif size <= len(parts) and tuple(folded[-size:]) == template:
             parts[-size:] = spelling
             break
     else:
@@ -209,40 +295,95 @@ def _client_spelling(path: Path) -> str | None:
     return "/".join(parts)
 
 
-def _linked_client_files(files: ConfinedCollection, links: list[Path]) -> list[Path]:
-    """Client files a host opens through a directory symlink that the walk met.
+def _directory_gap(path: Path) -> bool:
+    """Whether the walked ``path``, which names no client file, is a gap below a server
+    directory: a file of a suffix the client may read, deeper than the directory or of
+    a suffix the collector does not read there, in any spelling of the directory."""
+    name = path.name.lower()
+    folded = tuple(fold_name(part) for part in path.parts[:-1])
+    return any(
+        name.endswith(dialect.member_gaps) and folded[start : start + len(template)] == template
+        for template, dialect in _DIRECTORY_DIALECTS.items()
+        for start in range(len(folded) - len(template) + 1)
+    )
+
+
+def _directory_members(
+    files: ConfinedCollection, directory: Path, dialect: McpDialect
+) -> tuple[list[Path], list[Path]]:
+    """The files a client reads in a linked server ``directory``, and the gaps below it.
+
+    The walk lists a linked directory under its target's name, so each file is named
+    back under the link, through which the read follows one symlink.
+    """
+    found: list[Path] = []
+    gaps: list[Path] = []
+    target = Path(files.link_target(directory) or directory)
+    for path in files.iter_files(directory):
+        try:
+            relative = path.relative_to(target)
+        except ValueError:
+            continue
+        if len(relative.parts) == 1 and fold_name(relative.name).endswith(dialect.members):
+            found.append(directory / relative)
+        elif relative.name.lower().endswith(dialect.member_gaps):
+            gaps.append(directory / relative)
+    return found, gaps
+
+
+def _linked_client_files(
+    files: ConfinedCollection, links: list[Path]
+) -> tuple[list[Path], list[Path]]:
+    """Client files a host opens through a directory symlink that the walk met, and the
+    gaps below a linked server directory.
 
     The walk covers a linked directory under its target's name, where a path such as
     ``pkg/.gemini/settings.json`` names no client file, so each one is looked up
     through the link: the rest of every client path whose leading directories the
-    link's name ends, and every client name below a linked host directory.
+    link's name ends, every client name below a linked host directory, and the members
+    of a server directory the link is or holds.
     """
     found: list[Path] = []
+    gaps: list[Path] = []
     for link in links:
         folded = tuple(fold_name(part) for part in link.parts)
-        candidates: set[Path] = set()
+        candidates: dict[Path, McpDialect | None] = {}
         if folded[-1] in _FOLDED_HOST_DIRECTORIES:
-            candidates.update(link / name for name in MCP_CONFIG_NAMES)
-        for template, spelling in (*_FOLDED_TEMPLATES, *_FOLDED_UNPARSED_TEMPLATES):
-            for size in range(1, len(template)):
+            candidates.update((link / name, None) for name in MCP_CONFIG_NAMES)
+        for template, spelling, members in _FOLDED_TEMPLATES:
+            for size in range(1, len(template) + (1 if members else 0)):
                 if folded[-size:] == template[:size]:
-                    candidates.add(link.joinpath(*spelling[size:]))
-        for path in sorted(candidates):
-            if files.regular_file(path) is not None:
+                    candidates[link.joinpath(*spelling[size:])] = (
+                        _DIRECTORY_DIALECTS[template] if members else None
+                    )
+        for path, directory in sorted(candidates.items(), key=lambda item: item[0]):
+            if directory is not None:
+                if files.is_directory(path):
+                    files_found, files_gaps = _directory_members(files, path, directory)
+                    found.extend(files_found)
+                    gaps.extend(files_gaps)
+                    continue
+            elif files.regular_file(path) is not None:
                 found.append(path)
-            else:
-                # Records a refused link, or another spelling below the link.
-                files.read_bytes(path, missing_ok=True)
-    return found
+                continue
+            # Records a refused link, or another spelling below the link.
+            files.read_bytes(path, missing_ok=True)
+    return found, gaps
+
+
+def _is_dialect_file(dialect: McpDialect, path: str) -> bool:
+    """Whether ``path`` is the dialect's file, or a member of its directory, at the root
+    or below it."""
+    if dialect.members:
+        path, _, name = path.rpartition("/")
+        if not fold_name(name).endswith(dialect.members):
+            return False
+    return path == dialect.path or path.endswith("/" + dialect.path)
 
 
 def _template(path: str) -> McpDialect | None:
     """The dialect whose file ``path`` is, at the root or below it; the longest match wins."""
-    matches = [
-        dialect
-        for dialect in MCP_DIALECTS
-        if path == dialect.path or path.endswith("/" + dialect.path)
-    ]
+    matches = [dialect for dialect in MCP_DIALECTS if _is_dialect_file(dialect, path)]
     return max(matches, key=lambda dialect: len(dialect.path)) if matches else None
 
 
@@ -267,6 +408,8 @@ def _launch_directory(path: str) -> str:
     """
     template = _template(path)
     if template is not None:
+        if template.members:
+            path = path.rpartition("/")[0]
         return path[: -len(template.path)].rstrip("/")
     parts = path.split("/")[:-1]
     while parts and parts[-1] in _HOST_DIRECTORIES:
@@ -397,23 +540,204 @@ def without_js_comments(text: str) -> str:
     return "".join(kept)
 
 
-# Client files whose MCP declarations are recognised but not parsed: a gap when present.
-UNPARSED_CLIENT_FILES = (
-    (".zed/settings.json", "context_servers"),
-    ("opencode.json", "mcp"),
-    ("opencode.jsonc", "mcp"),
-    (".junie/mcp/mcp.json", None),
-)
-UNPARSED_CLIENT_DIRECTORIES = (".continue/mcpServers",)
-_FOLDED_UNPARSED_TEMPLATES = [
-    (tuple(fold_name(part) for part in path.split("/")), path.split("/"))
-    for path, _ in UNPARSED_CLIENT_FILES
-]
-_FOLDED_UNPARSED_DIRECTORIES = [
-    (tuple(fold_name(part) for part in path.split("/")), path.split("/"))
-    for path in UNPARSED_CLIENT_DIRECTORIES
-]
-_UNPARSED_MEMBERS = dict(UNPARSED_CLIENT_FILES)
+@dataclass(frozen=True)
+class _Normalized:
+    """A server in the common form, the reason its launcher is unknown, and a problem
+    that refuses it; the form is as complete as the shape allows either way, so the
+    file's credential values are scrubbed even from a refused server."""
+
+    config: dict[str, Any]
+    unknown: str | None = None
+    problem: str | None = None
+
+
+@dataclass(frozen=True)
+class _Entries:
+    """One file's servers by name, with the problems and unknown launchers of its shape,
+    and the entries its shape drops before naming them, whose credential values the
+    file's servers may still repeat."""
+
+    servers: list[tuple[str, Any]]
+    problems: dict[str, str]
+    unknown: dict[str, str]
+    dropped: tuple[dict[str, Any], ...] = ()
+
+
+_INVALID_SERVER = "invalid server configuration"
+# Zed's ``settings`` object under a name of its own, so the field stays one the
+# collector does not interpret in every other client's file.
+_EXTENSION_SETTINGS = "settings (zed extension)"
+# opencode's ``"oauth": false``, which turns off OAuth detection for a remote server.
+_OAUTH_DISABLED = "oauth (disabled)"
+# Fields a client's own shape is read into, uninterpreted in any other client's file.
+_SHAPE_FIELDS = {_EXTENSION_SETTINGS: "zed", _OAUTH_DISABLED: "opencode"}
+_DECLARED_FIELDS = {_EXTENSION_SETTINGS: "settings", _OAUTH_DISABLED: "oauth"}
+
+
+def _interpreted(field: str, shape: str) -> bool:
+    """Whether ``field`` may be read in a file of ``shape``: a shape's own field is not
+    read in another client's file, where it stays a field the collector does not
+    interpret."""
+    return _SHAPE_FIELDS.get(field, shape) == shape
+
+
+_ZED_EXTENSION = "provided by a Zed extension; the client file holds no launch"
+_NO_LAUNCH = "declares neither a command nor an endpoint; the client file holds no launch"
+# Fields that mark a Continue server file whose top level is a server, a shape the
+# collector does not confirm, rather than a block holding a server list.
+_SERVER_FIELDS = ("command", "args", "url", "type")
+
+
+def _zed_server(config: dict[str, Any]) -> _Normalized:
+    """Zed's ``context_servers`` entry in the common form.
+
+    Older settings nest the launch as ``{"command": {"path", "args", "env"}}``; newer
+    ones declare it beside ``"source": "custom"``. A ``"source": "extension"`` entry,
+    and an entry with no source and neither a command nor an endpoint, is a server the
+    editor's extension starts from its own code, so its launcher is unknown and its
+    ``settings`` are the extension's, scrubbed as environment values are; a custom
+    entry without a launch holds none, as in any other client file. Zed reads ``env``
+    as optional, so a null one is absent.
+    """
+    config = {key: value for key, value in config.items() if key != "env" or value is not None}
+    problem = _INVALID_SERVER if _EXTENSION_SETTINGS in config else None
+    if "settings" in config:
+        config[_EXTENSION_SETTINGS] = config.pop("settings")
+    source = config.get("source")
+    if source in ("custom", "extension"):
+        del config["source"]
+    command = config.get("command")
+    if isinstance(command, dict):
+        config["command"] = command.get("path")
+        for key, value in command.items():
+            if key == "path" or (key == "env" and value is None):
+                continue
+            if key in ("args", "env"):
+                if key in config:
+                    problem = f"MCP server declares {key} both in and beside its command object"
+                config[key] = value
+            else:
+                config[f"command.{key}"] = value
+    launched = bool(config.get("command")) or any(config.get(field) for field in _ENDPOINT_FIELDS)
+    unknown = _ZED_EXTENSION if source == "extension" or (source is None and not launched) else None
+    if source == "extension" and launched:
+        problem = "MCP server declares a launch beside an extension source"
+    return _Normalized(config, unknown, problem)
+
+
+# opencode replaces {env:NAME} and {file:PATH} in its configuration text when it loads it.
+_OPENCODE_SUBSTITUTION = re.compile(r"(?<!\$)\{((?:env|file):[^}]+)\}")
+
+
+def _opencode_text(value: Any) -> Any:
+    """``value`` with each opencode substitution spelled as the reference ``${...}``,
+    which every reader treats as unresolved; other values are returned unchanged."""
+    if not isinstance(value, str):
+        return value
+    # Past the last closing brace nothing can match, and an opening there would scan
+    # to the end of the text, so a run of unclosed openings would read in quadratic time.
+    end = value.rfind("}") + 1
+    return _OPENCODE_SUBSTITUTION.sub(r"${\1}", value[:end]) + value[end:]
+
+
+_OPENCODE_OPENING = re.compile(r"\{(?:env|file):")
+_JSONC_TOKEN = re.compile(r'"[^"\\]*(?:\\.[^"\\]*)*"|//[^\n]*|/\*.*?\*/', re.S)
+_JSONC_SPACE = re.compile(r"(?:\s+|//[^\n]*|/\*.*?\*/)*", re.S)
+
+
+def _opencode_substitution_outside_values(text: str) -> bool:
+    """Whether opencode, which substitutes in the raw text of a parsed JSONC file, may
+    replace text that is not inside one string value: an opening ``{env:`` or ``{file:``
+    in a comment or a key, or one whose closing brace is not in the same string.
+
+    Such a substitution can join, split or add the strings the per-value reading sees.
+    """
+    openings = [match.start() for match in _OPENCODE_OPENING.finditer(text)]
+    # opencode reads the raw text, so an escape such as a JSON unicode escape for the
+    # closing brace names a different variable from the decoded value we read.
+    escapes = [match.start() for match in re.finditer(r"\\", text)]
+    index = 0
+    close = -1
+    for token in _JSONC_TOKEN.finditer(text):
+        if index == len(openings):
+            return False
+        start, end = token.span()
+        if openings[index] < start:
+            return True
+        if openings[index] >= end:
+            continue
+        gap = _JSONC_SPACE.match(text, end)
+        if text[start] != '"' or (gap is not None and text.startswith(":", gap.end())):
+            return True
+        while index < len(openings) and openings[index] < end:
+            if close < openings[index]:
+                close = text.find("}", openings[index])
+            if not openings[index] < close < end - 1:
+                return True
+            escape = bisect.bisect_left(escapes, openings[index])
+            if escape < len(escapes) and escapes[escape] < close:
+                return True
+            index += 1
+    return index < len(openings)
+
+
+def _opencode_server(config: dict[str, Any]) -> _Normalized:
+    """opencode's ``mcp`` entry in the common form.
+
+    A local server's ``command`` is a list of words and its environment is
+    ``environment``; a remote server's ``type`` is ``remote``, whose transport the
+    endpoint decides, as for a client file that declares none, and which is
+    Streamable HTTP when it declares no endpoint. A substitution in a
+    value, or in a word or value one level below, is an unresolved reference.
+    """
+    config = {
+        key: (
+            [_opencode_text(item) for item in value]
+            if isinstance(value, list)
+            else {name: _opencode_text(item) for name, item in value.items()}
+            if isinstance(value, dict)
+            else _opencode_text(value)
+        )
+        for key, value in config.items()
+    }
+    problem = _INVALID_SERVER if _OAUTH_DISABLED in config else None
+    if config.get("oauth") is False:
+        del config["oauth"]
+        config[_OAUTH_DISABLED] = True
+    command = config.get("command")
+    if isinstance(command, list):
+        if not command or not all(isinstance(word, str) for word in command):
+            problem = _INVALID_SERVER
+            config["command"] = ""
+        else:
+            config["command"] = command[0]
+            if "args" in config:
+                problem = "MCP server declares args beside a command list"
+            else:
+                config["args"] = command[1:]
+    if "environment" in config:
+        if "env" in config:
+            problem = "MCP server declares both environment and env"
+        else:
+            config["env"] = config.pop("environment")
+    if config.get("type") == "remote":
+        if any(field in config for field in _ENDPOINT_FIELDS):
+            del config["type"]
+        else:
+            # opencode starts no command for a remote server, so one without an endpoint
+            # keeps a remote type and a command beside it reads as transport ambiguity.
+            config["type"] = "streamable-http"
+    return _Normalized(config, None, problem)
+
+
+def _normalized_server(shape: str, config: dict[str, Any]) -> _Normalized:
+    """``config`` read from the client's own ``shape`` into the common server form."""
+    if shape == "zed":
+        return _zed_server(config)
+    if shape == "opencode":
+        return _opencode_server(config)
+    return _Normalized(config)
+
 
 MAX_SERVERS_PER_FILE = 1000
 # Credential values of all servers in one file, each scrubbed from every server's text.
@@ -554,8 +878,8 @@ def _url_secrets(value: str) -> list[str]:
     return found
 
 
-def _header_line_secrets(text: str) -> list[str]:
-    """Credentials in an inline ``Header-Name: value`` string such as ``Authorization: Bearer ...``."""
+def _header_line(text: str) -> tuple[str, str] | None:
+    """The name and value of an inline ``Header-Name: value`` string, or None."""
     candidate = text.strip()
     lowered = candidate.lower()
     for prefix in _HEADER_PREFIXES:
@@ -566,13 +890,22 @@ def _header_line_secrets(text: str) -> list[str]:
         if candidate.startswith("-H") and len(candidate) > 2 and not candidate.startswith("-H="):
             candidate = candidate[2:].strip()
     if ":" not in candidate:
-        return []
+        return None
     hdr_name, _, hdr_val = candidate.partition(":")
     hdr_name = hdr_name.strip(" \"'")
     if hdr_val.startswith("//") or not _HEADER_NAME.fullmatch(hdr_name):
-        return []
+        return None
     hdr_val = hdr_val.strip(" \"'")
-    if not hdr_val or is_reference(hdr_val):
+    return (hdr_name, hdr_val) if hdr_val else None
+
+
+def _header_line_secrets(text: str) -> list[str]:
+    """Credentials in an inline ``Header-Name: value`` string such as ``Authorization: Bearer ...``."""
+    header = _header_line(text)
+    if header is None:
+        return []
+    hdr_name, hdr_val = header
+    if is_reference(hdr_val):
         return []
     found: list[str] = []
     if secret_like(hdr_name, hdr_val):
@@ -604,6 +937,46 @@ def _auth_object_secrets(settings: dict[str, Any]) -> list[str]:
         elif isinstance(current, list):
             pending.extend((key, item) for item in current)
     return found
+
+
+def _settings_secrets(settings: dict[str, Any]) -> list[str]:
+    """Credentials an object such as a Zed extension's ``settings`` holds, at any depth.
+
+    Each string is read as the value of the key that names it, as an environment
+    value is, and by its shape. _server_problem bounds an extension's object, and the
+    file's size and parse depth bound a shape's credential fields, so every node is read.
+    """
+    found: list[str] = []
+    pending: list[tuple[str, Any]] = [("", settings)]
+    while pending:
+        key, current = pending.pop()
+        if isinstance(current, str):
+            if not is_reference(current) and secret_like(key, current):
+                found.append(current)
+            found.extend(_shape_secrets(current))
+        elif isinstance(current, dict):
+            pending.extend((str(name), item) for name, item in current.items())
+        elif isinstance(current, list):
+            pending.extend((key, item) for item in current)
+    return found
+
+
+# Credential fields of a client's own shape that the collector does not interpret: a
+# refused opencode server's environment beside env, and Continue's apiKey, request
+# options and hub block inputs. Their values are scrubbed from every server of the file
+# all the same.
+_SHAPE_CREDENTIALS = {
+    "opencode": ("environment",),
+    "continue": ("apiKey", "requestOptions", "with"),
+}
+
+
+def _shape_credentials(config: dict[str, Any], shape: str) -> list[str]:
+    """Credential values ``config`` holds in its shape's uninterpreted credential fields."""
+    fields = {
+        field: config[field] for field in _SHAPE_CREDENTIALS.get(shape, ()) if field in config
+    }
+    return _settings_secrets(fields) if fields else []
 
 
 def _launch_words(texts: Iterable[str]) -> list[str]:
@@ -674,14 +1047,267 @@ def _launch_secrets(launch: Launch, args: Sequence[str] = (), command: str = "")
     return list(dict.fromkeys(values))
 
 
+# One finding lists this many positions and counts the rest; collection for one server
+# stops at the larger bound, so the finding stays small however many values a file holds.
+LISTED_CREDENTIAL_POSITIONS = 12
+MAX_CREDENTIAL_POSITIONS = 64
+_ENDPOINT_QUERY_POSITION = "endpoint URL query"
+_ASSIGNMENT_FLAGS = frozenset({"env", "e", "build-arg"})
+# The scheme words _AUTH reads, after which cmd's `set NAME=<scheme> <credential>` splits.
+_ASSIGNMENT_SCHEMES = frozenset({"bearer", "basic", "token", "bot", "apikey", "api-key"})
+# curl's `-u user:password`, also in a cluster of short flags (`-su`), and httpie's `-a`
+# (`--auth`) only under a fetcher. Under another command (docker -u www-data:www-data) the
+# part after the colon counts only when it reads as a literal under a non-password name.
+_USER_FLAG = re.compile(r"--user|--auth|-a|-[A-Za-z]{0,4}u")
+_FETCHERS = frozenset({"curl", "wget", "http", "https", "httpie"})
+# Words of letters, or capitals and digits in a name with a capital: GH_TOKEN_2, not oauth2-x.
+_NAME_FORM = re.compile(
+    r"(?=.*[A-Z]|\D*\Z)(?:[A-Za-z]+|[A-Z][A-Z0-9]*)"
+    r"(?:[._-](?:[A-Za-z]+|[A-Z0-9]+))*"
+)
+_PLAIN_ASSIGNMENT = re.compile(r"-{0,2}[A-Za-z_][\w.-]{0,63}=[^,;\"'&|:]*")
+# Past this length an argument's words are split at white space only: shell quoting is
+# read one character at a time, and its cost grows faster than the argument.
+_SHELL_SPLIT_LIMIT = 65536
+
+
+def _header_line_hits(text: str, *, explicit: bool) -> list[Hit]:
+    """The hits of ``text`` read as an inline ``Header-Name: value`` line.
+
+    Prose such as ``Authentication: handled by the gateway`` reads like one, so a
+    text is a header line only after ``-H`` or ``--header`` or when the header name
+    itself names a credential (Authorization, Cookie, X-Api-Key).
+    """
+    header = _header_line(text)
+    if header is None or not (explicit or credential_name(header[0])):
+        return []
+    return value_hits(*header, header=True)
+
+
+def _explicit_header(previous: str | None, word: str) -> bool:
+    """Whether ``word`` is a header by its flag: after ``-H``, or ``--header=`` or ``-H``."""
+    stripped = word.strip()
+    return (
+        (previous is not None and previous.lower() in _HEADER_FLAGS)
+        or stripped.lower().startswith(_HEADER_PREFIXES)
+        or (stripped.startswith("-H") and len(stripped) > 2)
+    )
+
+
+def _assignment_word_hits(word: str, following: str | None) -> list[Hit]:
+    """The hits of a ``NAME=value`` word, ``--name=value`` and ``--env=NAME=value`` included.
+
+    cmd's ``set API_TOKEN=Bearer <token>`` leaves the credential in the next word.
+    """
+    name, equals, value = word.partition("=")
+    if not equals or _requirement(name, value):
+        return []
+    name = name.lstrip("-").strip(" \"'")
+    if name.lower() in _ASSIGNMENT_FLAGS and "=" in value:
+        name, _, value = value.strip(" \"'").partition("=")
+        name = name.strip(" \"'")
+        if _requirement(name, value):
+            return []
+    value = value.strip(" \"'")
+    if not name or not value or name.lower() in {"h", "header"}:
+        return []
+    hits = value_hits(name, value)
+    if following is not None and value.lower() in _ASSIGNMENT_SCHEMES:
+        hits.extend(value_hits(name, f"{value} {following}"))
+    return hits
+
+
+def _flag_value(flag: str, word: str) -> bool:
+    """Whether ``word`` is the value of a non-header ``flag`` such as ``--token``."""
+    return (
+        _CLI_FLAG.fullmatch(flag) is not None
+        and flag.lower() not in _HEADER_FLAGS
+        and not word.startswith("-")
+    )
+
+
+def _user_hits(previous: str | None, word: str, fetcher: bool) -> list[Hit]:
+    """The password of ``-u user:password``."""
+    if previous is None or _USER_FLAG.fullmatch(previous) is None:
+        return []
+    user, colon, password = word.partition(":")
+    fetched = fetcher or not previous.endswith(("-a", "auth"))
+    if not (user and colon and fetched and literal_value(password, password=fetcher)):
+        return []
+    return [(NAMED_CLASS, password)]
+
+
+def _word_hits(
+    previous: str | None, word: str, following: str | None, fetcher: bool = False
+) -> list[Hit]:
+    """The hits of one argument or shell word, given the words around it."""
+    flagged = previous is not None and _flag_value(previous, word)
+    hits = value_hits(previous if flagged and previous else "", word)
+    if ":" in word:
+        hits.extend(_header_line_hits(word, explicit=_explicit_header(previous, word)))
+    if "=" in word:
+        hits.extend(_assignment_word_hits(word, following))
+    if (":" in word or "=" in word) and _PLAIN_ASSIGNMENT.fullmatch(word) is None:
+        hits.extend(assignment_hits(word))
+    hits.extend(_user_hits(previous, word, fetcher))
+    return hits
+
+
+def _argument_hits(previous: str | None, argument: str, fetcher: bool = False) -> list[Hit]:
+    """The hits of a launch argument.
+
+    An argument without white space is one word, read with the argument before it as
+    its flag. One with white space (a command line, an inline script) is read whole
+    for what holds whatever names it, as a header line, for credential-named
+    assignments and as its flag's value; its shell words are then read one by one,
+    so ``-c "API_TOKEN=${API_TOKEN} exec ..."`` is never a ``NAME=value`` or a literal.
+    """
+    if not any(char.isspace() for char in argument):
+        return _word_hits(previous, argument, None, fetcher)
+    flagged = previous is not None and _flag_value(previous, argument)
+    hits = value_hits(previous if flagged and previous else "", argument)
+    hits.extend(_header_line_hits(argument, explicit=_explicit_header(previous, argument)))
+    hits.extend(assignment_hits(argument, spaced=True))
+    long = len(argument) > _SHELL_SPLIT_LIMIT
+    words = argument.split() if long else _launch_words([argument])[1:]
+    fetcher = fetcher or not _FETCHERS.isdisjoint(map(posixpath.basename, words))
+    around: list[str | None] = [None, *words, None]
+    for index, word in enumerate(words, start=1):
+        hits.extend(_word_hits(around[index - 1], word, around[index + 1], fetcher))
+    return hits
+
+
+def _name_hits(name: str) -> list[Hit]:
+    return [(SHAPE_CLASS, match.group()) for match in TOKEN_SHAPE.finditer(name)]
+
+
+def _credential_hits(
+    env: dict[str, Any],
+    args: list[Any],
+    header_maps: Sequence[dict[str, Any]],
+    endpoints: Sequence[Any],
+    command: Any = "",
+) -> Iterator[tuple[str, str, list[Hit]]]:
+    """Each launch position, as its kind and name, with the literal credentials it holds.
+
+    A header value with a line break injects a header line after it: each following
+    line is read as one, at the position of the header that carries it.
+    """
+    words = [word for word in (command, *args) if isinstance(word, str)]
+    fetcher = not _FETCHERS.isdisjoint(map(posixpath.basename, words))
+    for name in sorted(env):
+        value = env[name]
+        hits = _name_hits(name)
+        if isinstance(value, str):
+            hits.extend(value_hits(name, value))
+            hits.extend(_header_line_hits(value, explicit=False))
+        yield ("env", name, hits)
+    previous: str | None = None
+    for index, argument in enumerate(args, start=1):
+        if isinstance(argument, str):
+            yield ("argument", str(index), _argument_hits(previous, argument, fetcher))
+            previous = argument
+        else:
+            previous = None
+    headers = [item for mapping in header_maps for item in mapping.items()]
+    for name, value in sorted(headers, key=lambda item: item[0]):
+        hits = _name_hits(name)
+        if isinstance(value, str):
+            hits.extend(value_hits(name, value, header=True))
+            for line in [value, *value.splitlines()[1:]]:
+                hits.extend(_header_line_hits(line, explicit=False))
+        yield ("header", name, hits)
+    for endpoint in endpoints:
+        if isinstance(endpoint, str):
+            yield ("endpoint", "", endpoint_hits(endpoint))
+
+
+PositionHits = list[tuple[str, str, list[Hit]]]
+
+
+def _literals(positions: PositionHits) -> list[str]:
+    """Every literal credential the launch positions hold, as the finding reads them."""
+    return [literal for _, _, hits in positions for _, literal in hits if literal]
+
+
+def _credential_positions(hits: PositionHits, names: _Names | None = None) -> list[tuple[str, str]]:
+    """Each launch position holding a literal credential, with its pattern class.
+
+    Positions are named as the inventory exports them: a name it withholds, such as one holding
+    a literal of the same file, is not named here, and no value is. A name in a known token shape
+    is itself a literal credential. A credential-named query parameter of an endpoint URL is the
+    position "endpoint URL query"; its user information stays with transport_security. At most
+    MAX_CREDENTIAL_POSITIONS are collected from ``hits``, the positions _server_hits read.
+    """
+    names = names or _Names(_literals(hits)).scoped()
+    positions: dict[tuple[str, str], None] = {}
+    for kind, name, found_hits in hits:
+        found = strongest(found_hits)
+        if found is None:
+            continue
+        if kind == "env":
+            label = f"env {name}" if names.shown(name, finding=True) else "an env key"
+        elif kind == "header":
+            shown = f"header {redact_text(name, identifier=True)}"
+            label = shown if names.shown(name, finding=True) else "a header"
+        elif kind == "argument":
+            label = f"argument {name}"
+        else:
+            label = _ENDPOINT_QUERY_POSITION
+        positions[(label, found)] = None
+        if len(positions) >= MAX_CREDENTIAL_POSITIONS:
+            break
+    return list(positions)
+
+
+def _server_hits(config: dict[str, Any]) -> PositionHits:
+    """Each launch position of one server with the literal credentials it holds."""
+    endpoints = [config[field] for field in _ENDPOINT_FIELDS if config.get(field)]
+    return list(
+        _credential_hits(
+            config.get("env", {}),
+            config.get("args", []),
+            [config.get("headers", {}), config.get("http_headers", {})],
+            endpoints,
+            config.get("command", ""),
+        )
+    )
+
+
+def _declared_hits(config: dict[str, Any]) -> PositionHits:
+    """The hits of a refused server's env, arguments and headers, read as a parsed one's are."""
+    env, args = config.get("env"), config.get("args")
+    maps = [m for m in (config.get("headers"), config.get("http_headers")) if isinstance(m, dict)]
+    args = args if isinstance(args, list) else []
+    return list(_credential_hits(env if isinstance(env, dict) else {}, args, maps, ()))
+
+
+def _server_literals(config: dict[str, Any], hits: PositionHits) -> list[str]:
+    """What no name may hold: the finding's literals, an auth object's and a URL password."""
+    found = _literals(hits)
+    for field in ("oauth", "auth"):
+        if isinstance(settings := config.get(field), dict):
+            found.extend(_auth_object_secrets(settings))
+    for field in _ENDPOINT_FIELDS:
+        if isinstance(endpoint := config.get(field), str):
+            found.extend(_url_secrets(endpoint))
+    return found
+
+
 def _server_launch(config: dict[str, Any]) -> Launch:
     """The server's launcher as analyze reads it; raises as analyze does."""
     command = config.get("command", "")
     return analyze(command, config.get("args", [])) if command else Launch()
 
 
-def _server_secrets(config: dict[str, Any], launch: Launch) -> list[str]:
-    """Credential values one server declares: env, headers, auth, endpoints and launcher."""
+def _server_secrets(
+    config: dict[str, Any], launch: Launch, hits: PositionHits | None = None
+) -> list[str]:
+    """Credential values one server declares: env, headers, auth, endpoints and launcher.
+
+    Every literal credential the finding reads counts too, so a server name, a tool's
+    text or a name that repeats one is scrubbed or withheld as a scrubbed value is.
+    """
     values: list[str] = []
     for field in ("env", "headers", "http_headers"):
         mapping = config.get(field)
@@ -694,6 +1320,9 @@ def _server_secrets(config: dict[str, Any], launch: Launch) -> list[str]:
         settings = config.get(field)
         if isinstance(settings, dict):
             values.extend(_auth_object_secrets(settings))
+    extension = config.get(_EXTENSION_SETTINGS)
+    if isinstance(extension, dict):
+        values.extend(_settings_secrets(extension))
     for field in (*_ENDPOINT_FIELDS, "gallery"):
         endpoint = config.get(field)
         if isinstance(endpoint, str):
@@ -707,6 +1336,7 @@ def _server_secrets(config: dict[str, Any], launch: Launch) -> list[str]:
             command if isinstance(command, str) else "",
         )
     )
+    values.extend(_literals(_server_hits(config) if hits is None else hits))
     return list(dict.fromkeys(values))
 
 
@@ -766,9 +1396,9 @@ _LIST_FIELDS = _names(
     "disabledTools env_vars watchPaths"
 )
 _MAP_FIELDS = frozenset({"env", "headers", "http_headers", "env_http_headers"})
-_BOOL_FIELDS = frozenset({"disabled", "trust", "enabled"})
+_BOOL_FIELDS = frozenset({"disabled", "trust", "enabled", _OAUTH_DISABLED})
 _NUMBER_FIELDS = _names("timeout startup_timeout_sec startup_timeout_ms tool_timeout_sec")
-_OBJECT_FIELDS = frozenset({"oauth", "auth", "dev"})
+_OBJECT_FIELDS = frozenset({"oauth", "auth", "dev", _EXTENSION_SETTINGS})
 _KNOWN_FIELDS = (
     _STRING_FIELDS
     | _LIST_FIELDS
@@ -1021,20 +1651,87 @@ def _exportable_name(name: str) -> bool:
     )
 
 
-def _exported_names(names: Iterable[str]) -> list[str]:
+def _folded(text: str) -> set[str]:
+    return {(low := text.casefold()).replace("-", "_"), re.sub("[-_.]", "", low)} - {""}
+
+
+class _Parts:
+    """Strings found in a name by its windows' 64-bit hashes, where a collision withholds it: whole
+    if ``exact``, else folded, and one of 16 or more characters by any 16 in a row (23 past 4,096)."""
+
+    def __init__(self, texts: Iterable[str], *, exact: bool = False) -> None:
+        self.exact, self.sizes = exact, set[int]()
+        found = [array("q") for _ in range(256)]
+        for text in texts if exact else (form for item in texts for form in _folded(item)):
+            self.sizes.add(size := len(text) if exact else min(len(text), 16))
+            for start in range(0, len(text) - size + 1, 1 if len(text) <= 4096 else 8):
+                found[(part := hash(text[start : start + size])) & 255].append(part)
+        self.parts = [array("q", sorted(set(parts))) for parts in found]
+
+    def find(self, name: str) -> Iterator[tuple[int, int]]:
+        for text in (name,) if self.exact else _folded(name):
+            for size in self.sizes:
+                for start in range(len(text) - size + 1):
+                    parts = self.parts[(part := hash(text[start : start + size])) & 255]
+                    if part in parts[(at := bisect_left(parts, part)) : at + 1]:
+                        yield start, start + size
+
+
+class _Names:
+    """Which env, header and field names may be shown, each name's verdict reached once a file.
+
+    A name holding a literal is withheld: whole, or by 16 characters in a row, in any case, with
+    "-" for "_" and with or without "-", "_" and ".". In the inventory only a credential-shaped literal of the scan counts, or
+    any of the server's own; the finding never names one holding any literal of the scan.
+    Another value the file's scrubber holds withholds it whole, or as a credential-shaped part,
+    unless that is a credential's name (OPENAI_API_KEY, also in AZURE_OPENAI_API_KEY).
+    """
+
+    def __init__(self, literals: Sequence[str]) -> None:
+        shaped = set(filter(credential_shaped, literals))
+        self.every, self.shaped = _Parts(set(literals) - shaped), _Parts(shaped)
+        self.values = self.own = _Parts((), exact=True)
+        self.verdicts: dict[str, tuple[bool, bool]] = {}
+
+    def scoped(self, values: Iterable[str] | None = None, own: Iterable[str] = ()) -> _Names:
+        """These names in a file whose scrubber holds ``values``, or in a server that reads ``own``."""
+        names = copy.copy(self)
+        if values is not None:
+            names.values, names.verdicts = _Parts(values, exact=True), {}
+        names.own = _Parts(own)
+        return names
+
+    def shown(self, name: str, *, finding: bool = False) -> bool:
+        if name not in self.verdicts:
+            plain = _exportable_name(name) and not any(self.shaped.find(name))
+            self.verdicts[name] = (plain and self._named(name), not any(self.every.find(name)))
+        plain, clear = self.verdicts[name]
+        return plain and (clear if finding else not any(self.own.find(name)))
+
+    def _named(self, name: str) -> bool:
+        covered = bytearray(len(name))
+        for start, end in self.values.find(name):
+            covered[start:end] = b"\x01" * (end - start)
+        spans = [run.span() for run in re.finditer(rb"\x01+", covered)]
+        whole = spans == [(0, len(name))]
+        held = [name[a:b] for a, b in spans if whole or credential_shaped(name[a:b])]
+        return all(_NAME_FORM.fullmatch(part) and credential_name(part) for part in held)
+
+
+def _exported_names(names: Iterable[str], shown: _Names | None = None) -> list[str]:
     """Sorted names with every withheld one as "[redacted]", one marker per name."""
     return sorted(
-        redact_text(name, identifier=True) if _exportable_name(name) else "[redacted]"
+        redact_text(name, identifier=True) if (shown or _Names(())).shown(name) else "[redacted]"
         for name in names
     )
 
 
-def _exported_environment(env: dict[str, Any]) -> dict[str, str]:
+def _exported_environment(env: dict[str, Any], names: _Names | None = None) -> dict[str, str]:
     """The environment's names with masked values; withheld names get numbered markers."""
     shown: dict[str, str] = {}
     withheld = 0
     for name in sorted(env):
-        if _exportable_name(name):
+        if (names or _Names(())).shown(name):
             shown[name] = "***"
         else:
             withheld += 1
@@ -1042,8 +1739,14 @@ def _exported_environment(env: dict[str, Any]) -> dict[str, str]:
     return shown
 
 
-def _field_names(config: dict[str, Any]) -> list[str]:
-    return _exported_names(config)
+def _field_names(config: dict[str, Any], shape: str, names: _Names | None = None) -> list[str]:
+    """The fields a server declares, each read from the client's shape by the name the
+    client file gives it."""
+    fields = [
+        _DECLARED_FIELDS[field] if field in _SHAPE_FIELDS and _interpreted(field, shape) else field
+        for field in config
+    ]
+    return _exported_names(fields, names)
 
 
 def _json_shape(value: Any, budget: int) -> tuple[int, int]:
@@ -1893,9 +2596,9 @@ def _text_credentials(text: str) -> list[str]:
 # Nodes of one configuration document read for the values a declared name must not hold.
 _KNOWN_VALUE_NODES = 1 << 17
 # Maps whose values a client passes to a server or sends with its requests, and which
-# no record publishes: environments, headers and Codex's query parameters and
-# `shell_environment_policy.set`.
-_VALUE_MAPS = frozenset({"env", "headers", "http_headers", "query_params", "set"})
+# no record publishes: environments (opencode's `environment` too), headers and Codex's
+# query parameters and `shell_environment_policy.set`.
+_VALUE_MAPS = frozenset({"env", "environment", "headers", "http_headers", "query_params", "set"})
 # Settings whose `env` the host applies to every process it starts, MCP servers too.
 _HOST_SETTINGS = frozenset(
     {(".claude", "settings.json"), (".claude", "settings.local.json"), (".cursor", "settings.json")}
@@ -1960,8 +2663,9 @@ class MCPScanner(Scanner):
         ) as files:
             links: list[Path] = []
             sources = list(files.iter_files(directory_links=links))
-            walked = [*sources, *_linked_client_files(files, links)]
-            nested = self._nested_client_files(files, walked)
+            linked, linked_gaps = _linked_client_files(files, links)
+            nested, directory_gaps = self._nested_client_files(files, [*sources, *linked])
+            directory_gaps.update(path.as_posix() for path in linked_gaps)
             try:
                 key, key_error = source_binding_key(), None
             except SourceBindingKeyError as exc:
@@ -1975,7 +2679,9 @@ class MCPScanner(Scanner):
             finally:
                 self._resolvers = None
             result.components.extend(clients.values())
-            self._report_unparsed_clients(files, result, walked, links)
+            result.surfaces_excluded.extend(
+                f"{path}: {_DIRECTORY_GAP}" for path in sorted(directory_gaps)
+            )
             if known is not None:
                 self._read_host_settings(files, sources, links, known)
                 self._scan_code_mcp_clients(result, sources, known)
@@ -1986,23 +2692,28 @@ class MCPScanner(Scanner):
         return result
 
     @staticmethod
-    def _nested_client_files(files: ConfinedCollection, sources: list[Path]) -> list[str]:
-        """The walked client files that are not fixed root paths, in a stable order.
+    def _nested_client_files(
+        files: ConfinedCollection, sources: list[Path]
+    ) -> tuple[list[str], set[str]]:
+        """The walked client files that are not fixed root paths, in a stable order, and
+        the walked files below a server directory that the collector does not read.
 
         Another spelling of one is a failure, beside the exact spelling too: a
         case-insensitive checkout holds one file for both names, with the content of
         whichever it wrote last.
         """
         nested: set[str] = set()
+        gaps: set[str] = set()
         for path in sources:
             spelling = _client_spelling(path)
             if spelling is None:
-                continue
-            if spelling != path.as_posix():
+                if _directory_gap(path):
+                    gaps.add(path.as_posix())
+            elif spelling != path.as_posix():
                 files.report_case_variant(path, spelling)
             elif spelling not in _ROOT_CLIENT_FILES:
                 nested.add(spelling)
-        return sorted(nested)
+        return sorted(nested), gaps
 
     def _scan_dialects(
         self,
@@ -2023,9 +2734,12 @@ class MCPScanner(Scanner):
         # Server references per host, sorted once at the end: sorting the union after
         # every file would cost the square of the number of nested client files.
         pending_refs: dict[str, set[str]] = {}
+        parsed: dict[str, tuple[Any, list[str]]] = {}
+        collected: list[tuple[McpDialect, dict[str, Any], _Entries, SecretScrubber, dict[int, Any]]]
+        collected, literals = [], []
         for path in paths:
             dialect = _dialect(path)
-            data = self._read_dialect(files, dialect, result)
+            data = self._read_dialect(files, dialect, result, parsed, known)
             if data is None:
                 continue
             found_any = True
@@ -2039,10 +2753,14 @@ class MCPScanner(Scanner):
             if not isinstance(data, dict):
                 result.scan_failures.append(f"{dialect.path}: expected a configuration object")
                 continue
-            entries = self._server_entries(dialect, data, result)
-            if entries is None:
+            read = self._server_entries(dialect, data, result)
+            if read is None:
                 continue
-            values = self._file_secrets(entries)
+            entries = read.servers
+            server_hits: dict[int, PositionHits] = {}
+            values = self._file_secrets(
+                [*entries, *(("", config) for config in read.dropped)], dialect.shape, server_hits
+            )
             # Before either refusal below: a file that is not collected still holds them.
             if known is not None:
                 known.add(values)
@@ -2051,16 +2769,24 @@ class MCPScanner(Scanner):
                 continue
             # Prepared once per file and reused for every server and diagnostic.
             file_secrets = SecretScrubber(values)
+            configs = {id(config): config for config in [*(c for _, c in entries), *read.dropped]}
+            for server, hits in server_hits.items():
+                literals.extend(_server_literals(configs[server], hits))
             if len(file_secrets) > MAX_SECRETS_PER_FILE:
                 result.scan_failures.append(
                     f"{dialect.path}: more than {MAX_SECRETS_PER_FILE} credential values in one "
                     "file; not collected"
                 )
                 continue
+            collected.append((dialect, data, read, file_secrets, server_hits))
+        # A name may repeat a literal of any client file, so every file is read first.
+        names = _Names(literals)
+        for dialect, data, read, file_secrets, server_hits in collected:
+            file_names = names.scoped(file_secrets.values)
             server_refs: list[str] = []
-            for server_name, server_config in entries:
-                problem = (
-                    self._server_problem(server_config)
+            for server_name, server_config in read.servers:
+                problem = read.problems.get(server_name) or (
+                    self._server_problem(server_config, dialect.shape)
                     if isinstance(server_config, dict)
                     else "invalid server configuration"
                 )
@@ -2069,7 +2795,15 @@ class MCPScanner(Scanner):
                     continue
                 try:
                     mcp_comp, tool_comps = self._parse_server(
-                        server_name, server_config, dialect, key, result, file_secrets
+                        server_name,
+                        server_config,
+                        dialect,
+                        key,
+                        result,
+                        file_secrets,
+                        server_hits.get(id(server_config)),
+                        file_names,
+                        launcher_unknown=read.unknown.get(server_name),
                     )
                 except SourceBindingKeyError as exc:
                     result.scan_failures.append(f"{dialect.path}: {exc}")
@@ -2107,7 +2841,12 @@ class MCPScanner(Scanner):
         return found_any
 
     @classmethod
-    def _file_secrets(cls, entries: list[tuple[str, Any]]) -> list[str]:
+    def _file_secrets(
+        cls,
+        entries: list[tuple[str, Any]],
+        shape: str,
+        server_hits: dict[int, PositionHits] | None = None,
+    ) -> list[str]:
         """Credential values of every server in a file, inline launcher values included.
 
         One server's tool text or name may repeat a value that another server's
@@ -2115,25 +2854,34 @@ class MCPScanner(Scanner):
         from each. A server that _server_problem refuses is never parsed, but its
         `env`, `headers` and `http_headers` still count, as they did before launcher
         values were added: refusing it must not publish what its siblings repeat. Only
-        its launcher is not analysed.
+        its launcher is not analysed: its arguments are read for the names they withhold. Each
+        server's launch positions are read once, into ``server_hits`` by the server's identity.
         """
         values: list[str] = []
         for _, config in entries:
             if not isinstance(config, dict):
                 continue
-            if cls._server_problem(config) is not None:
+            values.extend(_shape_credentials(config, shape))
+            if cls._server_problem(config, shape) is not None:
                 for field in ("env", "headers", "http_headers"):
                     mapping = config.get(field)
                     if isinstance(mapping, dict):
                         values.extend(secret_values(mapping))
+                hits = _declared_hits(config)
+                values.extend(_literals([hit for hit in hits if hit[0] != "argument"]))
+                if server_hits is not None:
+                    server_hits[id(config)] = hits
                 continue
             try:
                 launch = _server_launch(config)
             except (TypeError, ValueError, RecursionError):
                 # The server's normal parsing path reports this failure.
                 launch = Launch()
-            values.extend(_server_secrets(config, launch))
-        return values
+            hits = _server_hits(config)
+            if server_hits is not None:
+                server_hits[id(config)] = hits
+            values.extend(_server_secrets(config, launch, hits))
+        return list(dict.fromkeys(values))
 
     @staticmethod
     def _diagnostic_server_name(
@@ -2164,30 +2912,112 @@ class MCPScanner(Scanner):
         # Clipping first can truncate a token so its recognizable shape is lost.
         return neutralize(redact_text(name, scrubber)[:256])
 
-    @staticmethod
-    def _read_dialect(files: ConfinedCollection, dialect: McpDialect, result: ScanResult) -> Any:
+    def _read_dialect(
+        self,
+        files: ConfinedCollection,
+        dialect: McpDialect,
+        result: ScanResult,
+        parsed: dict[str, tuple[Any, list[str]]],
+        known: KnownValues | None = None,
+    ) -> Any:
         if dialect.syntax == "json":
             return files.read_json(dialect.path, missing_ok=True)
         text = files.read_text(dialect.path, missing_ok=True)
         if text is None:
             return None
+        if dialect.syntax == "yaml":
+            # The bounded reader: an empty document holds no servers; anchors, aliases,
+            # tags and a non-mapping are failures where a server could be declared.
+            # A file read through several directory links is parsed once.
+            names = (*dialect.maps, *(_SERVER_FIELDS if dialect.members else ()))
+            cache_key = f"{names!r}\0{text}"
+            if cache_key not in parsed:
+                scratch = ScanResult(self.name)
+                data = self._parse_yaml_mapping(
+                    Path(dialect.path), text, scratch, inert_without=frozenset(names)
+                )
+                prefix = f"{Path(dialect.path).as_posix()}: "
+                reasons = [failure.removeprefix(prefix) for failure in scratch.scan_failures]
+                parsed[cache_key] = (data, reasons)
+            data, reasons = parsed[cache_key]
+            result.scan_failures.extend(f"{dialect.path}: {reason}" for reason in reasons)
+            return data
         try:
             if dialect.syntax == "toml":
                 return load_toml(text, parse_float=_finite_float)
-            return _load_jsonc(text)
+            data = _load_jsonc(text)
         except (ValueError, RecursionError, MemoryError):
             syntax = "TOML" if dialect.syntax == "toml" else "JSON or duplicate keys"
             result.scan_failures.append(f"{dialect.path}: invalid {syntax}")
             return None
+        if dialect.shape == "opencode" and _opencode_substitution_outside_values(text):
+            # Parsed but not read: its values are unknown, so no source name may be published.
+            if known is not None:
+                known.refuse()
+            result.scan_failures.append(
+                f"{dialect.path}: opencode substitution outside one string value; the "
+                "configuration depends on the environment and is not inventoried"
+            )
+            return None
+        return data
 
     @staticmethod
     def _server_entries(
         dialect: McpDialect, data: dict[str, Any], result: ScanResult
-    ) -> list[tuple[str, Any]] | None:
+    ) -> _Entries | None:
         entries: dict[str, Any] = {}
+        problems: dict[str, str] = {}
+        unknown: dict[str, str] = {}
+        dropped: list[dict[str, Any]] = []
+        experimental = data.get("experimental")
+        if (
+            dialect.shape == "continuerc"
+            and isinstance(experimental, dict)
+            and experimental.get("modelContextProtocolServers")
+        ):
+            result.surfaces_excluded.append(
+                f"{dialect.path}: Continue workspace MCP servers "
+                "(experimental.modelContextProtocolServers) not inventoried"
+            )
         for key in dialect.maps:
             servers = data.get(key)
             if servers is None:
+                continue
+            if dialect.shape == "continue":
+                if not isinstance(servers, list) or len(servers) > MAX_SERVERS_PER_FILE:
+                    result.scan_failures.append(
+                        f"{dialect.path}: invalid server list or MCP server limit "
+                        f"({MAX_SERVERS_PER_FILE} per file) exceeded"
+                    )
+                    return None
+                repeated: set[str] = set()
+                for index, config in enumerate(servers, 1):
+                    name = config.get("name") if isinstance(config, dict) else None
+                    if isinstance(config, dict) and (
+                        not isinstance(name, str) or not name or name in entries or name in repeated
+                    ):
+                        dropped.append(config)
+                    if isinstance(config, dict) and "uses" in config and name is None:
+                        # The slug is not shown: it is the checkout's text, not an identity.
+                        result.surfaces_excluded.append(
+                            f"{dialect.path}: MCP server entry {index} references a hub block "
+                            "whose launch is not resolved offline; not inventoried"
+                        )
+                    elif not isinstance(name, str) or not name:
+                        result.scan_failures.append(
+                            f"{dialect.path}: MCP server entry {index} declares no name and is "
+                            "not inventoried"
+                        )
+                    elif name in entries or name in repeated:
+                        repeated.add(name)
+                    else:
+                        entries[name] = config
+                for name in sorted(repeated):
+                    # Which entry the client keeps is not confirmed, so neither is read.
+                    dropped.append(entries.pop(name))
+                    result.scan_failures.append(
+                        f"{dialect.path}: MCP server declared more than once; not inventoried"
+                    )
                 continue
             if not isinstance(servers, dict) or len(servers) + len(entries) > MAX_SERVERS_PER_FILE:
                 result.scan_failures.append(
@@ -2201,7 +3031,22 @@ class MCPScanner(Scanner):
                         f"{dialect.path}: MCP server declared under more than one server map"
                     )
                     continue
+                if dialect.shape != "map" and isinstance(config, dict):
+                    normalized = _normalized_server(dialect.shape, config)
+                    config = normalized.config
+                    if normalized.problem is not None:
+                        problems[name] = normalized.problem
+                    if normalized.unknown is not None:
+                        unknown[name] = normalized.unknown
                 entries[name] = config
+        if (
+            dialect.members
+            and not any(key in data for key in dialect.maps)
+            and any(field in data for field in _SERVER_FIELDS)
+        ):
+            result.surfaces_excluded.append(
+                f"{dialect.path}: MCP server file of unconfirmed shape; not inventoried"
+            )
         commands: list[Any] = []
         for keys in dialect.server_commands:
             value: Any = data
@@ -2245,12 +3090,14 @@ class MCPScanner(Scanner):
                     "exceeded"
                 )
                 return None
-        return sorted(entries.items())
+        return _Entries(sorted(entries.items()), problems, unknown, tuple(dropped))
 
     @staticmethod
-    def _server_problem(config: dict[str, Any]) -> str | None:
+    def _server_problem(config: dict[str, Any], shape: str) -> str | None:
         """A type or size problem in a server entry; unknown fields are gaps, not failures."""
         for field, value in config.items():
+            if not _interpreted(field, shape):
+                continue
             if field in _STRING_FIELDS:
                 valid = isinstance(value, str)
             elif field in _LIST_FIELDS:
@@ -2292,14 +3139,18 @@ class MCPScanner(Scanner):
                     f"MCP tool definition limit ({MAX_TOOL_NODES} nodes, "
                     f"{MAX_TOOL_DEPTH} levels) exceeded"
                 )
-        # Every credential an authentication object holds is scrubbed, so all of it is
-        # read; one past the bound is refused, never read in part.
-        for field in ("oauth", "auth"):
-            if field in config:
+        # Every credential an authentication or extension settings object holds is
+        # scrubbed, so all of it is read; one past the bound is refused, never read in part.
+        for field, label in (
+            ("oauth", "authentication"),
+            ("auth", "authentication"),
+            (_EXTENSION_SETTINGS, "extension"),
+        ):
+            if field in config and _interpreted(field, shape):
                 nodes, depth = _json_shape(config[field], MAX_TOOL_NODES)
                 if nodes > MAX_TOOL_NODES or depth > MAX_TOOL_DEPTH:
                     return (
-                        f"MCP server authentication settings limit ({MAX_TOOL_NODES} nodes, "
+                        f"MCP server {label} settings limit ({MAX_TOOL_NODES} nodes, "
                         f"{MAX_TOOL_DEPTH} levels) exceeded"
                     )
         return None
@@ -2312,6 +3163,10 @@ class MCPScanner(Scanner):
         key: bytes | None,
         result: ScanResult,
         file_secrets: SecretScrubber | None = None,
+        credential_hits: PositionHits | None = None,
+        names: _Names | None = None,
+        *,
+        launcher_unknown: str | None = None,
     ) -> tuple[MCPServerComponent, list[ToolComponent]]:
         config_scope = dialect.path
         command = config.get("command", "")
@@ -2332,9 +3187,13 @@ class MCPScanner(Scanner):
         # values included: this server's free text may repeat a value one of them holds.
         # Without a file context, _server_secrets collects them as _file_secrets does,
         # shadowed inline assignments included.
+        if credential_hits is None:
+            credential_hits = _server_hits(config)
         scrubber = file_secrets
         if scrubber is None:
-            scrubber = SecretScrubber(_server_secrets(config, launch))
+            scrubber = SecretScrubber(_server_secrets(config, launch, credential_hits))
+        own = _server_literals(config, credential_hits)
+        names = (names or _Names(own).scoped(scrubber.values)).scoped(own=own)
         cwd = config.get("cwd")
         nested = _launch_directory(dialect.path) != ""
         # Clients do not trim a cwd: " ." is a directory the checkout can create.
@@ -2359,7 +3218,11 @@ class MCPScanner(Scanner):
                 gaps.append(gap)
         if len(set(endpoints)) > 1:
             gaps.append("declares more than one endpoint field")
-        unknown_fields = [field for field in config if field not in _KNOWN_FIELDS]
+        unknown_fields = [
+            field
+            for field in config
+            if field not in _KNOWN_FIELDS or not _interpreted(field, dialect.shape)
+        ]
         command_fields = [field for field in unknown_fields if _COMMAND_FIELD.fullmatch(field)]
         if unknown_fields:
             count = len(unknown_fields)
@@ -2375,6 +3238,10 @@ class MCPScanner(Scanner):
                 (reason for reason in view.identity if reason.startswith("npm call setting")),
                 identity_unknown,
             )
+        if identity_unknown is None:
+            identity_unknown = launcher_unknown
+        if identity_unknown is None and not command and not endpoints:
+            identity_unknown = _NO_LAUNCH
         if identity_unknown:
             gaps.append(f"launcher identity unknown ({identity_unknown})")
         if identity.withheld:
@@ -2419,7 +3286,7 @@ class MCPScanner(Scanner):
             if primary is not None and launcher_package is not None and not identity_unknown
             else None
         )
-        settings = self._client_settings(config, tool_lists)
+        settings = self._client_settings(config, tool_lists, dialect.shape)
         context = dict(launch.context)
         loading = [
             variable
@@ -2438,6 +3305,7 @@ class MCPScanner(Scanner):
         risks = self._server_risks(
             name,
             launch=launch,
+            credentials=_credential_positions(credential_hits, names),
             transport=transport,
             command=command,
             endpoint_url=endpoint_url,
@@ -2459,7 +3327,9 @@ class MCPScanner(Scanner):
         )
         unbound = self._unbound_values(args, env, headers, endpoint_url, command, launch, recorded)
         unbound.extend(
-            self._unbound_client_values(config, nested=nested, redacted=tool_lists_redacted)
+            self._unbound_client_values(
+                config, dialect.shape, nested=nested, redacted=tool_lists_redacted
+            )
         )
         if resolver:
             unbound.append("project resolver settings")
@@ -2475,7 +3345,7 @@ class MCPScanner(Scanner):
                     ),
                 )
             )
-        fields = _field_names(config)
+        fields = _field_names(config, dialect.shape, names)
         launcher_properties: dict[str, Any] = {}
         if launch.launcher:
             launcher_properties["launcher"] = launch.launcher
@@ -2494,7 +3364,7 @@ class MCPScanner(Scanner):
         if context:
             launcher_properties["launch_context"] = context
         if header_names:
-            launcher_properties["header_names"] = _exported_names(header_names)
+            launcher_properties["header_names"] = _exported_names(header_names, names)
         if settings:
             launcher_properties["client_settings"] = settings
         source_config_hash = hash_canonical(
@@ -2513,7 +3383,7 @@ class MCPScanner(Scanner):
                     "transport": transport,
                     "endpoint": identity.endpoint,
                     "argument_count": len(args),
-                    "environment_names": _exported_names(env),
+                    "environment_names": _exported_names(env, names),
                     "header_names": launcher_properties.get("header_names", []),
                     "client_settings": settings,
                     "tool_names": tool_names,
@@ -2531,7 +3401,7 @@ class MCPScanner(Scanner):
             package_url=package_url,
             command=identity.command,
             args=[REDACTED for _ in args],
-            env=_exported_environment(env),
+            env=_exported_environment(env, names),
             endpoint_url=identity.endpoint,
             version_pinned=version_pinned,
             source_path=config_scope,
@@ -2868,7 +3738,7 @@ class MCPScanner(Scanner):
 
     @staticmethod
     def _client_settings(
-        config: dict[str, Any], tool_lists: dict[str, list[str]]
+        config: dict[str, Any], tool_lists: dict[str, list[str]], shape: str
     ) -> dict[str, Any]:
         """Client behaviour switches as booleans and counts, and the tool names they name.
 
@@ -2889,6 +3759,8 @@ class MCPScanner(Scanner):
             settings["auto_approved_tools"] = approved
         if config.get("disabled") is True or config.get("enabled") is False:
             settings["disabled"] = True
+        if config.get(_OAUTH_DISABLED) is True and _interpreted(_OAUTH_DISABLED, shape):
+            settings["oauth_disabled"] = True
         for field, label in (
             ("cwd", "working_directory"),
             ("envFile", "environment_file"),
@@ -2897,8 +3769,9 @@ class MCPScanner(Scanner):
             ("watchPaths", "watch_paths"),
             ("bearer_token_env_var", "bearer_token_variable"),
             ("dev", "development_mode"),
+            (_EXTENSION_SETTINGS, "extension_settings"),
         ):
-            if field in config:
+            if field in config and _interpreted(field, shape):
                 settings[label] = True
         filters = {field: tool_lists[field] for field in _TOOL_FILTER_FIELDS if field in tool_lists}
         if filters:
@@ -2934,7 +3807,7 @@ class MCPScanner(Scanner):
 
     @staticmethod
     def _unbound_client_values(
-        config: dict[str, Any], *, nested: bool, redacted: bool
+        config: dict[str, Any], shape: str, *, nested: bool, redacted: bool
     ) -> list[str]:
         """Client settings exported only as present or redacted, whose values only the key covers.
 
@@ -2951,12 +3824,13 @@ class MCPScanner(Scanner):
             ("watch paths", ("watchPaths",)),
             ("authentication settings", ("oauth", "auth")),
             ("development settings", ("dev",)),
+            ("extension settings", (_EXTENSION_SETTINGS,)),
             (
                 "forwarded environment variable names",
                 ("env_vars", "bearer_token_env_var", "env_http_headers"),
             ),
         ):
-            if any(config.get(field) for field in fields):
+            if any(config.get(field) and _interpreted(field, shape) for field in fields):
                 unbound.append(label)
         if redacted:
             unbound.append("redacted tool list entries")
@@ -2979,6 +3853,7 @@ class MCPScanner(Scanner):
         withheld: list[str],
         endpoints: list[str],
         remote_type: bool,
+        credentials: list[tuple[str, str]],
     ) -> list[RiskAssessment]:
         risks: list[RiskAssessment] = []
 
@@ -3141,6 +4016,22 @@ class MCPScanner(Scanner):
                 f"MCP server '{name}' tools run without per-call approval: {scope}.",
                 "Require human approval for tool calls with side effects.",
             )
+        if credentials:
+            listed = "; ".join(
+                f"{position} ({kind})"
+                for position, kind in credentials[:LISTED_CREDENTIAL_POSITIONS]
+            )
+            if (more := len(credentials) - LISTED_CREDENTIAL_POSITIONS) > 0:
+                # Collection stops at the bound, so past it the count is a floor.
+                least = "at least " if len(credentials) >= MAX_CREDENTIAL_POSITIONS else ""
+                listed += f"; and {least}{more} more position{'s' if more > 1 else ''}"
+            add(
+                RiskSeverity.HIGH,
+                "credential_exposure",
+                f"MCP server '{name}' records a literal credential in its launch: {listed}.",
+                "Replace each literal with an environment reference such as ${NAME}, and "
+                "rotate the credential: it is committed.",
+            )
         if withheld:
             add(
                 RiskSeverity.MEDIUM,
@@ -3152,77 +4043,6 @@ class MCPScanner(Scanner):
             )
         return risks
 
-    def _report_unparsed_clients(
-        self,
-        files: ConfinedCollection,
-        result: ScanResult,
-        walked: list[Path],
-        links: list[Path],
-    ) -> None:
-        """Recognised client files whose MCP declarations this collector does not parse.
-
-        A client started in a package directory reads that directory's copy, so the
-        walked copies below the root are gaps too, and another spelling of one is a
-        failure, as for the client files that are parsed.
-        """
-        paths: dict[str, str | None] = dict(UNPARSED_CLIENT_FILES)
-        directories = set(UNPARSED_CLIENT_DIRECTORIES)
-        for path in walked:
-            folded = tuple(fold_name(part) for part in path.parts)
-            for template, spelling in _FOLDED_UNPARSED_TEMPLATES:
-                size = len(template)
-                if len(folded) > size and folded[-size:] == template:
-                    exact = "/".join([*path.parts[:-size], *spelling])
-                    if exact != path.as_posix():
-                        files.report_case_variant(path, exact)
-                    else:
-                        paths[exact] = _UNPARSED_MEMBERS["/".join(spelling)]
-            for template, spelling in _FOLDED_UNPARSED_DIRECTORIES:
-                size = len(template)
-                for start in range(1, len(folded) - size):
-                    if folded[start : start + size] == template:
-                        found = Path(*path.parts[: start + size])
-                        canonical = Path(*path.parts[:start], *spelling)
-                        if found != canonical:
-                            files.report_case_variant(found, canonical)
-                        else:
-                            directories.add(canonical.as_posix())
-        for link in links:
-            folded = tuple(fold_name(part) for part in link.parts)
-            for template, spelling in _FOLDED_UNPARSED_DIRECTORIES:
-                for size in range(1, len(template) + 1):
-                    if len(folded) <= size or folded[-size:] != template[:size]:
-                        continue
-                    found = link.joinpath(*spelling[size:])
-                    canonical = Path(*link.parts[:-size], *spelling)
-                    if not files.is_directory(found):
-                        # The walk sees the target under its own name, so another
-                        # spelling below the link is only found here, as for files.
-                        files.read_bytes(found, missing_ok=True)
-                        continue
-                    if found != canonical:
-                        files.report_case_variant(found, canonical)
-                    else:
-                        directories.add(canonical.as_posix())
-        for name, member in paths.items():
-            text = files.read_text(name, missing_ok=True)
-            if text is None:
-                continue
-            if member is not None:
-                try:
-                    data = _load_jsonc(text)
-                except (ValueError, RecursionError):
-                    data = {member: True}
-                if not isinstance(data, dict) or not data.get(member):
-                    continue
-            result.surfaces_excluded.append(f"{name}: MCP client configuration not inventoried")
-        root = set(UNPARSED_CLIENT_DIRECTORIES)
-        for directory in sorted(directories, key=lambda name: (name not in root, name)):
-            if next(iter(files.iter_files(directory)), None) is not None:
-                result.surfaces_excluded.append(
-                    f"{directory}: MCP client configuration not inventoried"
-                )
-
     def _extract_tools(
         self,
         server_name: str,
@@ -3232,6 +4052,9 @@ class MCPScanner(Scanner):
         server_ref: str,
         config_path: str,
     ) -> list[ToolComponent]:
+        # Deferred: the prompt collector imports this module for the binding key's name.
+        from nexus_symbiote.scanners.prompt import definition_text_risks
+
         tools_config = config.get("tools", [])
         tool_comps = []
         seen_refs: set[str] = set()
@@ -3284,7 +4107,9 @@ class MCPScanner(Scanner):
                         t_name, safe["description"], safe["inputSchema"], safe["annotations"]
                     )
 
-                    risks: list[RiskAssessment] = []
+                    # Read before redaction: text shaped like a credential is withheld from
+                    # the record, and a host still shows the model what it hid.
+                    risks = definition_text_risks(tool_def, f"{config_path}: tool {t_name}")
                     if side_effect in (
                         SideEffectProfile.DESTRUCTIVE,
                         SideEffectProfile.FINANCIAL_TRANSACTION,
@@ -3361,6 +4186,9 @@ class MCPScanner(Scanner):
 
     @staticmethod
     def _detect_host_from_config(config_name: str) -> str | None:
+        template = _template(config_name)
+        if template is not None and template.host is not None:
+            return template.host
         path = Path(config_name)
         return _CLIENTS_BY_NAME.get(path.name) or next(
             (host for part in path.parts[:-1] if (host := _HOST_DIRECTORIES.get(part))), None

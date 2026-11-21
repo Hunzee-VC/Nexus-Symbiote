@@ -812,3 +812,78 @@ class TestPolicyIntegration:
             subject_bytes=b"x" * (MAX_SUBJECT_BYTES + 1),
         )
         assert oversized["reason"] == "input-too-large"
+
+    def test_attestation_gate_failure_follows_exit_code_scheme(self, tmp_path):
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+        bom_path = _make_fixture_bom(tmp_path, with_risks=False)
+        key_dir = tmp_path / "keys"
+        key_dir.mkdir(mode=0o700)
+        priv = Ed25519PrivateKey.generate()
+        priv_path = key_dir / "signer.key"
+        priv_path.write_bytes(
+            priv.private_bytes(
+                serialization.Encoding.PEM,
+                serialization.PrivateFormat.PKCS8,
+                serialization.NoEncryption(),
+            )
+        )
+        priv_path.chmod(0o600)
+        pub_path = key_dir / "signer.pub"
+        pub_path.write_bytes(
+            priv.public_key().public_bytes(
+                serialization.Encoding.PEM,
+                serialization.PublicFormat.SubjectPublicKeyInfo,
+            )
+        )
+        pub_path.chmod(0o600)
+        att_path = tmp_path / "bom.att.json"
+        runner = CliRunner()
+        signed = runner.invoke(
+            main,
+            [
+                "attest",
+                str(bom_path),
+                "--key",
+                str(priv_path),
+                "--purpose",
+                "reviewed",
+                "--out",
+                str(att_path),
+            ],
+        )
+        assert signed.exit_code == 0, signed.output
+        gate = [
+            "--require-attestation",
+            str(att_path),
+            "--trusted-key",
+            str(pub_path),
+            "--attestation-purpose",
+            "generated",
+        ]
+
+        for command in ("validate", "risk"):
+            detailed = runner.invoke(
+                main, [command, str(bom_path), *gate, "--detailed-exit-codes", "--json-output"]
+            )
+            assert detailed.exit_code == 3, detailed.output
+            report = json.loads(detailed.output)
+            assert report["passed"] is False
+            assert report["attestation"]["reason"] == "purpose-mismatch"
+            legacy = runner.invoke(main, [command, str(bom_path), *gate, "--legacy-exit-codes"])
+            assert legacy.exit_code == 1, legacy.output
+
+        verify = [
+            "verify-attestation",
+            str(bom_path),
+            str(att_path),
+            "--trusted-key",
+            str(pub_path),
+            "--purpose",
+            "generated",
+        ]
+        verified = runner.invoke(main, ["--detailed-exit-codes", *verify])
+        assert verified.exit_code == 3, verified.output
+        assert "(purpose-mismatch)" in verified.output
+        assert runner.invoke(main, verify).exit_code == 1

@@ -41,7 +41,12 @@ from nexus_symbiote.core.hashing import (
     hash_canonical,
     open_regular_file,
 )
-from nexus_symbiote.core.models import ClaimEvidence, ModelComponent, RiskAssessment
+from nexus_symbiote.core.models import (
+    NAMED_FORMAT_PROPERTY,
+    ClaimEvidence,
+    ModelComponent,
+    RiskAssessment,
+)
 from nexus_symbiote.scanners.base import Scanner, ScanResult
 from nexus_symbiote.scanners.credential_files import credential_gap, credential_shaped
 from nexus_symbiote.scanners.shadowscan import REPORT_PATHS
@@ -62,6 +67,7 @@ from nexus_symbiote.utils.crypto import (
 )
 from nexus_symbiote.utils.model_formats import (
     GGUF_LIMIT,
+    GGUF_MAGIC,
     FormatError,
     InspectionBudget,
     gguf_metadata,
@@ -98,6 +104,10 @@ NAMED_MODEL_FILES = {
     "saved_model.pb": ("pb", "tensorflow-savedmodel"),
     "saved_model.pbtxt": ("pbtxt", "tensorflow-savedmodel"),
 }
+# The formats whose header a bounded reader checks. A file named as one is recorded
+# with that format and a model type only when its header is the format's; the other
+# formats have no such check and are recorded from the name.
+_HEADER_CHECKED = frozenset({"safetensors", "gguf"})
 
 MODEL_CONFIG_FILES = [
     "config.json",
@@ -188,6 +198,13 @@ INSPECTION_FAILED = (
     "Artifact could not be read or its content inspected; no bounded structural "
     "validator for this format/loader"
 )
+GGUF_MISMATCH = (
+    "Named as GGUF, but the content does not start with the GGUF magic; "
+    "the format was not established"
+)
+GGUF_TOO_SHORT = (
+    "Named as GGUF, but too short to hold the GGUF magic; the format was not established"
+)
 PICKLE_NAME_UNREADABLE = "Potential code-executing loader format (artifact could not be inspected)"
 PICKLE_NAME_UNEVIDENCED = "Named pickle-family format; no pickle evidence in the inspected prefix"
 PICKLE_NAME_EMPTY = "empty file"
@@ -229,8 +246,6 @@ _TAR_NUMBERS = (
 )
 _LZMA_ALONE_HEADER = 13
 _LZMA_JOBLIB_PREFIX = b"\x5d\x00"
-# llama.cpp opens a model by this magic, not by its name.
-_GGUF_MAGIC = b"GGUF"
 # Content that a bound left unread: a file no model name rates is inventoried for it.
 _CONTENT_UNREAD = frozenset(
     {
@@ -1001,7 +1016,9 @@ def inspect_model_format(
 
     A file that cannot be read, or whose content check fails, is unknown: a SafeTensors
     one as malformed SafeTensors, any other as ``INSPECTION_FAILED``, except a
-    pickle-family name, which keeps the code-executing rating its loader implies.
+    pickle-family name, which keeps the code-executing rating its loader implies. A
+    file named as GGUF whose content is not recognized as anything else is unknown as
+    ``GGUF_MISMATCH`` without the GGUF magic, or ``GGUF_TOO_SHORT`` when shorter than it.
 
     A pickle-family name is rated by its inspected content, not by the name alone: it
     keeps the code-executing rating when the content is a recognized pickle, a NumPy
@@ -1048,13 +1065,18 @@ def inspect_model_format(
                 # name rating says what the file is.
                 if container is not None and (
                     container[0] is SerializationSafety.UNSAFE_CODE_EXECUTION
-                    and not (pickle_family and prefix.startswith(_GGUF_MAGIC))
+                    and not (pickle_family and prefix.startswith(GGUF_MAGIC))
                     or not (safetensors or pickle_family)
                 ):
                     return container
             if head is not None:
                 return _pickle_name_rating(path, head, size, container)
             if not safetensors:
+                if path.suffix.lower() == ".gguf" and not prefix.startswith(GGUF_MAGIC):
+                    return (
+                        SerializationSafety.UNKNOWN,
+                        GGUF_TOO_SHORT if len(prefix) < len(GGUF_MAGIC) else GGUF_MISMATCH,
+                    )
                 return (
                     SerializationSafety.UNKNOWN,
                     "No bounded structural validator for this format/loader",
@@ -1095,7 +1117,7 @@ def _pickle_name_rating(
         or _tar_header(start)
     ):
         return SerializationSafety.UNSAFE_CODE_EXECUTION, PICKLE_NAME_WRAPPED
-    if start.startswith(_GGUF_MAGIC):
+    if start.startswith(GGUF_MAGIC):
         return SerializationSafety.UNSAFE_CODE_EXECUTION, PICKLE_NAME_GGUF
     if container is not None and container[1] in _CONTENT_UNREAD:
         return SerializationSafety.UNSAFE_CODE_EXECUTION, _loader_rated(container[1])
@@ -1239,6 +1261,9 @@ class ModelArtifactObservation:
     chat_templates: tuple[tuple[str, str], ...] = ()
     gguf_architecture: str | None = None
     gguf_error: str | None = None
+    # For a name in ``_HEADER_CHECKED``: whether the header is that format's, which is
+    # a SafeTensors header that validates or the GGUF magic.
+    header_matched: bool = False
 
 
 def observe_model_artifact(
@@ -1345,7 +1370,18 @@ def _complete_observation(
     if descriptor_binding(before) != descriptor_binding(after):
         raise OSError("model artifact changed during inspection and hashing")
     return ModelArtifactObservation(
-        safety, explanation, "sha256:" + observed.digest.hexdigest(), **extra
+        safety,
+        explanation,
+        "sha256:" + observed.digest.hexdigest(),
+        # Only a SafeTensors header that validates is rated safe. The GGUF magic before
+        # content rated as code that runs on load is a disguise, not a GGUF file.
+        header_matched=safety == SerializationSafety.SAFE
+        or (
+            key == "gguf"
+            and safety != SerializationSafety.UNSAFE_CODE_EXECUTION
+            and observed.prefix.startswith(GGUF_MAGIC)
+        ),
+        **extra,
     )
 
 
@@ -2577,6 +2613,13 @@ class ModelScanner(Scanner):
         )
         templates = [*context.chat_templates, *gguf_templates] if recorded else []
         properties: dict[str, Any] = {"format_inspection": format_evidence}
+        # A header that was not read, or is not the format's, establishes neither the
+        # format the name claims nor a model type; the record says what the name claims.
+        established = fmt_key not in _HEADER_CHECKED or (
+            observation is not None and observation.header_matched
+        )
+        if not established:
+            properties[NAMED_FORMAT_PROPERTY] = fmt_name
         if companions:
             properties["weight_files"] = [
                 {"path": companion.as_posix(), "sha256": digest}
@@ -2616,12 +2659,12 @@ class ModelScanner(Scanner):
         component = ModelComponent(
             bom_ref=f"model:{name}",
             name=name,
-            serialization_format=fmt_name,
+            serialization_format=fmt_name if established else None,
             serialization_safety=safety,
             signing_status=status.value,
             signing_identity=verification.identity,
             properties=properties,
-            model_type=self._infer_model_type(config, path),
+            model_type=self._infer_model_type(config, path) if established else None,
             derivation_type=config.get("peft_type"),
             quantization_method=config.get("quantization_method") or config.get("quant_method"),
             trust_remote_code=context.trust_remote_code,
@@ -2641,7 +2684,13 @@ class ModelScanner(Scanner):
             source_path=name,
             trust_tier=trust_tier,
             risks=self._assess_model_risks(
-                path, fmt_key, safety, status.value, context, embedded=embedded
+                path,
+                fmt_key,
+                safety,
+                status.value,
+                context,
+                embedded=embedded,
+                established=established,
             ),
             claims=(
                 {SIGNING_EVIDENCE_CLAIM: verification.evidence}
@@ -2681,6 +2730,7 @@ class ModelScanner(Scanner):
         context: _DirectoryContext,
         *,
         embedded: bool,
+        established: bool,
     ) -> list[RiskAssessment]:
         risks: list[RiskAssessment] = []
 
@@ -2726,6 +2776,20 @@ class ModelScanner(Scanner):
                         "templates only in a sandboxed Jinja2 environment."
                     ),
                     references=[DOCUMENTATION],
+                )
+            )
+
+        if safety == SerializationSafety.UNKNOWN and fmt_key == "safetensors" and not established:
+            # Stored, in the words risk derives it in: a build before this record's
+            # format derives the finding from serialization_format, which is withheld
+            # here, and would pass the gate that fails on it at any score.
+            risks.append(
+                RiskAssessment(
+                    severity=RiskSeverity.HIGH,
+                    category="invalid_safetensors",
+                    detail=(
+                        "The declared SafeTensors artifact has no corroborated structural safety."
+                    ),
                 )
             )
 

@@ -15,6 +15,7 @@ from nexus_symbiote.core.collection import is_imported
 from nexus_symbiote.core.coverage import CoverageStatus, assess_coverage
 from nexus_symbiote.core.enums import RiskSeverity, SerializationSafety
 from nexus_symbiote.core.models import (
+    NAMED_FORMAT_PROPERTY,
     AgentComponent,
     AnyComponent,
     ComponentBase,
@@ -39,6 +40,16 @@ SEVERITY_WEIGHTS: dict[RiskSeverity, float] = {
 }
 
 
+def _declared_safetensors(component: ModelComponent) -> bool:
+    """Whether the record gives SafeTensors as the format, or as the format that the file's
+    name claims: the model collector records only the claim when no header established it."""
+    declared = (component.serialization_format, component.properties.get(NAMED_FORMAT_PROPERTY))
+    return any(
+        isinstance(name, str) and name.lower() in {"safetensors", "safe-tensors"}
+        for name in declared
+    )
+
+
 def _intrinsic_model_risks(component: ModelComponent) -> list[RiskAssessment]:
     """Derive risk from declared security facts even if findings were removed."""
     risks = list(component.risks)
@@ -60,7 +71,7 @@ def _intrinsic_model_risks(component: ModelComponent) -> list[RiskAssessment]:
             "The model configuration enables repository code execution.",
         ),
         (
-            (component.serialization_format or "").lower() in {"safetensors", "safe-tensors"}
+            _declared_safetensors(component)
             and component.serialization_safety == SerializationSafety.UNKNOWN,
             RiskSeverity.HIGH,
             "invalid_safetensors",

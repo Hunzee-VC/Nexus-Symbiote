@@ -16,6 +16,7 @@ from urllib.parse import urlsplit
 
 from nexus_symbiote import limits
 from nexus_symbiote.core.aibom import DependencyEdge
+from nexus_symbiote.core.identifiers import neutral_text
 from nexus_symbiote.core.models import (
     AnyComponent,
     DiscoveryVerification,
@@ -26,6 +27,7 @@ from nexus_symbiote.utils.confined import BoundedRecords, ConfinedCollection
 from nexus_symbiote.utils.secrets import holds_token_shape, redact_text
 
 MAX_CONFIG_BYTES = 4 * 1024 * 1024
+YAML_TOKEN_LIMIT = 20_000
 MAX_MODEL_BYTES = 1024 * 1024 * 1024
 # The default only: a source budget reads the operator's source-scan-bytes limit.
 MAX_SOURCE_BYTES = limits.DEFAULTS.source_scan_bytes
@@ -228,8 +230,10 @@ class ScanResult:
                     component.properties[key] = [
                         relative(value) if isinstance(value, str) else value for value in values
                     ]
-        for records in (self.surfaces_scanned, self.surfaces_excluded, self.scan_failures):
-            records[:] = [relative(record) for record in records]
+        self.surfaces_scanned[:] = [relative(record) for record in self.surfaces_scanned]
+        # Coverage reasons quote checkout text, such as a server name, and are exported.
+        for records in (self.surfaces_excluded, self.scan_failures):
+            records[:] = [neutral_text(relative(record)) for record in records]
 
 
 class SourceBudget:
@@ -312,6 +316,59 @@ class Scanner(ABC):
     def scan(self, project_root: Path) -> ScanResult:
         """Scan a project directory and return discovered components."""
 
+    @staticmethod
+    def _parse_yaml_mapping(
+        path: Path,
+        text: str,
+        result: ScanResult,
+        *,
+        inert_without: frozenset[str] | None = None,
+    ) -> dict[str, Any] | None:
+        """Parse ``text`` read from ``path`` as a bounded static YAML mapping.
+
+        Anchors, aliases and tags are refused, as is more than ``YAML_TOKEN_LIMIT``
+        tokens. With ``inert_without``, a document with no content, or one with an
+        anchor, alias or tag but no scalar equal to any of those names, is an empty
+        mapping: it cannot declare a key of that name, so it is never composed.
+        """
+        try:
+            import yaml
+        except ImportError:
+            result.scan_failures.append(f"{path.as_posix()}: YAML parser unavailable")
+            return None
+        from nexus_symbiote.policy import parse_yaml_mapping
+
+        frame = (
+            yaml.StreamStartToken,
+            yaml.StreamEndToken,
+            yaml.DocumentStartToken,
+            yaml.DocumentEndToken,
+        )
+        try:
+            graph = named = content = False
+            for index, token in enumerate(yaml.scan(text)):
+                if index >= YAML_TOKEN_LIMIT:
+                    raise ValueError("YAML token limit exceeded")
+                if isinstance(token, (yaml.AliasToken, yaml.AnchorToken, yaml.TagToken)):
+                    if inert_without is None:
+                        raise ValueError("unsupported YAML graph")
+                    graph = True
+                elif isinstance(token, yaml.ScalarToken):
+                    named = named or (inert_without is not None and token.value in inert_without)
+                if not isinstance(token, frame):
+                    content = True
+            if inert_without is not None and (not content or (graph and not named)):
+                return {}
+            if graph:
+                raise ValueError("unsupported YAML graph")
+            data = parse_yaml_mapping(text)
+        except (ValueError, RecursionError, OverflowError, IndexError, yaml.YAMLError):
+            result.scan_failures.append(
+                f"{path.as_posix()}: YAML mapping parse failed or unsupported"
+            )
+            return None
+        return data
+
     def _read_mapping(
         self, path: Path, result: ScanResult, *, missing_ok: bool = True
     ) -> dict[str, Any] | None:
@@ -324,25 +381,7 @@ class Scanner(ABC):
             text = self._files.read_text(path, missing_ok=missing_ok)
             if text is None:
                 return None
-            try:
-                import yaml
-            except ImportError:
-                result.scan_failures.append(f"{path.as_posix()}: YAML parser unavailable")
-                return None
-            from nexus_symbiote.policy import parse_yaml_mapping
-
-            try:
-                for index, token in enumerate(yaml.scan(text)):
-                    if index >= 20_000 or isinstance(
-                        token, (yaml.AliasToken, yaml.AnchorToken, yaml.TagToken)
-                    ):
-                        raise ValueError("unsupported YAML graph")
-                data = parse_yaml_mapping(text)
-            except (ValueError, RecursionError, OverflowError, IndexError, yaml.YAMLError):
-                result.scan_failures.append(
-                    f"{path.as_posix()}: YAML mapping parse failed or unsupported"
-                )
-                return None
+            return self._parse_yaml_mapping(path, text, result)
         if data is None:
             return None
         if not isinstance(data, dict):
