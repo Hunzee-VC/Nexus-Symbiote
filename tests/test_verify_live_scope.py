@@ -19,9 +19,12 @@ from nexus_symbiote.core.aibom import AIBOM
 from nexus_symbiote.core.hashing import TOOL_DEFINITION_HASH_VERSION, hash_tool_definition
 from nexus_symbiote.core.models import MCPServerComponent, ToolComponent
 from nexus_symbiote.live import stdio, verify
+from nexus_symbiote.live.pinned_process import opt_out_supported
 from nexus_symbiote.live.verify import record_candidate, verify_mcp_servers
 
 pytestmark = pytest.mark.usefixtures("nonisolated_pinned_fixtures")
+# Taken before that fixture replaces it, so a test can restore the product's own check.
+REAL_OPT_OUT_SUPPORTED = opt_out_supported
 
 
 TOOL = {"name": "weather", "description": "Read weather", "inputSchema": {"type": "object"}}
@@ -683,9 +686,12 @@ def test_teardown_is_confirmed_only_where_cleanup_can_list_what_the_launcher_sta
     result, _, _ = invoke(tmp_path, inventory(), policy, "--json-output", "--no-isolation")
     assert result.exit_code == 0, result.output
     assert json.loads(result.stdout)["results"][0]["teardown"] == expected
+    # Off Linux the opt-out is refused before any launch, so no teardown is ever claimed;
+    # the module fixture lifts that refusal for the protocol tests, so it is restored here.
     monkeypatch.setattr(pinned_process.sys, "platform", "darwin")
+    monkeypatch.setattr(pinned_process, "opt_out_supported", REAL_OPT_OUT_SUPPORTED)
     report = verify_mcp_servers(inventory(), trusted_launchers=policy)
-    assert [(r.status, r.teardown) for r in report.results] == [("verified", None)]
+    assert [(r.reason, r.teardown) for r in report.results] == [("isolation-unavailable", None)]
 
 
 def test_a_server_that_is_not_verified_reports_no_teardown(tmp_path):

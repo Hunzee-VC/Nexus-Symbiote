@@ -253,6 +253,85 @@ def test_off_linux_the_cli_refuses_pinned_execution_without_an_explicit_opt_out(
     assert json.loads(blocked.stdout)["results"][0]["reason"] == "isolation-unavailable"
 
 
+def _recorded_launches(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
+    """Every process the pinned launch helpers start, still started for real."""
+    launches: list[list[str]] = []
+    popen = subprocess.Popen
+
+    def record(argv: list[str], **kwargs: Any) -> subprocess.Popen[bytes]:
+        launches.append(list(argv))
+        return popen(argv, **kwargs)
+
+    monkeypatch.setattr(pinned_process.subprocess, "Popen", record)
+    return launches
+
+
+def test_off_linux_verify_live_refuses_the_isolation_opt_out(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Off Linux only killpg would remain, and a setsid child would outlive a session
+    # reported as a success, so the opt-out is refused before any launcher runs.
+    monkeypatch.setattr(pinned_process.sys, "platform", "darwin")
+    monkeypatch.setattr("nexus_symbiote.supply_chain_cli._running_as_root", lambda: True)
+    launches = _recorded_launches(monkeypatch)
+    arguments, _ = command(tmp_path, inventory(), launcher(tmp_path))
+    refused = CliRunner().invoke(main, [*arguments, "--json-output", "--no-isolation"])
+    assert refused.exit_code == 1, refused.output
+    report = json.loads(refused.stdout)
+    assert not report["complete"]
+    assert [result["reason"] for result in report["results"]] == ["isolation-unavailable"]
+    stderr = " ".join(refused.stderr.split())
+    assert "--no-isolation is refused off Linux" in stderr
+    assert "kernel PID containment is disabled" not in stderr
+    assert "--no-isolation as root" not in stderr
+    assert launches == []
+
+
+def test_off_linux_isolation_off_refuses_every_launch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(pinned_process.sys, "platform", "darwin")
+    launches = _recorded_launches(monkeypatch)
+    marker = tmp_path / "pid"
+    command_path, digest = _launcher(tmp_path, marker, detached=True)
+    with isolation_off():
+        assert pinned_process.opt_out_supported() is False
+        with pytest.raises(LaunchPolicyError) as denied:
+            observe_pinned(str(command_path), digest)
+        assert denied.value.reason == "isolation-unavailable"
+        session = PinnedStdioSession(
+            command=str(command_path), sha256=digest, server_id="server:mail"
+        )
+        with pytest.raises(AuthorizationError, match="opt-out is refused off Linux"), session:
+            pass
+        with pytest.raises(pinned_process.PinnedProcessError) as argv_denied:
+            pinned_process.isolated_argv(tmp_path / "server")
+        assert argv_denied.value.reason == "isolation-unavailable"
+    assert launches == []
+    time.sleep(0.2)
+    assert not marker.exists()
+
+
+def test_on_linux_the_isolation_opt_out_still_launches(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    staged = tmp_path / "server"
+    with monkeypatch.context() as linux:
+        linux.setattr(pinned_process.sys, "platform", "linux")
+        assert pinned_process.opt_out_supported() is True
+        with isolation_off():
+            argv = pinned_process.isolated_argv(staged)
+        assert argv[-1] == str(staged)
+    if not _LINUX:
+        return
+    # On a Linux host the opted-out launch runs, and its double-forked child is killed.
+    marker = tmp_path / "pid"
+    command_path, digest = _launcher(tmp_path, marker, detached=True)
+    with isolation_off():
+        observe_pinned(str(command_path), digest)
+    _assert_dead(_host_pid(marker))
+
+
 @pytest.mark.parametrize(
     ("platform", "exited", "raised"),
     [("darwin", True, False), ("darwin", False, True), ("linux", True, True)],
@@ -478,7 +557,8 @@ def test_cleanup_elsewhere_than_linux_does_not_stop_the_launcher(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # Python before 3.13 has no os.waitid on macOS, and the sweep that the stop serves
-    # reads Linux's /proc.
+    # reads Linux's /proc. Without them a setsid child outlived the cleanup, so the opt-out
+    # is refused there before anything runs, and nothing is left to stop or signal.
     monkeypatch.setattr(pinned_process.sys, "platform", "darwin")
     monkeypatch.delattr(pinned_process.os, "waitid", raising=False)
     kill = os.kill
@@ -491,21 +571,12 @@ def test_cleanup_elsewhere_than_linux_does_not_stop_the_launcher(
     monkeypatch.setattr(pinned_process.os, "kill", record)
     marker = tmp_path / "pid"
     command, digest = _launcher(tmp_path, marker)
-    with isolation_off():
+    with isolation_off(), pytest.raises(LaunchPolicyError) as denied:
         observe_pinned(str(command), digest)
-    assert signal.SIGSTOP not in sent
-    child = _host_pid(marker)
-    if _LINUX:
-        # The /proc sweep still finds the setsid child that killpg misses.
-        _assert_dead(child)
-        return
-    # Without /proc the opt-out is best effort, as documented: the setsid child outlives
-    # cleanup, which is why a launch that is not opted out is refused here.
-    try:
-        assert _stat(child)[0] not in {"Z", "X"}
-    finally:
-        with contextlib.suppress(ProcessLookupError):
-            os.kill(child, signal.SIGKILL)
+    assert denied.value.reason == "isolation-unavailable"
+    assert sent == []
+    time.sleep(0.2)
+    assert not marker.exists()
 
 
 class _NoPrctl:
@@ -533,10 +604,12 @@ def test_subreaper_wrapper_needs_linux_prctl_and_an_interpreter(
 ) -> None:
     staged = tmp_path / "server"
     if not _LINUX:
-        # This host is the case the parameters simulate: no wrapper, a direct exec.
+        # This host is the case the parameters simulate: no wrapper, and the opt-out is
+        # refused rather than run as a direct exec.
         assert pinned_process._subreaper_argv(staged) is None
-        with isolation_off():
-            assert pinned_process.isolated_argv(staged) == [str(staged)]
+        with isolation_off(), pytest.raises(pinned_process.PinnedProcessError) as denied:
+            pinned_process.isolated_argv(staged)
+        assert denied.value.reason == "isolation-unavailable"
         return
     assert pinned_process._subreaper_argv(staged) == [
         sys.executable,
@@ -551,7 +624,13 @@ def test_subreaper_wrapper_needs_linux_prctl_and_an_interpreter(
     monkeypatch.setattr(owner, attribute, value, raising=False)
     assert pinned_process._subreaper_argv(staged) is None
     with isolation_off():
-        assert pinned_process.isolated_argv(staged) == [str(staged)]
+        if attribute == "platform":
+            # Off Linux the opt-out is refused rather than run as a direct exec.
+            with pytest.raises(pinned_process.PinnedProcessError) as denied:
+                pinned_process.isolated_argv(staged)
+            assert denied.value.reason == "isolation-unavailable"
+        else:
+            assert pinned_process.isolated_argv(staged) == [str(staged)]
 
 
 @_SWEEP_ONLY
@@ -577,10 +656,19 @@ def test_cli_requires_an_explicit_opt_out_when_the_namespace_is_unavailable(
     assert blocked.exit_code == 1, blocked.output
     assert json.loads(blocked.stdout)["results"][0]["reason"] == "isolation-unavailable"
     allowed = CliRunner().invoke(main, [*arguments, "--json-output", "--no-isolation"])
-    assert allowed.exit_code == 0, allowed.output
-    assert "kernel PID containment is disabled" in allowed.stderr
     usage = " ".join(CliRunner().invoke(main, ["verify-live", "--help"]).output.split())
-    for text in (" ".join(allowed.stderr.split()), usage):
+    assert "Refused off Linux, where no launcher runs" in usage
+    texts = [usage]
+    if _LINUX:
+        assert allowed.exit_code == 0, allowed.output
+        assert "kernel PID containment is disabled" in allowed.stderr
+        texts.append(" ".join(allowed.stderr.split()))
+    else:
+        # The opt-out is refused here before any launcher runs.
+        assert allowed.exit_code == 1, allowed.output
+        assert json.loads(allowed.stdout)["results"][0]["reason"] == "isolation-unavailable"
+        assert "--no-isolation is refused off Linux" in " ".join(allowed.stderr.split())
+    for text in texts:
         assert "its own process group" in text
         assert "stays its parent as a child subreaper" in text
         assert "ignores the signals it can" in text
@@ -1431,8 +1519,10 @@ def test_verify_live_fails_a_server_whose_namespace_did_not_end(
     assert result.exit_code == 1, result.output
     report = json.loads(result.stdout)
     assert not report["complete"]
-    assert report["results"][0]["reason"] == "isolation-teardown-failed"
-    assert report["results"][0]["error"] == verify.REASONS["isolation-teardown-failed"]
+    # Off Linux the opt-out is refused before a launcher runs, so no teardown happens.
+    reason = "isolation-teardown-failed" if _LINUX else "isolation-unavailable"
+    assert report["results"][0]["reason"] == reason
+    assert report["results"][0]["error"] == verify.REASONS[reason]
 
 
 def test_gate_is_disabled_and_init_fd_closes_without_pidfd_send_signal(
@@ -2253,6 +2343,12 @@ def test_opting_out_as_root_prints_a_second_warning(
     monkeypatch.setattr("nexus_symbiote.supply_chain_cli._running_as_root", lambda: True)
     arguments, _ = command(tmp_path, inventory(), launcher(tmp_path))
     allowed = CliRunner().invoke(main, [*arguments, "--json-output", "--no-isolation"])
+    if not _LINUX:
+        # The opt-out is refused here, so no launcher runs as root to warn about.
+        assert allowed.exit_code == 1, allowed.output
+        assert "--no-isolation is refused off Linux" in " ".join(allowed.stderr.split())
+        assert "warning: --no-isolation as root" not in allowed.stderr
+        return
     assert allowed.exit_code == 0, allowed.output
     assert "warning: --no-isolation as root" in allowed.stderr
 
