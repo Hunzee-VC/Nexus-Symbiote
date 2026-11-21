@@ -101,11 +101,17 @@ DEFAULT_TIMEOUT_SECONDS = 300
 
 
 @pytest.fixture
-def nonisolated_pinned_fixtures() -> Iterator[None]:
-    """Protocol fixtures opt out explicitly; containment has separate default-denial tests."""
-    from nexus_symbiote.live.pinned_process import isolation_off
+def nonisolated_pinned_fixtures(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Protocol fixtures opt out explicitly; containment has separate default-denial tests.
 
-    with isolation_off():
+    Off Linux the product refuses the opt-out. These tests check the MCP exchange, not
+    containment, so they lift that refusal to keep running there; the refusal itself is
+    tested without this fixture, in tests/test_pinned_process_isolation.py.
+    """
+    from nexus_symbiote.live import pinned_process
+
+    monkeypatch.setattr(pinned_process, "opt_out_supported", lambda: True)
+    with pinned_process.isolation_off():
         yield
 
 
