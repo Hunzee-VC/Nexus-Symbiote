@@ -184,7 +184,7 @@ def _check_key_placement(
             if any(resolved.is_relative_to(d) for d in untrusted_dirs) or ancestors & untrusted:
                 raise click.UsageError(
                     f"a {option} file must lie outside every git working tree that holds "
-                    f"{holders} or the current directory, and outside any directory in {holders}; "
+                    f"{holders} or the current directory, and outside {holders}; "
                     "this catches misplacement, it does not authenticate the key"
                 )
             if os.stat(resolved).st_nlink != 1:
