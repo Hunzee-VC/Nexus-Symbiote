@@ -28,14 +28,14 @@ def clone_corpus(tmp_path):
 # The digest of the committed manifest, labels and fixtures. The gate compares results
 # only with the manifest they were produced from, so a label flipped in the same change as
 # the detector would pass it; changing any case must also change this line, visibly.
-CORPUS_DIGEST = "cfa1b7b2ae15f80adbca486a2ae53dd77e54d3a10cddb8f6976765c13382c7cc"
+CORPUS_DIGEST = "554fce5e76a9056241ec47e756792f39ad66b35ffd03389b6f6a58aaacc22255"
 
 
 def test_committed_inputs_have_exact_hashes_and_explicit_labels():
     manifest, digest = benchmark.load_manifest(benchmark.DEFAULT_MANIFEST)
     assert digest == CORPUS_DIGEST
-    assert len(manifest["cases"]) == 22
-    assert sum(c["task"] == "detection" for c in manifest["cases"]) == 20
+    assert len(manifest["cases"]) == 25
+    assert sum(c["task"] == "detection" for c in manifest["cases"]) == 23
     assert any(c["truth"] is True for c in manifest["cases"])
     assert any(c["truth"] is False for c in manifest["cases"])
     assert any(c["truth"] is None for c in manifest["cases"])
@@ -122,8 +122,8 @@ def test_the_key_order_case_needs_canonical_descriptor_hashing(monkeypatch):
 
 def test_actual_corpus_run_records_evidence_and_unknown_coverage():
     report = benchmark.run_benchmark()
-    assert report["corpus"]["cases"] == 22
-    assert report["metrics"]["detection_cases"] == 20
+    assert report["corpus"]["cases"] == 25
+    assert report["metrics"]["detection_cases"] == 23
     assert report["measurement"]["elapsed_seconds"] > 0
     assert report["measurement"]["python_traced_peak_bytes"] > 0
     assert len(report["tool"]["source_digest"]) == 64

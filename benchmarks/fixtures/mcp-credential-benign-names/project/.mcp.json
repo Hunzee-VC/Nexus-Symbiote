@@ -1,0 +1,26 @@
+{
+  "mcpServers": {
+    "fixture": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "some-mcp@1.0.0",
+        "--description",
+        "Basic calculator tools",
+        "--title",
+        "Token usage dashboard",
+        "--note",
+        "Authentication: handled by the gateway"
+      ],
+      "env": {
+        "PWD": "/workspace/app2",
+        "GIT_AUTHOR_NAME": "Jane Developer",
+        "SSL_CERT_FILE": "/etc/ssl/certs/ca-certificates.crt",
+        "GOOGLE_APPLICATION_CREDENTIALS": "/home/dev/.config/gcloud/sa.json",
+        "TOKENIZER": "cl100k_base",
+        "KEYBOARD_LAYOUT": "us-international",
+        "SESSION_TIMEOUT_MS": "3600000000"
+      }
+    }
+  }
+}

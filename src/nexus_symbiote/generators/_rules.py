@@ -96,6 +96,11 @@ RULES: dict[str, RuleInfo] = {
         "Large instruction file",
         "An instruction file is large enough to make review for injected text difficult.",
     ),
+    "instruction_injection": RuleInfo(
+        "Injected instructions or deception in prompt files",
+        "An instruction file, skill declaration, or assistant prompt contains prompt-injection "
+        "override directives, exfiltration instructions, or automated-auditor deception.",
+    ),
     "instruction_layering": RuleInfo(
         "Layered instruction files",
         "An IDE agent reads instructions from more than one location.",
@@ -146,6 +151,13 @@ RULES: dict[str, RuleInfo] = {
         "MCP tools without per-call approval",
         "An MCP server's tools run without per-call approval: alwaysAllow, autoApprove or "
         "trust is set.",
+    ),
+    "credential_exposure": RuleInfo(
+        "Literal credential in an MCP launch",
+        "An MCP server's env value, launch argument, header or endpoint URL query holds a "
+        "literal credential, which the inventory redacts: a vendor token shape, an "
+        "authorization scheme credential or a generic secret-like value. The finding names "
+        "the positions, never a value.",
     ),
     "credential_helper": RuleInfo(
         "Credential helper command",
@@ -247,6 +259,11 @@ RULES: dict[str, RuleInfo] = {
     "transport_ambiguity": RuleInfo(
         "Ambiguous MCP transport",
         "An MCP server declares both a launch command and an endpoint or a remote transport type.",
+    ),
+    "tool_description_poisoning": RuleInfo(
+        "Poisoned instructions in tool description or schema",
+        "A tool description, JSON schema field, or agent card contains coercive "
+        "tags, override directives, credential-relay instructions, or user-concealment guidance.",
     ),
     "runtime_undeclared": RuleInfo(
         "Runtime component not matched to the inventory",
