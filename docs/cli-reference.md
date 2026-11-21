@@ -55,17 +55,21 @@ change them. See [collection limits](collection-limits.md).
 | [`validate`](#validate) | offline | Check an AgentBOM's completeness and integrity, optionally against the project |
 | [`risk`](#risk) | offline | Score findings and apply the risk gate |
 | [`diff`](#diff) | offline | Compare two AgentBOMs and report security-relevant drift |
+| [`diff-instructions`](#diff-instructions) | offline | Compare instruction files between two trees for security-relevant CommonMark changes |
 | [`summary`](#summary) | offline | Print component and risk counts |
 | [`digest`](#digest) | offline | Print the digest of an AgentBOM's bytes, its canonical digest and its run-independent content digest |
 | [`blast-radius`](#blast-radius) | offline | List agents and components associated with one component |
 | [`graph`](#graph) | offline | Write a self-contained HTML or JSON view of an inventory's associations, risk classes and exposure paths |
 | [`baseline`](#baseline) | offline | Write an unsigned snapshot only if the scan gate passes |
 | [`vex`](#vex) | offline | Export schema-validated VEX findings with optional operator decisions, advisories and trace evidence |
+| [`trifecta`](#trifecta) | offline | Analyze an inventory offline for lethal trifectas, chained toxic flows and tool shadowing |
 | [`crosswalk`](#crosswalk) | offline | Map findings to OWASP, MITRE ATLAS, NIST AI RMF, EU AI Act, ISO/IEC 42001 and CWE entries |
 | [`minimum-elements`](#minimum-elements) | offline | Report which G7 AI SBOM minimum elements an AgentBOM's CycloneDX export carries, and how to supply the missing ones |
 | [`verify-artifact`](#verify-artifact) | offline | Check a file's SHA-256, and optionally its Sigstore bundle |
 | [`verify-discovery`](#verify-discovery) | offline | Check that a ShadowScan report's bytes match the digest a BOM records; with `--projection` or `--bundle`, also compare the BOM's imported components with the report |
 | [`export-inventory`](#export-inventory) | offline | Write the reviewed repository agent as an approved inventory that ShadowScan's `--inventory` accepts |
+| [`import-sbom`](#import-sbom) | offline | Import a foreign CycloneDX or SPDX SBOM as DECLARED evidence without picking silent winners |
+| [`evidence-profile`](#evidence-profile) | offline | Report concrete evidence attributes per component without a scalar TrustScore |
 | [`export-policy`](#export-policy) | offline | Export a default-deny Cedar, Rego v1 or JSON runtime allowlist from a corroborated inventory |
 | [`init`](#init) | offline | Create a `.nexus-symbiote.yaml` policy file |
 | [`runtime keygen`](#runtime-keygen) | offline | Create an Ed25519 key pair for runtime contracts |
@@ -152,6 +156,7 @@ What exit status 1 means for each gate:
 | `validate` | Completeness, integrity (including integrity that is only unknown), the discovery producer check, the minimum assurance level or the dependency graph failed, or unverified discovery evidence was gated (see below). |
 | `risk` | The risk gate failed, `--project` reconciliation failed, or unverified discovery evidence was gated (see below). |
 | `diff` | The diff reports a security alert; `--no-fail-on-alert` turns this gate off. |
+| `diff-instructions` | Any instruction surface or front-matter parse fails collection, or `--fail-on-change` is set and a security-relevant change or new excluded coverage gap is detected. |
 | `digest` | The file is a valid native inventory, but its canonical or content digest is undefined: the other values are printed, and the missing one as `unavailable` (`null` with `--json-output`). |
 | `graph` | The inventory's graph is invalid, `--focus` names no component, or the view would hold more components than `--max-nodes`. |
 | `minimum-elements` | `--fail-under` was given and fewer than that percentage of the assessable elements are present, or the inventory's CycloneDX export fails its checks. |
@@ -276,6 +281,7 @@ directory above the policy are owned by root or by you.
 | `validate --json-output` | `passed`; `assessment_basis` (`supplied-bom`, `project-reconciled`, `project-reconciled-with-supplier-claims`, `project-reconciliation-failed`, or `project-not-reconciled` when the project policy skips the completeness check); `policy_source` and `policy_weakened`; `completeness` and `integrity`, each with a `status` (`pass`, `fail`, `unknown` for integrity, or `skipped` with `skipped_by`) and the validator's report (its own `assessment_basis`, issues, `issues_omitted`; for completeness `supplier_claims` and `supplier_claims_omitted`; for integrity `bytes_charged`); `discovery_producer` (`null` without discovery evidence or a producer check, otherwise a `status` of `verified`, `failed`, `not-applicable` or `not-verified`, with `problems`); `unsigned_discovery` (`null`, or why unverified discovery evidence failed the run); `minimum_assurance_level`, `assurance_errors` and `graph_issues`. |
 | `risk --json-output` | `passed`; `overall_score` (`null` when the run is not scored: `--project` reconciliation or the discovery producer check failed, or unverified discovery evidence was gated); `risk_level`; `coverage_status` and `coverage_gaps`; `gate_reasons`; `gate` (the effective thresholds, cutoff, ignored categories and suppression count, each with a `*_source` of `cli`, `project policy` or `built-in`); `findings`, each with its `fingerprint`; `severity_counts`; `category_scores`; `ignored_findings`; `suppressed_findings`, `suppressions_expired`, `suppressions_unused` and `suppressions_stale`; `total_components` and `components_with_risks`; `warning_threshold_exceeded`; `assessment_basis` (`supplied-bom`, `project-reconciled`, `project-reconciled-with-supplier-claims`, `project-reconciliation-failed`, or `unsigned-discovery-evidence` when unverified discovery evidence fails the run); `supplier_claims` and `supplier_claims_omitted`; `discovery_producer` (`verified`, `failed`, `not-verified` or `not-applicable`); `score_threshold` (`null` with `--no-score-threshold`); `fail_on_severity`; `policy_source` and `policy_weakened`. A failed reconciliation has the same keys, with empty findings. |
 | `diff --json-output` | `has_changes`, `total_changes`, `components_added`, `components_removed`, `components_modified`, `dependencies_added`, `dependencies_removed` (each with its `severity` and `conditions`), `security_alerts`, `metadata_changes` and `notes`. |
+| `diff-instructions --json-output` | `format` (`nexus-symbiote/instruction-diff/v1`), `base_tree`, `head_tree`, `files_scanned`, `failures` (`base`, `head`), `excluded` (`base`, `head`), `changes` (each with `class`, `file`, `block_index`, `summary` and optional redacted `text`), and `summary` (`total_changes`, `total_failures`, `total_excluded`, `by_class`). |
 | `summary --json-output` | `total_components`, `component_types`, `total_dependencies`, `total_risks`, `risk_breakdown` and the inventory's `completeness` claim. |
 | `minimum-elements --format json` | `format` (`nexus-symbiote/minimum-elements/v1`), `edition`, `guidance`, `statement`, `evaluated` (the standard, the projection and the tool version), `subjects`, `coverage` (`present`, `assessable` and `percent`), `counts` per status, `gate` (`null` without `--fail-under`), `clusters` and `elements`; see [G7 AI SBOM minimum elements](minimum-elements.md#running-the-command). |
 | `blast-radius --json-output` | `subject`, `affected_agents`, `dependent_components`, `reachable_components`, `declared_principals`, `scope`, `effective_authority`, `linked` and `limitations`. |
@@ -497,6 +503,22 @@ about the comparison itself, also after `No changes detected.`), and added, remo
 modified components, and added and removed relationships, each with its severity and
 conditions.
 
+### `diff-instructions`
+
+Compare instruction files between `BASE_TREE` and `HEAD_TREE` across the same instruction, rule, prompt, steering, subagent, and skill declaration surfaces (plus recursive `@path` imports) that the `prompt` collector scans, through confined descriptor-relative reads, and report security-relevant CommonMark and front-matter changes (`tool_grant_changed`, `import_added`, `url_or_path_added`, `hidden_markup_added`, `scope_widened`).
+
+```text
+nexus-symbiote diff-instructions [OPTIONS] BASE_TREE HEAD_TREE
+```
+
+| Option | Description |
+|---|---|
+| `--show-text` | Include redacted, terminal-neutralized changed block text (withheld by default). |
+| `--json-output` | Print the instruction diff as JSON. |
+| `--fail-on-change` | Exit with status 1 if any security-relevant instruction change or new excluded agent-directory gap is detected. |
+
+Escaped, broken, credential-targeted, oversized, invalid UTF-8, or case-variant instruction surfaces, and malformed YAML front matter, are recorded under `failures` and exit 1 (fail closed) rather than silently reporting 0 changes; in-root symlinks to non-credential targets are read through their confined target and diffed. Changed text under `--show-text` masks multi-line PEM private keys and secrets across the whole block before terminal neutralization. A report shows at most 1 MiB of changed text; past that, each further change carries `[text withheld: --show-text output limit reached]` in place of its text. An instruction file that is in `BASE_TREE` only is reported as `tool_grant_changed` when it held tool grants or limits, and a rule that drops its `paths` front matter, or a negated glob, as `scope_widened`. A tool grant's argument, such as `Bash(...)` or `mcp__github__merge(...)`, runs to its balanced closing parenthesis, so a nested `$(...)` does not end it, or to the end of the line when it is not closed. An argument or MCP tool name longer than 512 characters is compared as the SHA-256 digest of its text, so any change to it is `tool_grant_changed` and it is never shown. The command judges no prose and does not recognize scheme-less hosts or UNC paths; see [its limits](known-limitations.md#instructions-and-ide-settings).
+
 ### `digest`
 
 Print the file, canonical and content digests of a native inventory.
@@ -554,6 +576,21 @@ nexus-symbiote discover-mcp [OPTIONS] ENDPOINT
 | `--client-version` `TEXT` | `clientInfo` version sent in `initialize` (default: the tool version). |
 | `--user-agent` `TEXT` | `User-Agent` header to send; none is sent by default. |
 | `--raw-descriptors` `PATH` | Also write the unredacted server info, capabilities, instructions, tool descriptors, prompts and resource templates to this new file (mode 0600) for review; only the bearer token is masked, and a server whose declarations repeat its own session ID (of eight or more characters) ends the observation. |
+
+### `evidence-profile`
+
+Report concrete evidence attributes per component without a scalar TrustScore (`signed_under_policy` is `true` only when `--project` and `--signature-policy` corroborate the artifact; inventory `signing_status` assertions appear separately under `declared_signing_status`).
+
+```text
+nexus-symbiote evidence-profile [OPTIONS] AIBOM_PATH
+```
+
+| Option | Description |
+|---|---|
+| `-o`, `--output` `PATH` | Write the evidence profile report to this file instead of standard output. |
+| `--project` `DIRECTORY` | Project root for corroborating artifact signatures and digest pins under `--signature-policy`. |
+| `--signature-policy` `FILE` | Explicit operator signer policy JSON outside the project; requires `--project`. |
+| `--json-output` | Emit the per-component evidence profile as JSON. |
 
 ### `export-inventory`
 
@@ -625,6 +662,24 @@ Content-Security-Policy hash, and shows inventory text only escaped. A graph lar
 than `--max-nodes` fails with exit status 1 instead of being cut. The output may not
 be the inventory itself. [Graph view](graph-view.md) gives the risk-class rules, the
 ranking and the JSON document.
+
+### `import-sbom`
+
+Import a foreign CycloneDX or SPDX SBOM as DECLARED evidence without picking silent winners. By default component names are hashed (`imported-<16hex>`): keyed HMAC-SHA256 (`hmac-sha256`) when `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` has at least 32 characters, or unsalted SHA-256 (`unsalted-sha256`) otherwise. Local digest matching (`declared_digest_local_match`) checks only non-empty, non-symlink, non-credential artifact files of matching type beneath `--project` and never sets `digest_bound`. The project is always walked, but files are hashed only when the SBOM declares a SHA-256, within the `model-bytes` and `model-total-bytes` limits; a file larger than `model-bytes` is left unbound, warned about and listed in `scan_failures`, while any other limit reached under `--project` ends the import with exit 1. Conflicts are found by purl, and by name within one ecosystem; an entry whose ecosystem is unknown (no purl) is compared with every record of the same name.
+
+```text
+nexus-symbiote import-sbom [OPTIONS] FOREIGN_BOM_PATH
+```
+
+| Option | Description |
+|---|---|
+| `-o`, `--output` `PATH` | Write the resulting native AgentBOM JSON to this file (must lie outside `--project`). |
+| `--into` `PATH` | Existing native AgentBOM to merge imported SBOM claims into. |
+| `--project` `PATH` | Trusted project root for SHA-256 local file binding, nested manifests, and shape census. |
+| `--reveal-names` | Retain plain component names from the foreign SBOM instead of hashed names. |
+| `--walk-manifests` | Walk nested manifests below `--project` and record manifest-only vs locked pinning state. |
+| `--census` | Count unread non-control-plane artifact shapes (`*.ipynb`, `n8n/*.json`, `*.tf`, `Chart.yaml`). |
+| `--json-output` | Print a structured JSON summary of imported, bound, and conflicting entries. |
 
 ### `import-shadowscan`
 
@@ -1159,6 +1214,20 @@ and `stdio`, such as the `websocket` that the `mcp` collector records for a `ws:
 `wss://` endpoint, fails with reason `unsupported-transport`. The
 [launch policy](#launch-policy) section gives the policy's format and where it may be
 kept.
+
+### `trifecta`
+
+Analyze an inventory offline for lethal trifectas, chained toxic flows, and tool shadowing.
+
+```text
+nexus-symbiote trifecta [OPTIONS] AIBOM_PATH
+```
+
+| Option | Description |
+|---|---|
+| `-o`, `--output` `PATH` | Write the trifecta and toxic-flow report JSON to this file instead of standard output. |
+| `--fail-on-critical` / `--no-fail-on-critical` | Exit with status 1 when a critical lethal-trifecta finding is present (default: fail). |
+| `--fail-on-finding` / `--no-fail-on-finding` | Exit with status 1 when any trifecta, toxic-flow, or tool-shadowing finding is present (default: off). |
 
 ### `vex`
 
