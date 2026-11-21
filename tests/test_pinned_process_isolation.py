@@ -280,11 +280,27 @@ def test_off_linux_verify_live_refuses_the_isolation_opt_out(
     report = json.loads(refused.stdout)
     assert not report["complete"]
     assert [result["reason"] for result in report["results"]] == ["isolation-unavailable"]
+    # The shown remedy must not offer the opt-out that was just refused.
+    assert "--no-isolation" not in report["results"][0]["error"]
     stderr = " ".join(refused.stderr.split())
     assert "--no-isolation is refused off Linux" in stderr
     assert "kernel PID containment is disabled" not in stderr
     assert "--no-isolation as root" not in stderr
     assert launches == []
+
+
+@pytest.mark.parametrize(("platform", "offered"), [("darwin", False), ("linux", True)])
+def test_the_isolation_unavailable_remedy_offers_the_opt_out_only_on_linux(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, platform: str, offered: bool
+) -> None:
+    monkeypatch.setattr(pinned_process.sys, "platform", platform)
+    shown = verify.reason_message("isolation-unavailable")
+    assert ("--no-isolation" in shown) is offered
+    assert "the pinned launcher was not executed" in shown
+    # The default launch is refused off Linux as well, and shows the same remedy.
+    monkeypatch.setattr(pinned_process, "namespace_available", lambda: False)
+    report = verify.verify_mcp_servers(inventory(), trusted_launchers=launcher(tmp_path))
+    assert [(r.reason, r.error) for r in report.results] == [("isolation-unavailable", shown)]
 
 
 def test_off_linux_isolation_off_refuses_every_launch(
@@ -1522,7 +1538,7 @@ def test_verify_live_fails_a_server_whose_namespace_did_not_end(
     # Off Linux the opt-out is refused before a launcher runs, so no teardown happens.
     reason = "isolation-teardown-failed" if _LINUX else "isolation-unavailable"
     assert report["results"][0]["reason"] == reason
-    assert report["results"][0]["error"] == verify.REASONS[reason]
+    assert report["results"][0]["error"] == verify.reason_message(reason)
 
 
 def test_gate_is_disabled_and_init_fd_closes_without_pidfd_send_signal(
