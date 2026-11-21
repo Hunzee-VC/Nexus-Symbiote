@@ -360,6 +360,20 @@ class VEXGenerator(Generator):
                 {"name": "nexus-symbiote:expiredVexDecisions", "value": str(len(expired_warnings))}
             )
         if self._execution_evidence is not None:
+            evidence = self._execution_evidence
+            meta_props.append(
+                {
+                    "name": "nexus-symbiote:traceAuthentication",
+                    "value": "attested" if evidence.attested else "unsigned",
+                }
+            )
+            if evidence.attestation_sha256:
+                meta_props.append(
+                    {
+                        "name": "nexus-symbiote:traceAttestationSha256",
+                        "value": evidence.attestation_sha256,
+                    }
+                )
             meta_props.append(
                 {
                     "name": "nexus-symbiote:traceEvidenceSha256",

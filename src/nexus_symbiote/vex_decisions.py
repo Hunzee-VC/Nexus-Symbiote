@@ -149,6 +149,7 @@ class ExecutionEvidence:
     shadowed_refs: frozenset[str]
     sha256: str
     attested: bool = False
+    attestation_sha256: str | None = None
 
     def outcome_for(self, component_ref: str) -> str | None:
         """Return 'shadowed', 'invoked', 'declared-never-loaded', 'unobserved', or None."""
@@ -333,7 +334,7 @@ def _verify_trace_attestation(
     *,
     project_root: Path | None,
     inventory_path: Path | None,
-) -> None:
+) -> str:
     from nexus_symbiote.attestation import (
         MAX_ENVELOPE_BYTES,
         AttestationError,
@@ -363,6 +364,7 @@ def _verify_trace_attestation(
         )
     except AttestationError as exc:
         raise VEXDecisionError(f"Trace evidence attestation verification failed: {exc}") from exc
+    return hash_bytes(env_bytes)
 
 
 def _extract_refs(items: object) -> set[str]:
@@ -415,16 +417,15 @@ def load_execution_evidence(
         label="Trace evidence file",
     )
     raw = _read_regular_bytes(path, MAX_REPORT_BYTES, "Trace evidence file")
-    attested = False
+    attestation_digest = None
     if attestation_path is not None:
-        _verify_trace_attestation(
+        attestation_digest = _verify_trace_attestation(
             raw,
             attestation_path,
             trusted_key_paths,
             project_root=project_root,
             inventory_path=inventory_path,
         )
-        attested = True
 
     payload = parse_json_strict(raw.decode("utf-8"), max_bytes=MAX_REPORT_BYTES)
     if not isinstance(payload, dict):
@@ -458,7 +459,8 @@ def load_execution_evidence(
         unobserved_refs=frozenset(unobserved - invoked - shadowed - declared_never_loaded),
         shadowed_refs=frozenset(shadowed),
         sha256=hash_bytes(raw),
-        attested=attested,
+        attested=attestation_digest is not None,
+        attestation_sha256=attestation_digest,
     )
 
 
