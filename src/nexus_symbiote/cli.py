@@ -45,6 +45,7 @@ from nexus_symbiote.reporting import (
     validation_report_lines,
 )
 from nexus_symbiote.runtime_cli import register_runtime_commands
+from nexus_symbiote.sbom_cli import register_sbom_commands
 from nexus_symbiote.supply_chain_cli import STAGED_INVENTORY, register_supply_chain_commands
 from nexus_symbiote.text_poisoning import apply_text_poisoning_rules
 from nexus_symbiote.trace_cli import register_trace_commands
@@ -2421,6 +2422,7 @@ register_minimum_elements_commands(main)
 register_export_standard_commands(main)
 register_control_plane_commands(main)
 register_instruction_diff_commands(main)
+register_sbom_commands(main)
 
 if __name__ == "__main__":
     main()
