@@ -1186,7 +1186,7 @@ kept.
 
 ### `trifecta`
 
-Analyze an inventory offline for lethal trifectas, chained toxic flows, and tool shadowing.
+Analyze an inventory offline for lethal trifectas, chained toxic flows, and tool shadowing. A declared approval requirement is recorded as evidence. The analyzer retains the exposure and its severity because the inventory cannot establish what a runtime enforces.
 
 ```text
 nexus-symbiote trifecta [OPTIONS] AIBOM_PATH

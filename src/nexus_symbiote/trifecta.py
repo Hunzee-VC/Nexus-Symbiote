@@ -814,12 +814,9 @@ def _own_reach(sig: _ComponentSignals) -> _Reach:
         tags.append("untrusted")
     if sig.private_basis:
         tags.extend(("private", "source") if chained else ("private",))
-    # "egress" holds what an ungated owner leaves open; "forced" what even a gated owner
-    # does, because the component itself opts out of approval.
-    if sig.egress_basis and not sig.explicitly_gated:
+    # The inventory can describe approvals but cannot establish enforcement at invocation.
+    if sig.egress_basis:
         tags.extend(("egress", "sink") if chained else ("egress",))
-        if sig.explicitly_ungated:
-            tags.extend(("egress_forced", "sink_forced") if chained else ("egress_forced",))
     if isinstance(comp, IDEAgentComponent) and sig.explicitly_ungated:
         tags.append("ungated_ide")
     if isinstance(comp, (MCPServerComponent, ToolComponent)):
@@ -1016,7 +1013,8 @@ def _evidence_entry(leg: str, item: LegEvidence) -> dict[str, Any]:
         "basis": list(item.basis),
         "locator": item.locator,
         "assurance": item.assurance.value,
-        "gated": item.gated,
+        "approval_required_declared": item.gated,
+        "approval_enforcement_verified": False,
     }
 
 
@@ -1107,10 +1105,10 @@ def _scope_findings(
     findings: list[FlowFinding] = []
     untrusted = items("untrusted")
     private = items("private")
-    ungated_egress = items("egress_forced" if gated_owner else "egress")
-    if untrusted and private and ungated_egress:
-        involved = sorted({i.component_ref for i in (*untrusted, *private, *ungated_egress)})
-        capped = EVIDENCE_LIMIT in (len(untrusted), len(private), len(ungated_egress))
+    egress = items("egress")
+    if untrusted and private and egress:
+        involved = sorted({i.component_ref for i in (*untrusted, *private, *egress)})
+        capped = EVIDENCE_LIMIT in (len(untrusted), len(private), len(egress))
         findings.append(
             FlowFinding(
                 kind="lethal_trifecta",
@@ -1118,19 +1116,19 @@ def _scope_findings(
                 scope_ref=scope_ref,
                 summary=(
                     f"Scope '{scope_ref}' combines untrusted input, private data access, "
-                    "and ungated external egress/state mutation across "
+                    "and external egress/state mutation across "
                     f"{'at least ' if capped else ''}{len(involved)} "
-                    "component(s) without an approval gate."
+                    "component(s) without verified approval enforcement."
                 ),
                 component_refs=tuple(involved),
                 evidence=(
                     *(_evidence_entry("untrusted_input", i) for i in untrusted),
                     *(_evidence_entry("private_data", i) for i in private),
-                    *(_evidence_entry("egress", i) for i in ungated_egress),
+                    *(_evidence_entry("egress", i) for i in egress),
                 ),
                 recommendation=(
                     "Break at least one leg of the trifecta or enforce an explicit "
-                    "human-in-the-loop approval gate (human_in_the_loop: required) on "
+                    "human approval at the execution boundary on "
                     "every egress and state-modifying tool."
                 ),
             )
@@ -1139,7 +1137,7 @@ def _scope_findings(
     # Item 24: Chained toxic flow across two distinct components where neither alone
     # is EXFIL_CAPABLE (linear time without materializing Cartesian pairs).
     chained_sources = items("source")
-    chained_sinks = items("sink_forced" if gated_owner else "sink")
+    chained_sinks = items("sink")
     source_refs = {src.component_ref for src in chained_sources}
     sink_refs = {snk.component_ref for snk in chained_sinks}
     active_sources = [
@@ -1160,7 +1158,7 @@ def _scope_findings(
                     f"Scope '{scope_ref}' enables a chained toxic flow across "
                     f"{'at least ' if capped else ''}{len(pair_refs)} distinct components "
                     f"({', '.join(pair_refs)}) where "
-                    "private data from one component can leave through an ungated sink."
+                    "private data from one component can leave through a sink without verified approval enforcement."
                 ),
                 component_refs=pair_refs,
                 evidence=(
