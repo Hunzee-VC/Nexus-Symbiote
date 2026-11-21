@@ -165,6 +165,44 @@ The serialization rating is:
 | `unsafe-template-injection` | A GGUF file whose embedded chat template matches the access-pattern heuristic, or a SafeTensors file that would be `safe` in a directory whose Hugging Face chat template matches it. A match does not establish that the renderer executes the pattern or that its sandbox is bypassed |
 | `unknown` | Everything else, including ONNX, GGUF, Keras, HDF5, SavedModel, TFLite, Core ML and ExecuTorch files, a readable pickle-family file whose first 64 KiB start no recognized pickle, NumPy array, ZIP archive, compressed or archived stream or GGUF magic (`Named pickle-family format; no pickle evidence in the inspected prefix`, or `empty file` for a zero-length one), a pickle under any other name that the 64 KiB, 4,096-opcode or 64-MARK bound cuts short before `pickle.load` calls anything, where [the check above](#model-files-and-references) rates it, a SafeTensors header over the 1 MiB inspection limit, a NumPy array header over 64 KiB or past the 16,000,000 structure units one scan shares with the ONNX and GGUF readers, at one unit a header byte, and a ZIP archive whose central directory is malformed or over 1 MiB or that has a member that was not checked: one compressed by another method, such as BZIP2 or LZMA, one whose data runs past the next member's local header, or one with an array header past those limits; under a pickle-family name, such a NumPy array or ZIP archive is `unsafe-code-execution` instead |
 
+### Format and model type
+
+The rating says how a file loads, not what it is. A component's `serialization_format`
+is the format its file name claims or, for a file inventoried by its content, what
+that content was recognized as. Its `model_type` is inferred from the directory's
+configuration and the file name, and is `foundation` when neither says otherwise.
+Neither field shows that the file was read as that format, except for the two formats
+whose header the collector checks: a `.gguf` or `.safetensors` file is recorded with
+its format (`llama.cpp` or `safe-tensors`) and a model type only when its header is
+that format's, which is the four bytes `GGUF` at the start of a `.gguf` file whose
+content is not rated `unsafe-code-execution` (those bytes also open a pickle), and a
+`.safetensors` header that validates, as the `safe` rating requires. Any other file
+under those two suffixes is still a component, with the rating and the findings its
+content gets, but its record has neither field. Instead `properties.named_format`
+holds the format its name claims, and `properties.format_inspection`, which every
+model file has, says what the check found:
+
+| `format_inspection` | When |
+| --- | --- |
+| `Named as GGUF, but the content does not start with the GGUF magic; the format was not established` | A `.gguf` file of at least four bytes that does not start with `GGUF` |
+| `Named as GGUF, but too short to hold the GGUF magic; the format was not established` | A `.gguf` file shorter than four bytes |
+| `Malformed or unsupported SafeTensors structure` | A `.safetensors` file whose header does not validate, or that is shorter than the eight bytes of its header length |
+| `SafeTensors header exceeds the inspection limit` | A `.safetensors` file whose header is longer than 1 MiB |
+| `Artifact could not be inspected` | A file that could not be read, which is also a collection failure |
+
+A `.gguf` file whose content the checks above rate as a pickle, a NumPy array or a ZIP
+archive, and a `.safetensors` file whose content they rate `unsafe-code-execution`,
+keep the explanation of that content instead.
+
+A text file named `not_a_model.gguf` is therefore a component rated `unknown`, with
+the high `serialization_format_unknown` finding and no format or model type, not a
+`foundation` model in `llama.cpp` format. A file named as SafeTensors that is rated
+`unknown` also gets the high `invalid_safetensors` finding from `risk`, which fails
+the gate at any score. A `.gguf` file that starts with the magic keeps its format and
+model type when its version or metadata cannot be read, and `properties.gguf_metadata`
+says so. No other suffix has a header check, so a file under one of them is recorded
+with the format its name claims and a model type, whatever it holds.
+
 ## Files bound to the weights
 
 Some formats keep weights outside the file the collector rates. The collector

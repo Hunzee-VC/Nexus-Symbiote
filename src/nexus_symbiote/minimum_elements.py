@@ -910,8 +910,9 @@ _INFRASTRUCTURE_TYPES = frozenset(
 # Package and image registries; a model hub or tool registry entry is neither.
 _SOFTWARE_REGISTRIES = frozenset({"npm", "pypi", "docker-hub", "docker", "oci"})
 _POLICY_REFERENCES = frozenset({"rfc-9116", "security-contact"})
-# Letters and symbols that render as blank space; a value is read without them.
-_BLANK = str.maketrans(dict.fromkeys("\u115f\u1160\u3164\uffa0\u2800"))
+# Letters and symbols that render as blank space, and U+FFFD, which collection puts in
+# place of a control or invisible character; a value is read without them.
+_BLANK = str.maketrans(dict.fromkeys("\u115f\u1160\u3164\uffa0\u2800\ufffd"))
 # The identity source a scan records for an agent without a manifest; release 0.1.0
 # then named the agent after the checkout directory, not the placeholder repository.
 _INFERRED_IDENTITY = "repository-path"
@@ -934,9 +935,11 @@ def _text_state(value: object) -> str:
     """``present``, ``explicit-unknown`` or ``missing`` for one recorded value.
 
     Text without a visible character (no letter, digit, punctuation mark or symbol
-    other than a blank filler), NOASSERTION and NoAssertionLicense are not present;
-    the literal unknown is an explicit unknown. Blank fillers are ignored like white
-    space, so they cannot turn a placeholder into a value.
+    other than a blank filler or U+FFFD), NOASSERTION and NoAssertionLicense are not
+    present; the literal unknown is an explicit unknown. Blank fillers and U+FFFD are
+    ignored like white space, so they cannot turn a placeholder into a value, and a value
+    collection neutralized to replacement characters alone is missing, as its raw
+    invisible text was.
     """
     if not isinstance(value, str):
         return MISSING

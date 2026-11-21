@@ -47,9 +47,13 @@ policy must come from a trusted source. This verifies the selected artifact, not
 its association with a discovery finding, deployment, or safety.
 
 The importer maps native `agent`, `mcp-server` and `local-model` findings,
-including MCP tool observations distinguished by resource type. It
+including MCP tool observations distinguished by resource type, and two more kinds
+for one resource type each: `agent-config` with `coding-agent-config` and
+`framework-usage` with `project`.
+[What each ShadowScan kind becomes](#what-each-shadowscan-kind-becomes) lists all
+18 kinds. It
 also accepts ShadowScan's CycloneDX 1.6/1.7 components and services, marking the
-projection partial. Unmapped entries are counted with source indexes. For
+projection partial. Unmapped entries are counted with source indexes and by kind. For
 CycloneDX, the index is into components followed by services. The source report
 and its scope, timestamps, detailed evidence, identities and full graph remain
 the authoritative discovery record. Only supported, mapped-endpoint CycloneDX
@@ -77,7 +81,7 @@ read it at and the report's signal label; see
 [models named from cited evidence](#models-named-from-cited-evidence). Both artifacts
 may still be sensitive and must be handled accordingly.
 
-The projection profile `nexus-symbiote/shadowscan-projection/v5` identifies the
+The projection profile `nexus-symbiote/shadowscan-projection/v6` identifies the
 SymBiote mapping, not a ShadowScan report schema or authenticated producer
 version. Each component projected from a finding records the exact report digest
 (`shadowscan:report-sha256`) and a content digest of its own source finding
@@ -106,7 +110,11 @@ Version 3 resolved a CycloneDX entry whose type or group contradicts its
 `shadowscan:kind`, such as kind `agent` on a `machine-learning-model`, by
 precedence; version 4 leaves it unmapped. Version 5 adds the models a merged scan
 names from cited evidence; a standalone import projects the same components as
-version 4.
+version 4. Version 6 projects `agent-config` findings of resource type
+`coding-agent-config` and `framework-usage` findings of resource type `project`,
+which version 5 left unmapped, and names the kinds of the entries it leaves
+unmapped in the projection limitation and the coverage gap. In a CycloneDX report a
+`dependsOn` edge of such a finding is now copied when its other endpoint maps too.
 Retain the original importer to reproduce or verify an older projection, then
 regenerate inventories with the current profile and review them before comparison or
 approval. Producer schema and version changes require compatibility testing; the
@@ -114,13 +122,99 @@ report remains untrusted.
 
 At present the bridge does not resolve agents across tenants or reports, verify
 live MCP identities, or map every ShadowScan finding type, model association or
-dependency. A complete ShadowScan run is only complete for its configured scope;
+dependency; the kinds it leaves out are listed
+[below](#what-each-shadowscan-kind-becomes). A complete ShadowScan run is only
+complete for its configured scope;
 Nexus SymBiote records the imported BOM coverage as partial. SARIF is not available
 for imported discovery because its finding projection does not retain complete
 coverage and provenance: `scan -f sarif` and `import-shadowscan -f sarif` refuse
 such an inventory, the GitHub Action skips its SARIF upload with a warning, and the
 `vex` command omits imported findings and records how many it omitted in the
 property `nexus-symbiote:omittedImportedFindings`.
+
+## What each ShadowScan kind becomes
+
+ShadowScan 0.1.4 reports 18 kinds of finding. This table was reviewed against that
+version at commit `2b80f199659a8de17ea9c7792c07940d5b747d72`. A kind that another
+version adds or renames stays unmapped until the mapping is reviewed, and so does a new
+resource type of `framework-usage` or `agent-config`. The kinds `agent`, `mcp-server`
+and `local-model` are projected for any resource type, so a new one of theirs is
+projected too.
+
+| ShadowScan kind | Becomes | Condition, or why it is a gap |
+| --- | --- | --- |
+| `agent` | `agent` | Any resource type but `mcp-tool`. Autonomy is recorded as unknown. |
+| `framework-usage` | `agent` | Resource type `project` only: a project that uses an agent framework, a model SDK or only the MCP SDK, in which ShadowScan saw no agent indicator. Autonomy is recorded as unknown. |
+| `agent-config` | `ide-agent` | Resource type `coding-agent-config` only: one coding-agent signature in one project, which is a product such as Claude Code or an instruction convention such as an `AGENTS.md` file or a set of `SKILL.md` files. `ide_type` and `permission_mode` stay unset and no configuration file is listed. |
+| `mcp-server` | `mcp-server`, or `tool` for resource type `mcp-tool` | A tool is recorded without a server association. |
+| `local-model` | `model` | Any resource type: a model file in a repository, model weights stored for a local runtime, or a running process that holds model files open. |
+| `secret`, `token` | Gap | A credential is never a component. ShadowScan's own CycloneDX export leaves both kinds out. |
+| `oauth-grant`, `service-identity`, `iam-grant` | Gap | An identity or a grant, for which the inventory has no component type. |
+| `infra`, `cloud-resource`, `workflow`, `bot-app`, `ai-app` | Gap | No component type describes it. |
+| `gateway-caller`, `network-contact`, `runtime-process` | Gap | An observation of run-time activity. |
+
+ShadowScan keeps one finding identifier while a project's kind moves from
+`framework-usage` to `agent`, which happens when it sees an agent indicator. Both
+kinds are therefore one component type: `diff` reports the move as one modified
+component, not as a removed and an added one. The kind ShadowScan gave stays in
+`shadowscan:kind` and in the label, such as "ShadowScan framework-usage
+af2459bd4b84".
+
+The importer reads the kind and the resource type and nothing else, so the component
+type is no narrower than that pair. A project that only implements or configures an
+MCP server is a `framework-usage` finding of resource type `project`, and becomes an
+`agent`: `agent` in CycloneDX, an AI package in SPDX and a declared agent in
+`trace-diff`, beside the `mcp-server` and `tool` components that the local collectors
+may record for the same directory. An `AGENTS.md` file or a set of `SKILL.md` files
+is an `agent-config` finding of resource type `coding-agent-config`, and becomes an
+`ide-agent`, beside the `skill-package` components that the local collectors record
+for the same files.
+
+Other ShadowScan connectors use the two resource-bound kinds for other things. For
+example, `framework-usage` is also a lockfile that lists AI packages
+(`lockfile-inventory`), an agent constructed in one source file (`source-agent`), an
+incomplete agent card (`agent-manifest`, or `a2a-agent-card` on an endpoint), a set
+of Salesforce prompt templates (`prompt-templates`) and a process with model-runtime
+indicators (`process/model-runtime-indicator`). `agent-config` is also a GitLab Duo
+group setting (`platform-setting`), GitHub Copilot billing (`copilot-billing`), a
+ServiceNow configuration without its parent (`unresolved-parent-configuration`), an
+agent configuration or an editor extension on an endpoint (`agent-config`,
+`ide-extension`), a registry skill (`agent-registry-skill`) and a skill record in an
+AWS registry (`agent-registry-record`, `agentcore-registry-record`). None of those is
+a project or a coding-agent signature in one, so any other resource type of the two
+kinds, a missing one included, stays unmapped. The projected resource type is
+recorded in `shadowscan:resource-type`, from the importer's own table. In a
+CycloneDX report an entry of `type` `machine-learning-model` or `group` `mcp-server`
+whose `shadowscan:kind` says otherwise stays unmapped whatever the kind. No other
+`type` or `group` is compared with the kind.
+
+An imported `agent` or `ide-agent` is a claim that the report holds such a finding.
+It carries a digest-based label, declared assurance and unknown trust, it is never
+linked to the repository agent or to the configuration the local collectors read
+from the same files, and its ShadowScan rating counts in `risk` as a
+`shadowscan-heuristic` finding.
+
+### Entries left unmapped
+
+An unmapped entry is counted in `source_unmapped_count`, listed by its index in
+`source_unmapped_indexes` and counted by kind in a projection limitation, for
+example "5 source entries were not mapped into BOM components (infra: 3; secret:
+2)". A merged scan also records the coverage gap "ShadowScan report contains
+unmapped entries: infra, secret", which lists the kinds without counts. One
+unmapped entry of any kind keeps the shadowscan collector partial and the default
+scan, validate and risk gates closed.
+
+The kind is named from the importer's own list, never copied from the report:
+
+| Label | Entry |
+| --- | --- |
+| The kind, such as `secret` | A finding of a kind that the table above shows as a gap |
+| The kind and `(unprojected form)`, such as `framework-usage (unprojected form)` | A finding of a projected kind in a form that is not projected: another resource type, or a CycloneDX `type` or `group` that contradicts the kind |
+| `no kind` | An entry with an empty kind or none, such as the `framework` components that ShadowScan's CycloneDX export adds beside its findings |
+| `unrecognized kind` | Any other kind string, whatever it holds |
+
+The importer also projects a kind named `model` as a model, as it did before;
+ShadowScan 0.1.4 reports no finding of that kind.
 
 ## Models named from cited evidence
 
@@ -216,11 +310,13 @@ All of these must hold.
   withheld. A value can also follow its key on a later line. A line that holds one
   value and no key of its own is therefore read together with the line before it, as
   a value follows `Authorization: Bearer`, and as the value of each key that opens it
-  within the eight lines above. A line opens a value when it is a key and its mark
-  with nothing after them but a YAML block indicator, an opening bracket or a comment:
-  `password:`, `password: >-`, `"credentials": [`, `export const credentials = [`,
-  `token =  # rotated`. Blank lines, comment lines and other single values, such as
-  list entries, may lie in between. The redactor decides which keys name a credential,
+  within the eight lines above. A line opens a value when it is a key and its mark,
+  after at most one opening bracket, with nothing after them but a YAML anchor or tag, a
+  block indicator, an opening bracket, a shell line continuation or a comment:
+  `password:`, `password: >-`, `password: &shared`, `{"credentials":`,
+  `"credentials": [`, `export const credentials = [`, `export API_KEY=\`,
+  `token =  # rotated`. Blank lines, comment lines, lines that only open a bracket and
+  other single values, such as list entries, may lie in between. The redactor decides which keys name a credential,
   and it reads names broadly: a list below `requires_token:` or `cache_key = (` is
   withheld as a value on the same line as that key always was. What the lines hold
   decides all of this, not which identifier a report cites there, so the order of a
@@ -348,7 +444,9 @@ unavailable because a finding-only projection does not preserve this evidence.
 
 The importer API returns `ImportedReport`, including `components`, coverage and
 provenance, rather than a bare component list. It rejects bare finding arrays that
-cannot carry source coverage. Unknown finding kinds remain unmapped. Imported
+cannot carry source coverage. A finding of a kind or form the profile does not
+project remains unmapped, and `ImportedReport.unmapped_kinds` counts such entries
+under the labels listed in [entries left unmapped](#entries-left-unmapped). Imported
 assets are not automatically linked to the repository agent or asserted present
 on the local filesystem.
 
@@ -381,7 +479,10 @@ whose source collection completed can accompany a successful repository baseline
 The digest and `source_projection_limitations` record the external evidence
 separately. Imported assets retain declared assurance and unknown trust, and
 the CycloneDX composition remains incomplete. Incomplete sources, unmapped
-entries and lossy CycloneDX inputs keep the default repository gate closed.
+entries and lossy CycloneDX inputs keep the default repository gate closed. For the
+gate to pass, every finding of the report must have a projected form: one `secret`
+or `infra` finding, or a lockfile that ShadowScan reports as `framework-usage` with
+resource type `lockfile-inventory`, is an unmapped entry.
 
 Project validation also compares imported dependency endpoints, relationship types,
 assurance, provenance and multiplicity against the local report projection. Missing,
@@ -416,11 +517,32 @@ written by an earlier version may have no content digests or an older projection
 profile. The first comparison after an upgrade then falls back to the exact report
 digest, which raises a high alert when the report bytes differ, and raises a medium
 alert for every imported component, even when the report bytes are unchanged,
-because the new inventory adds the content digests, the current projection profile and
+because the new inventory adds the content digests, a later projection profile and
 the per-component finding digests. Later comparisons use the content digests. The content
 digests are not authentication; `validate --project` compares them with the
 local report as it does the exact digest. Text output prints the note under
 Notes; `--json-output` lists it in `metadata_changes`.
+
+A changed projection profile keeps the report's content digest comparable, but not
+a component's finding digest: `diff` compares finding digests only between two
+inventories of one projection profile. The first `diff` from a version 5 inventory to
+a version 6 inventory of the same report file raises a medium alert for every
+component the earlier inventory imported
+("properties.shadowscan:projection-profile changed."), and reports each newly
+projected finding as an added component, at medium or at its ShadowScan rating when
+that is higher. When ShadowScan ran again between the two scans, which is the usual
+case in a pipeline, the alert for each previously imported component is high instead
+("properties.shadowscan:report-sha256 changed."), although the same `diff` notes that
+the report's normalized content is unchanged. When entries are still unmapped it also
+raises two high alerts, "New ShadowScan projection limitations" and "New coverage
+gaps", because version 6 words both lines differently, although fewer entries are
+unmapped. `validate --project`, `risk --project` and `verify-discovery --projection`
+refuse a version 5 inventory, because each compares it with the current projection.
+
+Between two version 6 inventories the coverage gap changes only when the set of
+unmapped kinds does, and the limitation whenever a count does. A changed line is a
+high alert in either direction. When entries left the report, the metadata change
+"ShadowScan entries left unmapped fell from 2 to 1." says so.
 
 ShadowScan's own finding content can include absolute paths of the directory it
 scanned, which the content digests keep. Run ShadowScan from the same checkout path

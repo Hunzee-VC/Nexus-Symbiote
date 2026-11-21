@@ -89,7 +89,8 @@ A few rules need their reasons:
   could be remote, so it counts as one. The `mcp` collector records an ambiguous
   authority as `[redacted]` in the first place.
 - The `mcp` collector exports an environment variable's name, with its value masked,
-  unless the name is token-shaped or not a plain field name; such a name is withheld as
+  unless the name is token-shaped, not a plain field name, or holds a credential
+  value read in the scan or its configuration file; such a name is withheld as
   `[redacted-N]`. That marker is the only credential signal the record keeps, so a
   plainly named variable such as `GITHUB_TOKEN` gives no class: names are not guessed
   at. A withheld name that is merely unusual, not a credential, still gives
@@ -120,8 +121,12 @@ the rules do not read, such as `oauth_scopes`, `filesystem_paths` or
 
 ## Exposure paths
 
-Sources are the agents and IDE agents in the view, in node order (agents before IDE
-agents, each by name and reference), at most 200; the number not searched is reported.
+Sources are the agents and IDE agents in the view, at most 200; the number not searched
+is reported. When there are more than 200, the sources searched are those whose own best
+path ranks highest under the order below: the heaviest sink each reaches, then the
+shortest distance to such a sink, then its reference. The 200 paths kept are therefore
+the ones a search of every source would keep. A source that reaches no sink has no path
+and is the first left out.
 Sinks are components with a `code-exec`, `exfil-capable`, `write-capable` or
 `secret-access` class or a high or critical finding; `network-egress` alone does not
 make a sink. Nor do unscoped allow rules: they leave an IDE agent unclassified, with a
@@ -136,8 +141,9 @@ Paths are ranked by the sink's weight, then by length, then by the references of
 source and the sink. The weight compares, in this order, whether the sink has a
 critical finding, a high finding, and the classes `code-exec`, `exfil-capable`,
 `write-capable` and `secret-access`: each outranks everything after it. The first 200
-paths are kept and the number left out is reported. The work is linear in the number of
-sources searched times the nodes and edges.
+paths are kept and the number left out is reported. Choosing the sources takes one
+search back from the sinks, linear in the nodes and edges, and the paths take time linear
+in the number of sources searched times the nodes and edges.
 
 A path is potential reach through recorded associations. It does not show that an
 agent can invoke a tool, that a credential reaches it, or that an exploit is possible.
