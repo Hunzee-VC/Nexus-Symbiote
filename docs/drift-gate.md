@@ -159,6 +159,7 @@ then notes, then the added, removed and modified components and relationships.
 | A collector first recorded as anything but `complete`, such as `failed` or `partial`, when the baseline's completeness claim never recorded it (`Collector 'model' is now recorded as failed; the baseline does not show this gap predates the change.`); first recorded as `complete`, it is an improvement | high |
 | ShadowScan: report content changed; report bytes changed without comparable content digests; source status worse; more unmapped entries; new projection limitations; a lossy format | high |
 | The new snapshot has graph problems the baseline did not (dangling or mistyped references), the snapshots differ in `spec_version`, or either snapshot uses a `spec_version` this release does not support | high |
+| IDE settings guardrail removed or widened on a retained `ide-agent` component: a `deny_rules` matcher removed (`deny_rule_removed`), a `sandbox.network.allowedDomains` host added (`sandbox_egress_widened`), a rule/subagent activation scope changed to `always_apply` or gained globs (`scope_widened`), or malformed settings metadata prevents verification (`malformed_settings_metadata`) | high |
 
 A relationship to a component that was itself added or removed is listed but alerts
 through that component, unless its own rating is high.
