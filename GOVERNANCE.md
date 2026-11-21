@@ -118,6 +118,7 @@ Every gate prints each of its failure reasons. How many findings the console lis
 | `runtime key-id` | Supported | offline | Prints canonical Ed25519 public key identifier |
 | `runtime register` | Experimental | offline | Registers newly issued runtime snapshot in local gateway state store |
 | `export-standard` | Experimental | offline | CycloneDX 1.6/1.7 or SPDX 3.0.1 export with typed AI and Dataset projections |
+| `audit-control-plane` | Experimental | offline | Hook targets, skill preambles, MCP bridges, steering surfaces, CI agents and identities |
 | `import-sbom` | Experimental | offline | Foreign CycloneDX or SPDX SBOM imported as declared evidence |
 | `evidence-profile` | Experimental | offline | Evidence attributes per component, without a scalar trust score |
 | `discover-mcp` | Experimental | **live** | Opt-in HTTPS MCP tool listing without calling tools |

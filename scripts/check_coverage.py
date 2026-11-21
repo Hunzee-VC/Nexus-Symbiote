@@ -86,6 +86,8 @@ MODULE_FLOORS: dict[str, tuple[int, int | None]] = {
     "nexus_symbiote/utils/pickle_load.py": (98, 98),
     "nexus_symbiote/spdx_profiles.py": (92, 86),
     "nexus_symbiote/export_standard_cli.py": (92, 86),
+    "nexus_symbiote/control_plane_audit.py": (92, 86),
+    "nexus_symbiote/control_plane_cli.py": (92, 86),
     "nexus_symbiote/sbom_import.py": (95, 82),
     "nexus_symbiote/evidence_profile.py": (98, 98),
     "nexus_symbiote/sbom_cli.py": (93, 88),
