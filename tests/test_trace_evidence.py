@@ -1115,6 +1115,30 @@ def test_mcp_endpoints_match_host_and_port_with_default_ports(tmp_path):
     assert unobserved == {"mcp:stdio", "mcp:bad"}
 
 
+def test_a_hosted_model_matches_by_its_requested_alias_when_its_name_differs(tmp_path):
+    pinned = ModelComponent(
+        bom_ref="model:pinned",
+        name="gpt-4o-2024-08-06",
+        requested_alias="gpt-4o",
+        provider="openai",
+        model_type="hosted",
+    )
+    spans = [
+        otlp_span({"gen_ai.request.model": "gpt-4o", "gen_ai.provider.name": "openai"}),
+        otlp_span({"gen_ai.request.model": "gpt-4o"}),
+    ]
+    evidence = _evidence(tmp_path, [pinned], *spans)
+    matched = {
+        (e["provider"], e["model"]): (e["inventory_ref"], e["basis"])
+        for e in _entries(evidence, "matched", "model")
+    }
+    assert matched == {
+        ("openai", "gpt-4o"): ("model:pinned", "name-and-provider"),
+        (None, "gpt-4o"): ("model:pinned", "name"),
+    }
+    assert _entries(evidence, "undeclared", "model") == []
+
+
 def test_models_match_by_alias_or_name_and_providers_must_agree(tmp_path):
     components = [
         _hosted("model:gpt", "gpt-4o-mini", "OpenAI"),

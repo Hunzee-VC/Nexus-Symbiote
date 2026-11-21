@@ -48,7 +48,8 @@ A way around a limit that its entry does not describe is worth a
   `scan` and for a later `validate --project` or `risk --project`, which collect
   the project again.
 - **Source search is bounded.** The mcp, a2a and rag collectors each read at most
-  `source-scan-bytes` (64 MiB by default) of source text. Past that, one failure
+  `source-scan-bytes` (64 MiB by default) of source text, and the shadowscan collector
+  reads at most that much of the files a report cites. Past that, one failure
   names the first file not read in full, and nothing after it is searched. Raise
   the limit for such a project.
 - **Exclusions are gaps.** A path you exclude with `scan.exclude_paths` is recorded
@@ -123,6 +124,67 @@ A way around a limit that its entry does not describe is worth a
 - **Hard links are ordinary files.** A hard-linked file inside the root is read like
   any other, so an inventory can describe a file that also has a name outside the
   root. See [security boundaries](../SECURITY.md#security-boundaries).
+- **Only identifiers and coverage reasons are neutralized.** A component's `name`,
+  `description` and `supplier` and the tool names under an MCP server's
+  `client_settings` have control, format and CI log-command characters replaced,
+  and an [`identifier_characters`](finding-catalog.md#categories) finding records
+  them; the details of its findings and the text of `surfaces_excluded` and
+  `scan_failures` are replaced the same way without a finding. A tab or line break
+  in a description or supplier becomes a space without a finding. References
+  derived from an A2A card, A2A client or RAG source name percent-encode those
+  characters instead. Kept as collected: a tool's `description_text`, which its
+  definition digest binds, so a control character in it reaches the native export
+  and the native document embedded in CycloneDX and SPDX as an escape such as
+  `\u001b`; values derived from a path, such as a prompt import's `bom_ref`,
+  `source_path`, evidence locators and `surfaces_scanned`, which validation opens
+  the file at again; other fields, such as an agent manifest's `version` and
+  `framework`, a model's `requested_alias` and an A2A card's declared skill names;
+  and every field of a [live mode](#live-mode) inventory, which is built from what a
+  server serves rather than collected. A consumer that decodes these strings and
+  prints them must neutralize them itself.
+- **Selectors and joiners are judged by context.** A variation selector U+FE0E or
+  U+FE0F directly after an emoji (any symbol of category So, or one of the few emoji
+  that are punctuation, letters or math symbols, such as `‼`, `ℹ` and `⤴`), or between
+  a keycap's `#`, `*` or digit and U+20E3, is kept and not reported. So is a
+  zero-width joiner between two emoji (after a selector or skin tone), and a joiner
+  where IDNA's CONTEXTJ rules (RFC 5892) allow it: either joiner after a virama on a
+  letter of the virama's own script, and U+200C between a letter that joins forward
+  and one that joins backward, such as Persian's `می` U+200C `خواهم`, by the joining
+  types of Unicode 16.0, with marks between them skipped. A zero-width joiner between
+  a letter and a virama of its script, as in Bengali's ra with ya-phala, is kept too.
+  Elsewhere they are replaced and reported: a selector after a dash, dot or digit; a
+  joiner between Latin letters or between Hebrew letters; a zero-width joiner between
+  Arabic letters, where CONTEXTJ allows only U+200C; U+200C after a letter that does
+  not join forward, such as an alef or the `ر` that Persian typing often follows with
+  U+200C before the plural `ها`, where the name reads the same without it; a joiner
+  between Indic letters without a virama, or after a virama placed on a letter of
+  another script; and a subdivision flag, which is written with tag characters. An
+  emoji is judged by its general category, so a selector after a symbol of category So
+  that has no emoji presentation is kept too.
+- **Neutralization never lengthens an export, but the finding adds to it.** A tab,
+  line break, form feed, backspace or delete, and the second `#` of a CI log-command
+  introducer, become a space because JSON writes each in fewer bytes than U+FFFD, so
+  a native inventory that fitted the 16 MiB limit before neutralization still fits.
+  The finding and the recorded digests add up to a few hundred bytes per affected
+  component, which an inventory within that margin of the limit may not have room for.
+- **Scripts are judged by the interpreter's Unicode tables.** A letter's script is the
+  first script word of its Unicode name, such as `LATIN` or `CYRILLIC`, and a virama
+  is read from the canonical combining classes of the Python that runs the command, so
+  a newer Unicode version can change what is a mix or an ordinary joiner, and so a
+  finding and the inventory's content digest, for letters added in that version. A
+  modifier or mathematical letter belongs to no script and does not make a mix.
+  Scripts mix only within a word, a run of letters, marks, digits and joiners: a
+  Cyrillic or Greek word beside a Latin one, as in `MCP сервер`, is ordinary, and
+  Latin and Cyrillic letters in one word are reported. So is a Cyrillic, Greek or
+  Armenian word beside Latin text whose every letter is in a short table of letters
+  that read as Latin ones, after UTS #39's confusables, such as `ехес` in `shell_ехес`
+  or `сом` in `github.сом`; a word with one letter outside that table, such as
+  `сервер`, is ordinary, and a lookalike the table does not hold is not reported. A
+  name written wholly in one script that looks like another, such as an all-Cyrillic
+  `раура` with no Latin text beside it, is not reported. Han with kana, with bopomofo
+  or with hangul counts as one writing system, and Latin beside one of them is not a
+  mix, as in Unicode UTS #39's Highly Restrictive level; only MCP server and tool
+  names are checked for a mix.
 
 ## MCP servers and tools
 
@@ -291,8 +353,10 @@ A way around a limit that its entry does not describe is worth a
   unknown. Other locations and the runner's own namespace (`UV_*`, `PIP_*`,
   `YARN_*`, `BUN_*`, `DOCKER_*` and similar) are a medium `package_source`
   finding, and the package URL is withheld. Configuration names that look like
-  tokens or hold one after a prefix (`AWS_AKIA...`) are exported as `[redacted]`,
-  and a launcher package whose name or specifier looks like a token is withheld
+  tokens or hold one after a prefix (`AWS_AKIA...`), and names that hold a literal
+  credential of the scan or repeat a value the scrubber holds (not `X-Api-Key`), are
+  exported as `[redacted]` (`[redacted-N]` in the `env` map), and a launcher
+  package whose name or specifier looks like a token is withheld
   (`[withheld]`, no package URL) with a medium `completeness` finding.
 - **Changed values need the binding key.** Launch arguments, environment and header
   values are exported only as redacted positions and names, and endpoint and
@@ -333,6 +397,62 @@ A way around a limit that its entry does not describe is worth a
   issuer) are not scrubbed. In an inline shell or `cmd` script a credential is found
   by its shape or in a `NAME=value`, `--name=value` or `--name value` word, which
   covers cmd's `set NAME=<scheme> <credential>`.
+- **`credential_exposure` reports a precise subset of what is scrubbed.** The scrubber
+  redacts broadly on purpose; the finding is raised only for an MCP server's `env`
+  values, launch arguments, header values and endpoint URL query, and for an `env` or
+  header name in a known token shape. A credential in the `command` field itself, in
+  an `oauth` or `auth` object, in a Claude Code settings `env` value, or in an A2A or
+  RAG header is scrubbed or withheld as before but raises no `credential_exposure`
+  finding. A password in an endpoint URL's user information stays with
+  `transport_security`; a token in a URL path
+  (`https://hooks.slack.test/services/T0/B0/<token>`), a URL fragment or a
+  `;name=value` path parameter is not reported, and neither is a literal at a position
+  with no credential name, such as a value after `-t`, a positional argument or
+  `echo <token> | docker login --password-stdin`. Names are read as words: `TOTP_SEED`
+  and `PIN` do not name a credential, and `VAULT_SECRET_ID` ends in the descriptor
+  `id`, so it is not reported although an AppRole secret ID is a credential; an index
+  key other than a primary or routing key (`SORT_KEY`, `RECAPTCHA_SITE_KEY`) holds none,
+  and an owner or location (`AUTH_USER`, `TOKEN_ISSUER`, `DB_PASSWORD_HOST`) describes
+  one. A JWT, bare or after `Bearer`, under an `anon`, `anonymous`, `public`,
+  `publishable` or `pk` name is not reported even when it is a misnamed service key, a
+  seed phrase counts only under a mnemonic or seed phrase name (not `WALLET_SEED`),
+  httpie's `-a` only under a fetcher, and elsewhere `-u user:secret` only with a literal
+  after the colon. A Discord token's first part starts with M, N or O, and the header
+  lines one value injects count toward the 4,096 values of one file. Values
+  are read for what they most likely are, so a real credential that looks like a
+  reference, a placeholder or a label is missed: a value that holds `${` or `$(`
+  anywhere (the default or alternate text of a shell expansion, `${TOKEN:-<value>}`,
+  `:=`, `-`, `=`, `:+` or `+`, is read on its own and counts when it is a literal;
+  `${TOKEN:?message}` carries no value), `$` and two or more upper-case letters, digits or underscores up to
+  punctuation or its end (`S3cure!Pa$$W0RD` and `$PR0D_KEY` read as `$NAME`;
+  `$PR0D_Kx9...` does count), or a name in braces set off from letters and digits
+  (`pw-{prod}`), or, under a name that is not a password's, a lower-case shell
+  variable such as `$api_token_2`; one made of placeholder words such as `test`, `dev`,
+  `my` or `example` that random segments do not outnumber, a date, time or duration
+  (`2027-01-01T00:00:00Z`, `1h30m`) under a credential name, a value of
+  fewer than eight characters, a single word of letters under 16 characters
+  (`letmeinplease`, `Sunshinesummer`) even under a password name, since what remains
+  must be credential-shaped, a phrase of short words (`MixedCaseLettersOnlyValue`)
+  under a token, key or secret name, a cookie value under 16 characters outside a
+  session cookie, a passphrase that holds a sentence's small word such as `the`, `by`
+  or `in`, and, under any name but a passphrase's, a value with white space
+  (`correct horse battery staple 1`) that is not a scheme credential, a header line, a
+  cookie, a connection string, a JSON object, an assignment or a `password <value>`
+  pair. An argument longer than 64 KiB is split into words at white space only,
+  without shell quoting. The other way, weak and documented values still count where they read as
+  literals: `admin123` or `passw0rd` under a password name, `Basic dXNlcjpwYXNz` under
+  `Authorization`, `correct horse battery staple` under a passphrase name, a repeated
+  pattern such as `deadbeefdeadbeef...` or `ab12ab12ab12`, a UUID under `--key`, the
+  jwt.io example token, and a value under a name whose word `pass` is a stage not
+  listed (`LINT_PASS`; `FIRST_PASS` and `PASS_THROUGH` are not read as passwords). The
+  detail lists at most 12 positions and then `and N more positions`. Collection stops
+  at 64 positions for one server, after which the detail says
+  `and at least 52 more positions` however many more the server holds; the finding
+  names positions, never values, so a suppression binds to the positions and classes
+  the detail lists. Below the bound a new position changes the detail and retires the
+  suppression; past it, a reference at an existing position replaced by a literal
+  leaves the detail, and so the suppression, unchanged, as does replacing a literal
+  with another of the same class at any count.
 - **Resolver settings outside the root are not read.** Settings are read from the
   root `.npmrc`, `bunfig.toml`, `.yarnrc.yml`, `.yarnrc`, `.env.yarn`, `uv.toml`
   and the `[tool.uv]` table of `pyproject.toml`. User and global configuration,
@@ -388,11 +508,66 @@ A way around a limit that its entry does not describe is worth a
   clients of other frameworks,
   leave no gap; the collector records some of those only as a code-detected client.
   User-level client settings in your home directory are not read either.
-- **Some client files are only detected.** Zed `context_servers`, opencode `mcp`,
-  `.continue/mcpServers/` and `.junie/mcp/mcp.json` are gaps; their servers are not
-  parsed. A copy at any depth, such as `pkg/opencode.json` or
-  `pkg/.continue/mcpServers/`, is a gap too, and another spelling of one, such as
-  `pkg/.Zed/settings.json`, is a [case-variant failure](#every-collector).
+- **Some client shapes are read with limits.** Zed `context_servers`, opencode `mcp`,
+  Continue `mcpServers` in `.continue/config.yaml`, in the `.yaml` and `.yml` files
+  directly in `.continue/mcpServers/` and in the local agent files directly in
+  `.continue/agents/`, `.continue/assistants/` and `.continue/configs/`, and Junie
+  `.junie/mcp/mcp.json` are parsed, at any depth and through a directory symlink, as
+  the other client files are. That Continue reads the three agent directories in a
+  workspace is confirmed from Continue's source, not its documentation, which names
+  only `~/.continue/agents/`. A server that declares neither a command nor an
+  endpoint, in any client file, holds no launch the collector can classify, so it is
+  inventoried with an unknown launcher, a high `launcher_identity` finding and a
+  gap; a Zed server with `"source": "extension"` is one too, and its `settings`
+  values are scrubbed as environment values are. opencode replaces `{env:NAME}` and
+  `{file:PATH}` in its configuration text when it loads it; the collector reads each
+  as an unresolved reference, as it reads `${NAME}`, in a server's string fields and
+  in the words and values one level below them, such as `oauth.clientId`. A command
+  that holds one is an unknown launcher that depends on the environment, a package
+  specification that holds one, such as `pkg@{env:VERSION}`, is an unknown launcher
+  too (an unparsed package reference), not only an unpinned one, each with a high
+  `launcher_identity` finding and a gap, and an endpoint that holds one is
+  unresolved. One in an object nested inside such a value, such as an object inside
+  `oauth`, stays literal text. An opening `{env:` or `{file:` whose closing brace is
+  not in the same string value, or one in a comment or a key, can change the strings
+  opencode reads, so the file is a collection failure.
+  Zed's `env` may be `null`, as Zed reads it as optional, so a Zed server with
+  `"env": null` is inventoried where the same server in `.mcp.json` is refused; a
+  `null` `args` is refused. A Zed entry with no source and no launch is read as one
+  an extension provides, and a `"source": "custom"` entry with no launch holds none.
+  An opencode `remote` server's transport is read from its endpoint, as for a server
+  that declares no type; one without an endpoint is read as Streamable HTTP, so a
+  command beside it is a `transport_ambiguity` finding rather than a launch, as
+  opencode starts no command for a remote server. A `.continue/mcpServers/` file
+  whose top level is a server rather than a block holding a `mcpServers` list, a
+  `.json` file there whose name is not a client file name, and a `.yaml` or `.yml` file in a directory below it or below an agent
+  directory are gaps: the collector does not read them there. A Continue entry that
+  references a hub block with `uses:` is a gap too, since its launch is on the hub and
+  is not resolved offline. A Continue name declared twice refuses every entry of that
+  name, and an `env` value that is not a string, such as YAML `PORT: 8080`, refuses
+  the server as an invalid server configuration; quote the value. Continue files are
+  read by the bounded YAML reader, which does not expand anchors, aliases or tags: an
+  empty or comment-only file holds no servers, and so does a file with an anchor,
+  alias or tag that never spells `mcpServers` (or, in a server directory, `command`,
+  `args`, `url` or `type`), but such a file that does is a collection failure. That
+  reader is pure Python, so each Continue file costs more to read than a JSON file
+  of the same size; its 20,000-token bound applies to every one. Continue's
+  `apiKey`, `requestOptions` and `uses` block inputs (`with`) are not interpreted,
+  but their credential values are scrubbed from every server of the file, as are
+  those of an opencode server refused for declaring both `environment` and `env` and
+  those of a Continue entry that is not inventoried (one without a name, a name
+  declared twice, a `uses` block). Continue's source reads the agent directories
+  recursively and keeps `.yaml` and `.yml` files at any depth there; the collector
+  reads only the files directly in them, so a deeper one is a gap. Whether Continue
+  reads a `.yml` file in `.continue/mcpServers/` is not confirmed; one is inventoried.
+  Continue loads `config.json` only from its global `~/.continue` directory and
+  reads no file named `config.yml`, so a workspace `.continue/config.json` or
+  `.continue/config.yml` is not read and leaves no gap. Continue merges a workspace
+  `.continuerc.json` onto that global `config.json`; the collector does not read its
+  `experimental.modelContextProtocolServers` and records a gap when it declares any,
+  but does not look for the other workspace names Continue accepts, which end in
+  `.continuerc.json`. Another spelling of one of these files, such as `pkg/.Zed/settings.json`, is a
+  [case-variant failure](#every-collector).
 - **Gemini CLI's server command is read only as plain words.** Gemini CLI starts
   `mcpServerCommand`, or `mcp.serverCommand` in its current settings layout, as a
   server named `mcp`, in place of an `mcpServers` entry of that name, and so does the
@@ -695,6 +870,11 @@ A way around a limit that its entry does not describe is worth a
   name with a digest of the declaring file; handlers imported from other modules
   are not covered. Observe the effective tools with `discover-mcp` or
   `verify-live`.
+- **Hidden characters are read in declared tool text only.** The text of each
+  entry in a `tools` array is checked for the hidden characters an instruction file
+  is checked for. A descriptor recorded by `discover-mcp --record` or
+  `verify-live --record` is not, and neither is a description in server source,
+  which is not collected. A tool's name is not part of the check.
 - **Tool digests are unkeyed.** A tool's `definition_hash` covers the declared
   descriptor, including text the exported descriptor omits, so anyone holding the
   inventory can confirm a guess of a low-entropy value withheld there.
@@ -745,6 +925,21 @@ A way around a limit that its entry does not describe is worth a
   TFLite, Core ML and ExecuTorch files are rated `unknown`: Keras Lambda layers,
   SavedModel operations and custom operators are not inspected. Each is a high
   finding, which the default gate does not fail on by severity alone.
+- **Most formats are recorded from the file name.** Only a `.gguf` file's four magic
+  bytes and a `.safetensors` file's header are checked before the record gives a
+  format and a model type
+  ([model integrity](model-integrity.md#format-and-model-type)). A file under any
+  other model suffix, such as text saved as `model.onnx`, `model.tflite` or
+  `model.ggml`, is recorded with the format its name claims and a model type, rated
+  `unknown`, and one under a pickle-family name the same, rated by its first 64 KiB as
+  the entry above says, so a text file there is `unknown`. The GGUF check reads the magic and rates what follows: a
+  file that starts with `GGUF` is recorded as `llama.cpp` unless the content after the
+  magic is rated `unsafe-code-execution`, and
+  `properties.gguf_metadata` says when its version or metadata could not be read.
+  The standard exports keep such a file's type: a file whose format was not
+  established is still a CycloneDX `machine-learning-model` and an SPDX `ai_AIPackage`,
+  as every component of the `model` collector is, without the format and model type
+  properties.
 - **Some files are not inventoried.** A file outside the
   [listed names](model-integrity.md#model-files-and-references) is inventoried by
   its content only when it is named `.npy`, `.npz` or `.dat` or has any name below a
@@ -823,9 +1018,45 @@ A way around a limit that its entry does not describe is worth a
 
 - **Instruction files under other names are not recorded.** The `prompt` collector
   reads the fixed files the [collector reference lists](collectors.md#what-each-collector-reads),
-  `CLAUDE.md`, `AGENTS.md`, `GEMINI.md` and `.cursorrules` in any subdirectory, and
-  every file in the rule, prompt and subagent directories, apart from files named as
-  holding credentials (see below). Another spelling of a
+  `CLAUDE.md`, `AGENTS.md`, `GEMINI.md` and `.cursorrules` in any subdirectory,
+  every file in the rule, prompt and subagent directories, and every text file under
+  a directory named `prompts` and every `*.prompt.md`, `*.prompt.yaml` or
+  `*.prompt.yml` file at any depth, apart from files named as holding credentials
+  (see below). A `prompts` directory or `*.prompt.*` file under `tests`, `test`,
+  `dist`, `build`, `docs`, `benchmarks`, `examples`, `node_modules` or `vendor`, the
+  names the mcp collector's source search skips, is not read and not recorded as a
+  gap; those names match exactly, as in the source search, so `Tests/prompts` is
+  read. Neither is a file under another spelling of the directory name, such as
+  `Prompts/a.md`, while the `*.prompt.*` suffix matches in any case, so
+  `src/Review.PROMPT.MD` is recorded. Under `prompts`, only the text suffixes the
+  [collector reference lists](collectors.md#what-each-collector-reads) and names
+  without a suffix are read: code such as `prompts/__init__.py`, images and dotfiles
+  such as `.DS_Store` are not, while `prompts/LICENSE` and `prompts/README.md` are
+  recorded as prompt templates. A new file under `prompts` can fail `scan` and
+  `validate --project` on a project that passed before: a text-named file that is
+  not UTF-8, such as a UTF-16 one, is a failure, as in a rule directory; a file
+  named as holding credentials, such as `support/prompts/credentials_help.txt`, is a
+  gap and is not read; a file larger than the
+  [`file-bytes`](collection-limits.md#limits) limit, such as a 5 MB
+  `prompts/eval_set.json`, is a failure; and prompt templates are read after every
+  other file the collector reads, so templates past the
+  [`total-bytes`](collection-limits.md#limits) limit fail while skills keep their
+  budget. A directory symlink under which a file would be a
+  prompt template, such as `app/prompts -> ../data` or `agent -> examples/agent` with
+  `examples/agent/prompts/a.md`, is a gap when no walk inventories that file: the walk
+  reads the directory a symlink leads to once, under that directory's own name, and a
+  file there that is a prompt template, or another kind, under that name is recorded
+  under it. A file under `prompts` that a memory file imports, also through a
+  directory symlink, is recorded once, as that import, with the
+  `imported-instruction` identity it had before prompt templates were read, and
+  another spelling of a nested name there, such as `pkg/prompts/claude.md`, is the
+  failure described below, not a prompt template. `llms.txt`, a prompt stored under another name, such as
+  `app/system.yaml`, and a prompt held in code or a database are not read either. A
+  file under a `prompts` directory that is not Markdown and not named `*.prompt.*`,
+  such as `prompts/settings.yaml`, is inventoried without a content hash, as the next
+  entry explains. More prompt files than the
+  [`prompt-files`](collection-limits.md#limits) limit are a collection failure, as
+  past every operator limit, until the limit is raised. Another spelling of a
   nested name, such as `claude.md` in a subdirectory, is a
   [failure](#every-collector), not a file that is read, unless one of those
   directories, or a skill or command directory, holds it. `CLAUDE.local.md`,
@@ -862,7 +1093,10 @@ A way around a limit that its entry does not describe is worth a
   the collector records: an instruction, nested memory, rule, prompt or subagent file
   keeps its content hash only when its name is Markdown, or is an instruction file name
   without one (`.cursorrules`, `.clinerules`, `.windsurfrules`, `system_prompt.txt`),
-  or, in a rule, prompt or subagent directory, has no suffix at all; and when a symlink
+  or is a prompt template named `*.prompt.yaml` or `*.prompt.yml`, or, in a rule,
+  prompt or subagent directory, has no suffix at all; so `prompts/x.prompt.yml` and
+  `src/x.prompt.yml` keep a content hash, while `.github/prompts/x.prompt.yml`, a
+  file of a prompt directory that is not Markdown, does not; and when a symlink
   there leads to a file with a Markdown suffix, the same test an import of that file
   passes. So `AGENTS.md` linked to `config/app.json` or `config/.windsurfrules`,
   `.cursorrules` linked to `docs/rules.txt` or `shared/.cursorrules`, and
@@ -876,7 +1110,9 @@ A way around a limit that its entry does not describe is worth a
   content, which `validate --project` with the same key verifies; without the key the
   component carries a low `completeness` finding saying its values are not bound in
   this inventory, validation counts it as unbound, and a change to the file fails no
-  validation. `diff` cannot see the change either, so it raises a medium alert that
+  validation. Prompt templates share one such finding, on the first of them, which
+  counts them and names up to 12, so a library of templates adds one point to the
+  score. `diff` cannot see the change either, so it raises a medium alert that
   the record's values are unbound on every comparison, changed or not, and a keyless
   `diff --fail-on-alert` fails. A project with more
   than the [`import-lookups`](collection-limits.md#limits) limit of memory files and
@@ -940,9 +1176,35 @@ A way around a limit that its entry does not describe is worth a
   zero-width or bidirectional characters each separated by another byte, plane-14
   characters spread so that no 4,096 characters hold 16 of them, and a UTF-16 or
   UTF-32 file without a byte-order mark.
-- **Hidden-character detection is character-based.** Lookalike letters are not
-  detected, and neither are control characters such as ESC, spaces other than
-  U+0020, such as U+00A0 and U+3000, or private-use characters.
+- **Escapes are decoded only in prompt templates.** A JSON, YAML or TOML prompt
+  template, under a `prompts` directory or named `*.prompt.yaml` or `*.prompt.yml`,
+  and the YAML front matter of a Markdown one, is checked in what it decodes to as
+  well as in its raw text, also when a memory file imports it, so a hidden character
+  written as an escape, such as `\udb40\udc49` in JSON or `"\U000E0049"` in YAML or
+  TOML, is the same finding as one written raw. YAML of at most 20,000 parser events
+  and 64 nested flow collections, counting brackets in its strings too, and TOML 1.0
+  within the dotted-key bound, each up to 65,536 characters, give the strings they
+  parse to. JSON, which hosts read leniently, with
+  comments, duplicate keys, large numbers or lone surrogates, and YAML or TOML that
+  does not parse or is past those bounds, have each escape that an odd run of
+  backslashes starts decoded by pattern: `\x`, `\u` and `\U` with their hexadecimal
+  digits, YAML's `\L`, `\P`, `\N` and `\_`, and `\e`. The pattern also decodes such
+  an escape in a YAML or TOML literal string or comment, which a host keeps as text,
+  so it can only add findings, which may be false positives: in a Jinja-templated
+  YAML file, or front matter that does not parse, a single-quoted Windows path or
+  regular expression, such as `'C:\Logs\Pipeline'` (`\L` and `\P`, U+2028 and
+  U+2029) or `'\P{L}+'` (`\P`, U+2029), is a low `line_separators` finding, while the
+  same lines in YAML that parses give none. A character the file holds raw in a comment
+  and also spells in a parsed string is counted once. The same file in a rule, prompt,
+  subagent, skill or command
+  directory, or imported with `@path` from outside a `prompts` directory, is checked
+  as raw text only, as are a Markdown body and templates in other formats, such as
+  Jinja's `{{ "\u202e" }}`, which only rendering decodes.
+- **Hidden-character detection is character-based.** In instruction file text,
+  lookalike letters are not detected, and neither are control characters such as
+  ESC, spaces other than U+0020, such as U+00A0 and U+3000, or private-use
+  characters. Component identifiers are checked separately; see
+  [every collector](#every-collector).
 - **Hidden markup means comments, unused definitions and footnotes.** HTML and
   Markdown comments are reported by count, not text, and only in Markdown files and
   instruction files without a suffix, such as `.cursorrules`. They are HTML comments,
@@ -1344,6 +1606,21 @@ A way around a limit that its entry does not describe is worth a
   methods, and aliases imported by name from `a2a` modules are recognized. The
   alias check is syntactic and can report a gap even when a name is later rebound;
   assignment aliases, re-exports under other names and dynamic lookup are not resolved.
+- **Guardrail and evaluation configuration is recognised by name only.** The rag
+  collector records `promptfooconfig.yaml`, `promptfooconfig.yml`,
+  `promptfooconfig.json`, `guardrails.yaml`, `guardrails.yml`, `guardrails.json`, and a
+  `config.yml` or `config.yaml` beside at least one `.co` file, as `guardrail-policy`
+  components bound by digest. A configuration under any other name, such as a
+  promptfoo file passed with `-c`, or `.co` files in a subdirectory of the directory
+  that holds `config.yml`, is not recorded. The content is not parsed: the record
+  carries no model, version, rule or provider, raises no finding, and does not show
+  that anything loads or enforces the file. The inferred repository agent lists every
+  such file in `guardrail_refs`, which is a repository association, not observed use.
+  Guardrails declared in Terraform or other infrastructure code, or built in source
+  code, are not collected. `validate` does not recompute `config_hash` in its
+  integrity check; `validate --project` compares it with a fresh collection.
+- **Memory stores are not collected.** No built-in collector emits `memory-store`
+  components.
 - **Python import heuristics are shallow.** The a2a and rag collectors read only
   Python files that name the SDK or a vector-store library. The rag collector skips
   one it cannot read or parse or that exceeds 262,144 characters. The a2a
@@ -1372,6 +1649,56 @@ A way around a limit that its entry does not describe is worth a
   each repository's discovery workflow its own signer identity, or pin the report
   with `expected_sha256` in a version 2 `sigstore-message-signature` entry; see
   [require a signed report in CI](shadowscan-integration.md#require-a-signed-report-in-ci).
+- **A cited model shows that text is in the repository, not that code uses it.** A merged
+  `scan` names a model when its identifier stands at the file and line a ShadowScan report
+  cites. Anyone who can write the report and a file in the checkout can add such a component,
+  which is why it keeps declared assurance. Evidence the scan does not confirm is counted and
+  not named, including identifiers that ShadowScan reports by a matched prefix or on a
+  neighbouring line. A bill of materials or scan report in the tree confirms nothing, but
+  that rule knows only JSON formats: a Markdown or HTML report kept in the tree can still
+  confirm an identifier; so can a JSON report behind a leading comment line or nested one
+  level deeper. A value written below a credential key is withheld when it is the one value
+  on its line and the line that opens it, a key and its mark with at most a block indicator,
+  a bracket or a comment after them, is within the eight lines above; keys nested in a
+  bracket between them, such as `{"values": [`, do not end that search. A line of several
+  words in a block below such a key, a value further down, and a value below a typed
+  declaration such as `const credentials: string[] = [` are read alone and can be named.
+  So is a value below a compact entry written with spaces, such as `{"type": "basic"},`,
+  which reads as a line of several words.
+  The redactor decides which keys name a credential and reads names broadly, so a list of
+  model identifiers below `requires_token:`, `cache_key = (` or `modelsRequiringApiKey = [`
+  is withheld; plural names such as `api_keys:` and `tokens:` are not credential names to
+  it. The kind is the report's: the scan checks that the identifier stands at the cited
+  line, not that it names a model, except that an Amazon Bedrock
+  resource name of another kind, such as a guardrail, is not named. The same model written
+  two ways, such as `anthropic/<model>` and `<model>`, is two components. Findings of other kinds, container images, infrastructure
+  and data are not named this way, and a standalone `import-shadowscan` names nothing; see
+  [models named from cited evidence](shadowscan-integration.md#models-named-from-cited-evidence).
+- **Two finding kinds are projected for one resource type each; the rest are gaps.** An
+  `agent-config` finding becomes an `ide-agent` only with resource type `coding-agent-config`,
+  and a `framework-usage` finding an `agent` only with resource type `project`. Any other
+  resource type of those kinds stays unmapped, such as the `lockfile-inventory` finding that
+  ShadowScan 0.1.4 reports for a `uv.lock` that lists an AI package, and so does every
+  `secret`, `token`, `infra`, identity and grant finding and every finding of the kinds
+  `gateway-caller`, `network-contact` and `runtime-process`. One unmapped entry keeps
+  the default scan, validate and risk gates closed, so a code report with a credential, an
+  infrastructure file or such a lockfile still does not pass. The component type is no
+  narrower than the kind and resource type: a project that only implements or configures an
+  MCP server is imported as an `agent`, and an `AGENTS.md` file or a set of `SKILL.md` files
+  as an `ide-agent`, beside what the local collectors record for the same files. An imported
+  `agent` or `ide-agent` carries a digest-based label and no `ide_type`, `permission_mode`,
+  framework or autonomy, and is not linked to the configuration the local collectors read from
+  the same files. Its ShadowScan rating counts in `risk` as `shadowscan-heuristic`, where it
+  can repeat what the local collectors already rate on those files, and a `critical` rating
+  closes the default risk gate by itself unless `risk.ignore_categories` lists
+  `shadowscan-heuristic`.
+  `trace-diff` treats each imported agent as a declared agent, matched by its label, and lists
+  it as unobserved when no trace names it. `graph` counts each imported agent and IDE agent
+  among the 200 sources it searches for exposure paths, in name order, so a report with some
+  two hundred of them can leave a repository agent unsearched; the view says how many it left
+  out, and `--focus` on the agent shows its paths. The mapping was reviewed against ShadowScan
+  0.1.4 at commit 2b80f19 only; see
+  [what each ShadowScan kind becomes](shadowscan-integration.md#what-each-shadowscan-kind-becomes).
 - **`verify-discovery --bundle` checks direct imports only.** It accepts only a BOM
   written by `import-shadowscan`. For a merged `scan` BOM, use the signature policy
   with `--project`.
@@ -1647,8 +1974,11 @@ A way around a limit that its entry does not describe is worth a
 - **Exposure paths show potential reach.** A path is the shortest chain of recorded
   associations from an agent or IDE agent to a risky component. It does not show that
   the agent can invoke the component, that a credential reaches it or that an exploit
-  is possible. At most 200 agents and IDE agents are searched and 200 paths kept, and
-  the view reports how many were left out.
+  is possible. At most 200 agents and IDE agents are searched, those whose best path
+  ranks highest, and the 200 best paths kept, and the view reports how many were left
+  out. An inventory with 200 sources whose paths outrank a repository agent's, such as
+  imported agents rated critical, leaves that agent's paths out of the view; `--focus`
+  on the agent still shows them.
 - **Large inventories make large pages.** `--max-nodes` bounds components, not edges,
   and the HTML page renders every detail when it is written, so a large or dense
   inventory gives a page that a browser opens slowly. Use `--focus` or
@@ -1846,3 +2176,15 @@ A way around a limit that its entry does not describe is worth a
 - **The TypeScript parser is native code.** It runs inside the scanning process with
   size, node and time bounds, but without isolation; see
   [security boundaries](../SECURITY.md#security-boundaries).
+- **One collection bound counts time.** A TypeScript or JavaScript file the grammar
+  cannot parse has no size or node bound on its parse, so the parse is held to 250 ms
+  of processor time, more when `syntax-bytes` is raised, and a file whose parse takes
+  that long is a failure. How busy the machine is does not count toward it, but how
+  fast the machine is does: a file whose parse takes about that long records
+  `TypeScript parsing exceeded its time limit` on a slower machine and a different
+  verdict on a faster one. A file that parses stays below the limit, and ordinary
+  source reaches the node limit first. The parser reads its clock only between steps
+  of its own, and some input makes one step long: 32 KiB of `f<a,` runs for about
+  ten times the limit and 1.4 GB of memory before it stops, in this release and in
+  those before it. See
+  [the TypeScript parse time limit](collection-limits.md#the-typescript-parse-time-limit).

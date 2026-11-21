@@ -14,9 +14,9 @@ jobs:
   test:
     name: Tests Python ${{ matrix.python }}
     runs-on: ubuntu-24.04
-    # Hosted runners differ in speed by about 1.6x: the 3.12 suite takes 17 to 19 min,
-    # and on slow runners it reached 29 of 30 min (#249) and was killed at 99% (#272).
-    # The budget fits the slow runners; a hung test still fails at test_timeout.
+    # In one process the 3.12 suite took 17 to 19 min, and on slow hosted runners (about 1.6x
+    # apart) it reached 29 of 30 min (#249) and was killed at 99% (#272). It now runs on every
+    # core; the budget stays until those runs are measured. A hung test fails at test_timeout.
     timeout-minutes: 50
     strategy:
       fail-fast: false
@@ -41,8 +41,8 @@ jobs:
           set -o pipefail
           timeout --signal=INT --kill-after=30s 45m \
             bash --noprofile --norc -e -o pipefail -c '
-              python -m pytest -vv --strict-skips --durations=20 -o test_timeout=120 \
-                2>&1 | tee "$PYTEST_LOG"
+              python -m pytest -n auto --dist worksteal -vv --strict-skips --durations=20 \
+                -o test_timeout=120 2>&1 | tee "$PYTEST_LOG"
             '
       - name: Preserve test diagnostics
         if: always()
@@ -77,8 +77,8 @@ jobs:
           set -o pipefail
           timeout --signal=INT --kill-after=30s 45m \
             bash --noprofile --norc -e -o pipefail -c '
-              python -m pytest -vv --strict-skips -m "not locked_only" --durations=20 \
-                -o test_timeout=120 2>&1 | tee "$PYTEST_LOG"
+              python -m pytest -n auto --dist worksteal -vv --strict-skips \
+                -m "not locked_only" --durations=20 -o test_timeout=120 2>&1 | tee "$PYTEST_LOG"
             '
       - name: Preserve floor diagnostics
         if: always()
@@ -91,9 +91,9 @@ jobs:
   coverage:
     name: Coverage Python 3.12
     runs-on: ubuntu-24.04
-    # Tracing makes the suite about twice as slow (1.6-2.7x), and hosted runners differ in speed
-    # by about 1.6x: the run of #249's head 57030e26 hit 55 minutes at 95% with no test
-    # failing and passed in 37 on its re-run, and #255's and #265's runs hit the same limit.
+    # In one process, tracing made the suite 1.6-2.7x slower and hosted runners differ by about
+    # 1.6x: #249's head 57030e26 hit 55 minutes at 95% with no test failing and passed in 37 on
+    # its re-run. It now runs on every core; the budget stays until those runs are measured.
     timeout-minutes: 80
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -115,9 +115,10 @@ jobs:
           set -o pipefail
           timeout --signal=INT --kill-after=30s 75m \
             bash --noprofile --norc -e -o pipefail -c '
-              python -m pytest -vv --strict-skips --durations=20 -o test_timeout=240 \
-                --cov=nexus_symbiote --cov=scripts --cov-branch --cov-report=term-missing \
-                --cov-report="json:$COVERAGE_JSON" \
+              python -m pytest -n auto --dist worksteal -vv --strict-skips --durations=20 \
+                -o test_timeout=240 -o faulthandler_timeout=230 \
+                --cov=nexus_symbiote --cov=scripts --cov-branch \
+                --cov-report=term-missing --cov-report="json:$COVERAGE_JSON" \
                 2>&1 | tee "$PYTEST_LOG"
             '
       - name: Enforce statement, branch and security-module coverage floors
@@ -154,13 +155,16 @@ jobs:
       - run: mypy src/nexus_symbiote scripts
       - run: python scripts/check_workflows.py
       - run: python scripts/check_repository_hygiene.py
+      # The checkout is the pull request's merge commit, whose first parent is the base it was
+      # merged with. The base branch's tip can move while the job waits for a runner, and a
+      # diff against that tip would count the commits merged since as the pull request's.
       - name: Cap pull request size outside tests
         if: github.event_name == 'pull_request'
         env:
-          PR_BASE: ${{ github.base_ref }}
+          MERGE_SHA: ${{ github.sha }}
         run: |
-          git fetch --no-tags origin "$PR_BASE"
-          python scripts/check_pull_request_size.py --base "origin/$PR_BASE"
+          git fetch --no-tags --depth=2 origin "$MERGE_SHA"
+          python scripts/check_pull_request_size.py --base "$MERGE_SHA^1"
       - name: Require the locks to match pyproject.toml and each other
         run: python scripts/check_locks.py
   distribution:
@@ -212,12 +216,20 @@ jobs:
         env:
           REGRESSION_REPORT: ${{ runner.temp }}/security-regressions.json
         run: python scripts/check_security_regressions.py --out "$REGRESSION_REPORT"
+      - name: Enforce drift-regression and benchmark class recall floors
+        env:
+          PRECISION_REPORT: ${{ runner.temp }}/precision-gate.json
+        run: python scripts/check_precision_gate.py --out "$PRECISION_REPORT"
+      - name: Run bounded parser fuzz smoke gate
+        run: python scripts/fuzz_parsers.py --iterations 64
       - name: Retain per-case security evidence
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: security-regression-evidence
-          path: ${{ runner.temp }}/security-regressions.json
+          path: |
+            ${{ runner.temp }}/security-regressions.json
+            ${{ runner.temp }}/precision-gate.json
           if-no-files-found: error
           retention-days: 14
   dependency-audit:
@@ -496,6 +508,76 @@ jobs:
             echo "A workflow command from the scanned checkout created an annotation"
             exit 1
           fi
+  # Invariant 2 (offline by default) under a kernel control instead of the suite's Python
+  # socket tripwire: the whole suite runs in a network namespace that holds only loopback.
+  offline-invariant:
+    name: Offline invariant (OS network denied)
+    runs-on: ubuntu-24.04
+    # The same budget as the Tests jobs: slow runners took the suite to 29 minutes.
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - name: Install locked test environment
+        run: |
+          python -m venv "$RUNNER_TEMP/offline-venv"
+          "$RUNNER_TEMP/offline-venv/bin/python" -m pip install --require-hashes --only-binary=:all: -r requirements-ci.lock
+          "$RUNNER_TEMP/offline-venv/bin/python" -m pip install --no-deps --no-build-isolation -e .
+          "$RUNNER_TEMP/offline-venv/bin/python" -m pip check
+      - name: Run full test suite inside kernel network-denied namespace
+        env:
+          PYTEST_LOG: ${{ runner.temp }}/pytest-offline-invariant.log
+        run: |
+          set -euo pipefail
+          HOST_UID="$(id -u)"
+          HOST_GID="$(id -g)"
+          OFFLINE_PYTHON="$RUNNER_TEMP/offline-venv/bin/python"
+          export HOST_UID HOST_GID OFFLINE_PYTHON
+          sudo --preserve-env=CI,HOST_UID,HOST_GID,OFFLINE_PYTHON,PYTEST_LOG,RUNNER_TEMP,HOME,TMPDIR \
+            unshare --net bash --noprofile --norc -euo pipefail -c '
+              ip link set lo up
+              setpriv --reuid="$HOST_UID" --regid="$HOST_GID" --clear-groups \
+                "$OFFLINE_PYTHON" - <<'"'"'PY'"'"'
+          import errno
+          import socket
+          for family, addr in (
+              (socket.AF_INET, ("1.1.1.1", 443)),
+              (socket.AF_INET6, ("2606:4700:4700::1111", 443)),
+          ):
+              try:
+                  sock = socket.socket(family, socket.SOCK_STREAM)
+              except OSError as error:
+                  if family == socket.AF_INET6 and error.errno == errno.EAFNOSUPPORT:
+                      continue
+                  raise
+              with sock:
+                  sock.settimeout(5.0)
+                  try:
+                      sock.connect(addr)
+                  except OSError as error:
+                      if error.errno != errno.ENETUNREACH:
+                          raise SystemExit(f"Expected ENETUNREACH for {addr}, got {error!r}")
+                  else:
+                      raise SystemExit(f"Expected kernel egress denial for {addr}")
+          PY
+              exec setpriv --reuid="$HOST_UID" --regid="$HOST_GID" --clear-groups \
+                timeout --signal=INT --kill-after=30s 45m \
+                "$OFFLINE_PYTHON" -m pytest -n auto --dist worksteal -vv --strict-skips \
+                -o test_timeout=120 2>&1 \
+                | tee "$PYTEST_LOG"
+            '
+      - name: Preserve offline invariant diagnostics
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: pytest-log-offline-invariant
+          path: ${{ runner.temp }}/pytest-offline-invariant.log
+          if-no-files-found: error
+          retention-days: 7
   verified:
     name: Verified CI
     if: always()
@@ -510,6 +592,7 @@ jobs:
       - codeql
       - action
       - action-annotations
+      - offline-invariant
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -522,7 +605,7 @@ jobs:
           import os
           import sys
           results = json.loads(os.environ["CI_RESULTS"])
-          expected = {"test", "floor", "coverage", "quality", "distribution", "security-regressions", "dependency-audit", "codeql", "action", "action-annotations"}
+          expected = {"test", "floor", "coverage", "quality", "distribution", "security-regressions", "dependency-audit", "codeql", "action", "action-annotations", "offline-invariant"}
           if not isinstance(results, dict) or set(results) != expected:
               print("Verification metadata does not contain exactly the required jobs")
               sys.exit(1)
