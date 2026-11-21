@@ -412,6 +412,7 @@ class LegEvidence:
     locator: str | None
     assurance: AssuranceLevel
     gated: bool
+    component_approval_declared: bool
 
 
 @dataclass(frozen=True)
@@ -474,6 +475,7 @@ class _ComponentSignals:
     private_basis: tuple[str, ...]
     egress_basis: tuple[str, ...]
     explicitly_gated: bool
+    approval_declared: bool
     explicitly_ungated: bool
 
 
@@ -1016,6 +1018,8 @@ def _evidence_entry(leg: str, item: LegEvidence) -> dict[str, Any]:
         "locator": item.locator,
         "assurance": item.assurance.value,
         "gated": item.gated,
+        "component_approval_declared": item.component_approval_declared,
+        "approval_enforcement_verified": False,
     }
 
 
@@ -1099,6 +1103,7 @@ def _scope_findings(
                     sig.locator,
                     comp.assurance_level,
                     (gated_owner or sig.explicitly_gated) and not sig.explicitly_ungated,
+                    sig.approval_declared,
                 )
             )
         return found
@@ -1188,6 +1193,7 @@ def analyze_trifecta(
     signals: dict[str, _ComponentSignals] = {}
     for comp in bom.components:
         rc = classify(comp)
+        declared_approval = _has_explicit_approval_gate(comp, moment)
         signals[comp.bom_ref] = _ComponentSignals(
             component=comp,
             risk_classification=rc,
@@ -1195,8 +1201,8 @@ def analyze_trifecta(
             untrusted_basis=_untrusted_input_basis(comp, rc),
             private_basis=_private_data_basis(comp, rc),
             egress_basis=_egress_basis(comp, rc),
-            explicitly_gated=assume_declared_approvals
-            and _has_explicit_approval_gate(comp, moment),
+            explicitly_gated=assume_declared_approvals and declared_approval,
+            approval_declared=declared_approval,
             explicitly_ungated=_is_explicitly_ungated(comp),
         )
 
