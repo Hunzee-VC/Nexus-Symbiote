@@ -654,6 +654,35 @@ CROSSWALK: dict[str, tuple[Reference, ...]] = {
         _ref(NIST_AI_RMF, "MEASURE-2.7", _EVALUATION),
         _ref(EU_AI_ACT, "Art. 15", _RESILIENCE),
     ),
+    "instruction_injection": (
+        _ref(
+            CWE,
+            "CWE-1427",
+            "Prompt or instruction text carries injection or auditor-deception directives without neutralization.",
+        ),
+        _ref(
+            OWASP_LLM_2025,
+            "LLM01:2025",
+            "Prompt or instruction text contains override, exfiltration, or deception directives.",
+        ),
+        _ref(
+            OWASP_ASI_2026,
+            "ASI01",
+            "Injected directives in prompt or skill files can hijack the agent's goal.",
+        ),
+        _ref(
+            OWASP_LLM_2026,
+            "LLM01:2026",
+            "Prompt or instruction text contains override, exfiltration, or deception directives.",
+        ),
+        _ref(
+            MITRE_ATLAS,
+            "AML.T0068",
+            "Concealed or override directives disguise instructions to alter agent or auditor behavior.",
+        ),
+        _ref(NIST_AI_RMF, "MEASURE-2.7", _EVALUATION),
+        _ref(EU_AI_ACT, "Art. 15", _RESILIENCE),
+    ),
     "instruction_layering": (
         _ref(
             OWASP_LLM_2025,
@@ -1173,6 +1202,45 @@ CROSSWALK: dict[str, tuple[Reference, ...]] = {
         _ref(EU_AI_ACT, "Art. 15", _RESILIENCE),
     ),
     "tag_characters": _HIDDEN_CHARACTERS,
+    "tool_description_poisoning": (
+        _ref(
+            CWE,
+            "CWE-1427",
+            "Tool or schema description carries directive tags or exfiltration instructions into the model prompt.",
+        ),
+        _ref(
+            OWASP_LLM_2025,
+            "LLM01:2025",
+            "Poisoned tool descriptions act as indirect prompt injection inside tool metadata.",
+        ),
+        _ref(
+            OWASP_ASI_2026,
+            "ASI01",
+            "Hidden or coercive directives inside tool metadata can redirect agent execution.",
+        ),
+        _ref(
+            OWASP_ASI_2026,
+            "ASI02",
+            "Poisoned tool guidance steers agents toward unintended sensitive reads or exfiltration.",
+        ),
+        _ref(
+            OWASP_LLM_2026,
+            "LLM01:2026",
+            "Poisoned tool descriptions act as indirect prompt injection inside tool metadata.",
+        ),
+        _ref(
+            MITRE_ATLAS,
+            "AML.T0010.005",
+            "Local tool descriptors embed malicious behavioral instructions inside the agent tool chain.",
+        ),
+        _ref(
+            MITRE_ATLAS,
+            "AML.T0068",
+            "Markup blocks or hidden directives inside tool schemas disguise injected instructions.",
+        ),
+        _ref(NIST_AI_RMF, "MEASURE-2.7", _EVALUATION),
+        _ref(EU_AI_ACT, "Art. 15", _RESILIENCE),
+    ),
     "transport_ambiguity": (_ref(NIST_AI_RMF, "MEASURE-2.7", _EVALUATION),),
     "transport_security": (
         _ref(
