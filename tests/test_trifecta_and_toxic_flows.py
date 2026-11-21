@@ -1016,3 +1016,28 @@ def test_secret_environment_name_scan_is_linear() -> None:
         analyze_trifecta(AIBOM(components=[server]))
 
     assert scaling_ratio(analyze) < 10
+
+
+# The anchors are written \A and \Z (CodeQL misreads ^ and $ inside these alternations as
+# unmatchable); these cases pin that both ends still bound a word, as ^ and $ did.
+@pytest.mark.parametrize(
+    ("name", "secret"),
+    [
+        ("KEY", True),
+        ("TOKEN", True),
+        ("API_KEY", True),
+        ("KEY_ID", True),
+        ("TOKEN\n", True),
+        ("AWS_ACCESS_KEY_ID", True),
+        ("anthropic_base_url", True),
+        ("MONKEY", False),
+        ("KEYRING", False),
+        ("MY_AWS_ACCESS", False),
+        ("TZ", False),
+        ("NODE_ENV", False),
+    ],
+)
+def test_secret_env_key_anchors_bound_a_word(name: str, secret: bool) -> None:
+    from nexus_symbiote.trifecta import _SECRET_ENV_KEY_RE
+
+    assert bool(_SECRET_ENV_KEY_RE.search(name)) is secret

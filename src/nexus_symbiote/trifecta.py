@@ -155,14 +155,14 @@ _WITHHELD_ENV_NAME_RE = re.compile(r"\[redacted-[1-9][0-9]{0,5}\]")
 # so a long run of datastore names (DBDBDB...) is scanned in linear time.
 _SECRET_ENV_KEY_RE = re.compile(
     r"secret|passw(?:or)?d|credential|apikey|"
-    r"(?:^|_)(?:"
+    r"(?:\A|_)(?:"
     r"key|keys|token|tokens|pass|pwd|cred|creds|auth|bearer|cookie|cookies|session|"
     r"private|jwt|oauth|pat|pem|dsn|conn_str|connection_string|kubeconfig|vault"
-    r")(?:$|_)|"
+    r")(?:_|\n?\Z)|"
     r"(?<![a-z0-9])(?=[a-z0-9]*+_ur[il])[a-z0-9]*?"
     r"(?:postgres|pg|mysql|maria|mongo|redis|database|db|amqp|rabbitmq|supabase|neon|"
     r"clickhouse|elastic|sqlalchemy)|"
-    r"^(?:aws_access|aws_session|openai_|anthropic_|stripe_|gcp_)",
+    r"\A(?:aws_access|aws_session|openai_|anthropic_|stripe_|gcp_)",
     re.IGNORECASE,
 )
 
