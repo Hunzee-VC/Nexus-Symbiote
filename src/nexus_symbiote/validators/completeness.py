@@ -312,6 +312,7 @@ class CompletenessValidator:
         *,
         exclude_paths: Sequence[str] = (),
         signature_policies: Sequence[SigstoreArtifactPolicy] = (),
+        accept_default_excludes: bool = False,
     ) -> CompletenessReport:
         """Recollect the supported static inventory under caller-selected scope.
 
@@ -344,7 +345,10 @@ class CompletenessValidator:
                 if scanner_type is ModelScanner
                 else scanner_type()
             )
-            scanner.configure(exclude_paths=exclude_paths)
+            scanner.configure(
+                exclude_paths=exclude_paths,
+                accept_default_excludes=accept_default_excludes,
+            )
             try:
                 local = scanner.scan(root)
             except Exception:

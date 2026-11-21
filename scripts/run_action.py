@@ -192,6 +192,7 @@ class Config:
     limits: str = ""
     baseline: bytes | None = field(default=None, repr=False)
     allow_unsigned_discovery: bool = False
+    accept_default_excludes: bool = False
     fail_on_severity: str = "high"
     binding_key: str = field(default="", repr=False)
     scratch_parent: Path | None = None
@@ -327,6 +328,9 @@ class Config:
             baseline,
             _boolean(
                 env.get("SYMBIOTE_ALLOW_UNSIGNED_DISCOVERY", "false"), "allow-unsigned-discovery"
+            ),
+            _boolean(
+                env.get("SYMBIOTE_ACCEPT_DEFAULT_EXCLUDES", "false"), "accept-default-excludes"
             ),
             severity,
             supplied_key,
@@ -626,6 +630,7 @@ def run(
             digest = hashlib.sha256(config.signature_policy).hexdigest()
             out.emit(signature_policy_digest=f"sha256:{digest}")
         unsigned = ["--allow-unsigned-discovery"] if config.allow_unsigned_discovery else []
+        accepted = ["--accept-default-excludes"] if config.accept_default_excludes else []
         args = [
             "scan",
             "--no-project-policy",
@@ -635,6 +640,7 @@ def run(
             "--output",
             str(native),
             *signers,
+            *accepted,
         ]
         for scanner in config.scanners:
             args.extend(["--scanner", scanner])
@@ -714,7 +720,13 @@ def run(
             record("integrity", "skipped")
             out.emit(validation_passed="skipped")
         else:
-            arguments = ["validate", "--no-project-policy", "--json-output", str(native)]
+            arguments = [
+                "validate",
+                "--no-project-policy",
+                "--json-output",
+                str(native),
+                *accepted,
+            ]
             arguments += ["--project", str(config.project), *signers, *unsigned]
             if not config.integrity:
                 arguments.append("--skip-integrity")
@@ -745,7 +757,14 @@ def run(
             record("risk", "skipped")
             out.emit(passed="skipped")
         else:
-            arguments = ["risk", "--no-project-policy", str(native), "--json-output", *unsigned]
+            arguments = [
+                "risk",
+                "--no-project-policy",
+                str(native),
+                "--json-output",
+                *unsigned,
+                *accepted,
+            ]
             # The same reconciliation and signers as validation, whether or not it ran,
             # so a signer policy that verifies the discovery producer counts here too.
             arguments += ["--project", str(config.project), *signers]

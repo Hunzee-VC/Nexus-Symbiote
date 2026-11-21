@@ -432,6 +432,7 @@ nexus-symbiote baseline [OPTIONS] [PROJECT_PATH]
 | `-o`, `--baseline-path` `PATH` | Where to write the unsigned baseline (default: .nexus-symbiote-baseline.json, in the working directory, not the project). |
 | `--no-project-policy` | Use built-in policy without reading configuration from the target, as scan does. |
 | `--accept-project-policy` | In CI, accept a project policy that weakens the built-in gates explicitly; without it such a policy fails the command there (exit 1). Interactive runs only warn. |
+| `--accept-default-excludes` | Do not record a coverage gap for a non-empty default-excluded name (`.git`, `node_modules`, `__pycache__`, `.venv`, `venv`), as `scan` does. The staged inventory is still re-gated, so this flag is what keeps that gap out of the baseline. An empty directory does not. |
 | `--signature-policy` `FILE` | Explicit operator signer policy JSON, kept outside the project, as for scan; also verifies any merged ShadowScan discovery report. |
 | `--fail-on-unsigned-discovery` | Exit with status 1 when the snapshot merges unverified ShadowScan discovery evidence. |
 | `--allow-unsigned-discovery` | Accept unverified ShadowScan discovery evidence explicitly (still warns); required in CI when no `--signature-policy` verifies the report. |
@@ -727,6 +728,7 @@ nexus-symbiote risk [OPTIONS] AIBOM_PATH
 | `--fail-on-severity` `critical\|high\|medium\|low\|info\|none` | Fail on any finding at or above this severity (default: from policy, built-in critical); none disables it. |
 | `--no-project-policy` | Use built-in policy without reading configuration from the target. |
 | `--accept-project-policy` | In CI, accept a project policy that weakens the built-in gates explicitly; without it such a policy fails the command there (exit 1). Interactive runs only warn. |
+| `--accept-default-excludes` | Do not record a coverage gap for a non-empty default-excluded name (`.git`, `node_modules`, `__pycache__`, `.venv`, `venv`). Without this flag such an entry makes coverage partial. An empty directory does not. |
 | `--require-discovery-signature` | Require the operator signature policy to verify any ShadowScan report the inventory records or the project contains, whatever the project policy says; requires --project. JSON output reports the result as `discovery_producer` |
 | `--fail-on-unsigned-discovery` | Exit with status 1 when the BOM's ShadowScan evidence is unverified |
 | `--allow-unsigned-discovery` | Accept unverified discovery evidence explicitly (still warns); required in CI |
@@ -896,6 +898,7 @@ nexus-symbiote scan [OPTIONS] [PROJECT_PATH]
 | `--signature-policy` `PATH` | Explicit operator signer policy JSON |
 | `--no-project-policy` | Use built-in policy without reading configuration from the target. |
 | `--accept-project-policy` | In CI, accept a project policy that weakens the built-in gates explicitly; without it such a policy fails the command there (exit 1). Interactive runs only warn. |
+| `--accept-default-excludes` | Do not record a coverage gap for a non-empty default-excluded name (`.git`, `node_modules`, `__pycache__`, `.venv`, `venv`). Without this flag such an entry makes coverage partial. An empty directory does not. |
 | `--fail-on-unsigned-discovery` | With `--check`, exit with status 1 when ShadowScan discovery evidence is unverified. |
 | `--allow-unsigned-discovery` | With `--check`, accept unverified ShadowScan discovery evidence explicitly (still warns); required in CI when no `--signature-policy` verifies the report. |
 | `--operator-policy` `FILE` | Signed operator policy YAML outside the scanned checkout; checkout policy may only narrow it. |
@@ -995,6 +998,7 @@ nexus-symbiote validate [OPTIONS] AIBOM_PATH
 | `--signature-policy` `PATH` | Explicit operator signer policy JSON; requires --project |
 | `--no-project-policy` | Use built-in policy without reading configuration from the target. |
 | `--accept-project-policy` | In CI, accept a project policy that weakens the built-in gates explicitly; without it such a policy fails the command there (exit 1). Interactive runs only warn. |
+| `--accept-default-excludes` | Do not record a coverage gap for a non-empty default-excluded name (`.git`, `node_modules`, `__pycache__`, `.venv`, `venv`). Without this flag such an entry makes coverage partial. An empty directory does not. |
 | `--skip-integrity` | Check completeness only and report integrity as skipped, for a repository whose models cannot be signed yet. The skip is printed and recorded in `--json-output`. |
 | `--json-output` | Print the validation report as JSON. |
 | `--require-discovery-signature` | Require the operator signature policy to verify any ShadowScan report the inventory records or the project contains, whatever the project policy says; requires --project |
