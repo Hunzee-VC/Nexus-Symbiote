@@ -414,7 +414,7 @@ class VEXGenerator(Generator):
                 }
             ]
         document["serialNumber"] = "urn:uuid:" + str(
-            uuid.uuid5(NAMESPACE, "nexus-symbiote-vex:" + content_digest(document))
+            uuid.uuid5(NAMESPACE, "nexus-symbiote/vex-content/v2:" + content_digest(document))
         )
         require_valid(document, "cyclonedx")
         return document
