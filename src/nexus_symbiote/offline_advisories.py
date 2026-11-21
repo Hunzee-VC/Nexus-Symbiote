@@ -223,7 +223,7 @@ def load_offline_advisory_db(path: Path) -> tuple[list[_ParsedAdvisory], str]:
         manifest_lines: list[str] = []
         # Bound directory iteration itself, including entries that are not advisory files.
         with os.scandir(path) as listing:
-            entries = []
+            entries: list[os.DirEntry[str]] = []
             for entry in listing:
                 if len(entries) == MAX_DB_FILES:
                     raise ValueError(
