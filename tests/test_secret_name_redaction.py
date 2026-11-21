@@ -388,6 +388,8 @@ VENDOR_TOKENS = {
     "doppler-service-account": "".join(("dp", ".sa.", DOPPLER_BODY)),
     "doppler-scim": "".join(("dp", ".scim.", DOPPLER_BODY)),
     "doppler-audit": "".join(("dp", ".audit.", DOPPLER_BODY)),
+    "anthropic": "".join(("sk-ant-", "api03-", "0123456789abcdefABCDEF0123456789")),
+    "anthropic-admin": "".join(("sk-ant-", "admin01-", "0123456789abcdefABCDEF0123456789")),
 }
 
 
@@ -413,6 +415,8 @@ def test_vendor_token_formats_are_redacted(token, identifier):
         "dp.st.dev",
         "dp.st.dev.integrations.secrets_manager.client_factory",
         "dp.pt.load_pretrained_weights_from_checkpoint_directory",
+        "sk-ant-docs",
+        "sk-ant-adapter",
     ],
 )
 @pytest.mark.parametrize("identifier", [False, True])

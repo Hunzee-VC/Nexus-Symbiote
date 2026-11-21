@@ -1,0 +1,873 @@
+{
+  "version": "0.1.4",
+  "finding_identity_schema": "shadowscan.finding-identity/v2",
+  "started_at": "2026-11-18T21:48:26+00:00",
+  "finished_at": "2026-11-18T21:48:26+00:00",
+  "inventory_size": 0,
+  "inventory_present": false,
+  "collection_scope": {
+    "schema": "shadowscan.collection-scope/v1",
+    "comparable": true,
+    "fingerprint": "840279f2df2173821253e392f1cda66710b3243350668f97c9f552ca5c27af49",
+    "credential_identity_schema": "shadowscan.credential-identity/v1",
+    "credential_identity_scope": "run"
+  },
+  "summary": {
+    "complete": true,
+    "status": "complete",
+    "total": 4,
+    "shadow": 0,
+    "by_surface": {
+      "code": 4
+    },
+    "by_kind": {
+      "mcp-server": 1,
+      "agent-config": 1,
+      "agent": 1,
+      "framework-usage": 1
+    },
+    "by_risk_level": {
+      "medium": 3,
+      "low": 1
+    },
+    "frameworks": {
+      "protocol.mcp": 2,
+      "coding-agent.claude-code": 1,
+      "framework.langchain": 1
+    },
+    "model_providers": {
+      "provider.openai": 1
+    },
+    "errors": 0,
+    "incomplete_reasons": {},
+    "declared_omissions": 0,
+    "tolerated_gaps": 0
+  },
+  "stats": [
+    {
+      "connector": "code.filesystem",
+      "started_at": "2026-11-18T21:48:26+00:00",
+      "finished_at": "2026-11-18T21:48:26+00:00",
+      "findings": 4,
+      "objects_examined": 6,
+      "errors": [],
+      "warnings": [],
+      "skipped": false,
+      "skip_reason": null,
+      "cached": false,
+      "incomplete": false,
+      "coverage": null,
+      "incomplete_reasons": {},
+      "declared_omissions": 0,
+      "declared_paths": [],
+      "name": "code.filesystem"
+    }
+  ],
+  "findings": [
+    {
+      "surface": "code",
+      "connector": "code.filesystem",
+      "kind": "mcp-server",
+      "title": "MCP configuration: .mcp.json",
+      "resource": "/work/agent-framework-demo/.mcp.json",
+      "resource_type": "mcp-config",
+      "provider": "filesystem",
+      "account": null,
+      "region": null,
+      "owner": null,
+      "frameworks": [
+        "protocol.mcp"
+      ],
+      "model_providers": [],
+      "models": [],
+      "capabilities": [
+        "tool-use",
+        "data-access"
+      ],
+      "permissions": [],
+      "evidence": [
+        {
+          "signal": "file:protocol.mcp",
+          "description": "MCP client/server configuration file .mcp.json",
+          "location": ".mcp.json",
+          "snippet": null,
+          "weight": 0.95,
+          "signature": "protocol.mcp",
+          "attributes": {}
+        }
+      ],
+      "confidence": 0.95,
+      "likelihood": "strong",
+      "risk": {
+        "score": 49,
+        "level": "medium",
+        "factors": [
+          {
+            "id": "kind",
+            "description": "mcp-server finding",
+            "weight": 15
+          },
+          {
+            "id": "no-owner",
+            "description": "no identifiable owner",
+            "weight": 10
+          },
+          {
+            "id": "capability:tool-use",
+            "description": "calls tools / functions",
+            "weight": 5
+          },
+          {
+            "id": "capability:data-access",
+            "description": "reads or writes files and databases directly (exfiltration / tampering surface)",
+            "weight": 10
+          },
+          {
+            "id": "vendor-notes",
+            "description": "MCP servers frequently expose local filesystem / shell / database access; verify auth and transport.; Client configs commonly embed API keys and tokens in plain text.",
+            "weight": 5
+          },
+          {
+            "id": "mcp-stdio",
+            "description": "local stdio MCP servers run with the user's full privileges",
+            "weight": 5
+          },
+          {
+            "id": "confidence-scaling",
+            "description": "score multiplied by 0.98 because confidence is 0.95; this only ever lowers risk",
+            "weight": -1
+          }
+        ],
+        "danger_score": 39
+      },
+      "shadow": null,
+      "registry_match": null,
+      "tags": [],
+      "first_seen": null,
+      "last_seen": null,
+      "metadata": {
+        "path": ".mcp.json",
+        "scan_root": "/work/agent-framework-demo",
+        "servers": [
+          {
+            "name": "docs",
+            "transport": "stdio",
+            "command": "npx",
+            "args": [
+              "-y",
+              "@modelcontextprotocol/server-filesystem@2025.8.21",
+              "docs"
+            ],
+            "url": null,
+            "urls": [],
+            "env_names": [],
+            "headers": [],
+            "auto_approve": null,
+            "secrets_inline": false,
+            "disabled": false,
+            "risks": []
+          }
+        ],
+        "server_count": 1,
+        "disabled_server_count": 0,
+        "remote_urls": [],
+        "client": "Claude Code",
+        "technologies": [
+          {
+            "id": "protocol.mcp",
+            "name": "Model Context Protocol (MCP)",
+            "category": "protocol",
+            "vendor": "Anthropic / Linux Foundation (Agentic AI Foundation)"
+          }
+        ],
+        "risk_notes": [
+          "MCP servers frequently expose local filesystem / shell / database access; verify auth and transport.",
+          "Client configs commonly embed API keys and tokens in plain text."
+        ],
+        "runtime_activity": {
+          "status": "unknown",
+          "reason": "no-trusted-workload-binding",
+          "events": 0,
+          "frameworks": [],
+          "window": null,
+          "last_seen": null,
+          "production_observed": false,
+          "production_label_verified": false,
+          "sources": [],
+          "limitations": "Absence in exported telemetry does not establish that the framework is inactive."
+        },
+        "autonomy": {
+          "schema": "shadowscan.autonomy/v1",
+          "floor": 1,
+          "floor_label": "L1 Copilot",
+          "ceiling": 5,
+          "ceiling_label": "L5 Fully Autonomous",
+          "oversight": "unknown",
+          "initiation": "unknown",
+          "basis": [
+            {
+              "bound": "floor",
+              "rule": "ai-system",
+              "value": 0
+            },
+            {
+              "bound": "floor",
+              "rule": "tool-access",
+              "value": 1
+            },
+            {
+              "bound": "ceiling",
+              "rule": "no-restriction-evidence",
+              "value": 5
+            },
+            {
+              "bound": "oversight",
+              "rule": "no-oversight-evidence",
+              "value": "unknown"
+            },
+            {
+              "bound": "initiation",
+              "rule": "no-initiation-evidence",
+              "value": "unknown"
+            }
+          ]
+        },
+        "threats": [
+          "maestro-2025:L2",
+          "maestro-2025:L3"
+        ],
+        "controls": [
+          "aiuc-1-2026q2:E",
+          "iso-iec-42001-2023:A.3.2",
+          "nist-ai-rmf-1.0:GOVERN-2.1"
+        ]
+      },
+      "id": "ss-28b79f22113f5685",
+      "identity_discriminator": "mcp-config",
+      "identity_schema": "shadowscan.finding-identity/v2"
+    },
+    {
+      "surface": "code",
+      "connector": "code.filesystem",
+      "kind": "agent-config",
+      "title": "Claude Code configured in repository root",
+      "resource": "/work/agent-framework-demo",
+      "resource_type": "coding-agent-config",
+      "provider": "filesystem",
+      "account": null,
+      "region": null,
+      "owner": null,
+      "frameworks": [
+        "coding-agent.claude-code"
+      ],
+      "model_providers": [],
+      "models": [],
+      "capabilities": [
+        "code-exec",
+        "tool-use"
+      ],
+      "permissions": [],
+      "evidence": [
+        {
+          "signal": "file:coding-agent.claude-code",
+          "description": "config file matched Claude Code: CLAUDE.md",
+          "location": "CLAUDE.md",
+          "snippet": null,
+          "weight": 0.9,
+          "signature": "coding-agent.claude-code",
+          "attributes": {
+            "category": "coding-agent",
+            "value": "CLAUDE.md"
+          }
+        }
+      ],
+      "confidence": 0.9,
+      "likelihood": "strong",
+      "risk": {
+        "score": 38,
+        "level": "medium",
+        "factors": [
+          {
+            "id": "kind",
+            "description": "agent-config finding",
+            "weight": 10
+          },
+          {
+            "id": "no-owner",
+            "description": "no identifiable owner",
+            "weight": 10
+          },
+          {
+            "id": "capability:code-exec",
+            "description": "can execute code or shell commands",
+            "weight": 15
+          },
+          {
+            "id": "capability:tool-use",
+            "description": "calls tools / functions",
+            "weight": 5
+          },
+          {
+            "id": "confidence-scaling",
+            "description": "score multiplied by 0.96 because confidence is 0.90; this only ever lowers risk",
+            "weight": -2
+          }
+        ],
+        "danger_score": 29
+      },
+      "shadow": null,
+      "registry_match": null,
+      "tags": [],
+      "first_seen": null,
+      "last_seen": null,
+      "metadata": {
+        "path": ".",
+        "scan_root": "/work/agent-framework-demo",
+        "agent_indicators": 1,
+        "files": [
+          "CLAUDE.md"
+        ],
+        "evidence_counts": {
+          "coding-agent.claude-code|file": 1
+        },
+        "technologies": [
+          {
+            "id": "coding-agent.claude-code",
+            "name": "Claude Code",
+            "category": "coding-agent",
+            "vendor": "Anthropic"
+          }
+        ],
+        "runtime_activity": {
+          "status": "unknown",
+          "reason": "no-trusted-workload-binding",
+          "events": 0,
+          "frameworks": [],
+          "window": null,
+          "last_seen": null,
+          "production_observed": false,
+          "production_label_verified": false,
+          "sources": [],
+          "limitations": "Absence in exported telemetry does not establish that the framework is inactive."
+        },
+        "autonomy": {
+          "schema": "shadowscan.autonomy/v1",
+          "floor": 2,
+          "floor_label": "L2 Supervised",
+          "ceiling": 5,
+          "ceiling_label": "L5 Fully Autonomous",
+          "oversight": "unknown",
+          "initiation": "unknown",
+          "basis": [
+            {
+              "bound": "floor",
+              "rule": "ai-system",
+              "value": 0
+            },
+            {
+              "bound": "floor",
+              "rule": "tool-access",
+              "value": 1
+            },
+            {
+              "bound": "floor",
+              "rule": "side-effect-tools",
+              "value": 2
+            },
+            {
+              "bound": "ceiling",
+              "rule": "no-restriction-evidence",
+              "value": 5
+            },
+            {
+              "bound": "oversight",
+              "rule": "no-oversight-evidence",
+              "value": "unknown"
+            },
+            {
+              "bound": "initiation",
+              "rule": "no-initiation-evidence",
+              "value": "unknown"
+            }
+          ]
+        },
+        "threats": [
+          "maestro-2025:L3",
+          "mitre-atlas-2026.09:AML.T0050",
+          "owasp-asi-2026:ASI05",
+          "owasp-llm-2026:LLM03"
+        ],
+        "controls": [
+          "aiuc-1-2026q2:E",
+          "iso-iec-42001-2023:A.3.2",
+          "nist-ai-rmf-1.0:GOVERN-2.1"
+        ]
+      },
+      "id": "ss-c2bdc0cdb8c35d84",
+      "identity_discriminator": "coding-agent-config:coding-agent.claude-code",
+      "identity_schema": "shadowscan.finding-identity/v2"
+    },
+    {
+      "surface": "code",
+      "connector": "code.filesystem",
+      "kind": "agent",
+      "title": "Agent in repository root: LangChain, Model Context Protocol (MCP)",
+      "resource": "/work/agent-framework-demo",
+      "resource_type": "project",
+      "provider": "filesystem",
+      "account": null,
+      "region": null,
+      "owner": null,
+      "frameworks": [
+        "framework.langchain",
+        "protocol.mcp"
+      ],
+      "model_providers": [],
+      "models": [],
+      "capabilities": [
+        "tool-use"
+      ],
+      "permissions": [],
+      "evidence": [
+        {
+          "signal": "code:framework.langchain",
+          "description": "code pattern matched LangChain: create_agent(",
+          "location": "agent.py:3",
+          "snippet": "agent = create_agent(\"openai:gpt-4o\", tools=[])",
+          "weight": 0.9,
+          "signature": "framework.langchain",
+          "attributes": {
+            "category": "framework",
+            "value": "create_agent(",
+            "confidence_group": "framework.langchain"
+          }
+        },
+        {
+          "signal": "code:framework.langchain",
+          "description": "code pattern matched import-bound agent construction: langchain.agents:create_agent(",
+          "location": "agent.py:3",
+          "snippet": "agent = create_agent(\"openai:gpt-4o\", tools=[])",
+          "weight": 0.9,
+          "signature": "framework.langchain",
+          "attributes": {
+            "category": "framework",
+            "value": "langchain.agents:create_agent(",
+            "confidence_group": "framework.langchain"
+          }
+        },
+        {
+          "signal": "dependency:framework.langchain",
+          "description": "dependency matched LangChain: langchain",
+          "location": "requirements.txt:1",
+          "snippet": "pypi: langchain ==1.0.0",
+          "weight": 0.85,
+          "signature": "framework.langchain",
+          "attributes": {
+            "category": "framework",
+            "value": "langchain",
+            "confidence_group": "framework.langchain"
+          }
+        },
+        {
+          "signal": "file:protocol.mcp",
+          "description": "config file matched Model Context Protocol (MCP): .mcp.json",
+          "location": ".mcp.json",
+          "snippet": null,
+          "weight": 0.9,
+          "signature": "protocol.mcp",
+          "attributes": {
+            "category": "protocol",
+            "value": ".mcp.json",
+            "confidence_group": "protocol.mcp"
+          }
+        },
+        {
+          "signal": "import:framework.langchain",
+          "description": "import matched LangChain: from langchain",
+          "location": "agent.py:1",
+          "snippet": "from langchain.agents import create_agent",
+          "weight": 0.85,
+          "signature": "framework.langchain",
+          "attributes": {
+            "category": "framework",
+            "value": "from langchain",
+            "confidence_group": "framework.langchain"
+          }
+        },
+        {
+          "signal": "import:framework.langchain",
+          "description": "import matched LangChain: langchain.agents",
+          "location": "agent.py:1",
+          "snippet": "from langchain.agents import create_agent",
+          "weight": 0.85,
+          "signature": "framework.langchain",
+          "attributes": {
+            "category": "framework",
+            "value": "langchain.agents",
+            "confidence_group": "framework.langchain"
+          }
+        },
+        {
+          "signal": "corroboration:cross-signal",
+          "description": "Multiple independent signal types corroborate this finding",
+          "location": "agent.py:3",
+          "snippet": null,
+          "weight": 0.15,
+          "signature": null,
+          "attributes": {
+            "confidence_group": "cross-signal-corroboration",
+            "synthetic": true
+          }
+        }
+      ],
+      "confidence": 0.992,
+      "likelihood": "strong",
+      "risk": {
+        "score": 35,
+        "level": "medium",
+        "factors": [
+          {
+            "id": "kind",
+            "description": "agent finding",
+            "weight": 15
+          },
+          {
+            "id": "no-owner",
+            "description": "no identifiable owner",
+            "weight": 10
+          },
+          {
+            "id": "capability:tool-use",
+            "description": "calls tools / functions",
+            "weight": 5
+          },
+          {
+            "id": "vendor-notes",
+            "description": "MCP servers frequently expose local filesystem / shell / database access; verify auth and transport.; Client configs commonly embed API keys and tokens in plain text.",
+            "weight": 5
+          },
+          {
+            "id": "confidence-scaling",
+            "description": "score multiplied by 1.00 because confidence is 0.99; this only ever lowers risk",
+            "weight": 0
+          }
+        ],
+        "danger_score": 25
+      },
+      "shadow": null,
+      "registry_match": null,
+      "tags": [],
+      "first_seen": null,
+      "last_seen": null,
+      "metadata": {
+        "path": ".",
+        "scan_root": "/work/agent-framework-demo",
+        "agent_indicators": 2,
+        "files_scanned": 4,
+        "languages": [
+          "python"
+        ],
+        "dependencies_matched": [
+          "pypi:langchain"
+        ],
+        "models": [],
+        "cross_signal_corroboration": {
+          "library_and_code": true,
+          "multi_signal": true,
+          "boost": 0.15
+        },
+        "evidence_counts": {
+          "framework.langchain|code": 2,
+          "framework.langchain|dependency": 1,
+          "protocol.mcp|file": 1,
+          "framework.langchain|import": 2
+        },
+        "technologies": [
+          {
+            "id": "framework.langchain",
+            "name": "LangChain",
+            "category": "framework",
+            "vendor": "LangChain, Inc."
+          },
+          {
+            "id": "protocol.mcp",
+            "name": "Model Context Protocol (MCP)",
+            "category": "protocol",
+            "vendor": "Anthropic / Linux Foundation (Agentic AI Foundation)"
+          }
+        ],
+        "runtime_activity": {
+          "status": "unknown",
+          "reason": "no-trusted-workload-binding",
+          "events": 0,
+          "frameworks": [],
+          "window": null,
+          "last_seen": null,
+          "production_observed": false,
+          "production_label_verified": false,
+          "sources": [],
+          "limitations": "Absence in exported telemetry does not establish that the framework is inactive."
+        },
+        "autonomy": {
+          "schema": "shadowscan.autonomy/v1",
+          "floor": 3,
+          "floor_label": "L3 Semi-Autonomous / Agentic Workflow",
+          "ceiling": 5,
+          "ceiling_label": "L5 Fully Autonomous",
+          "oversight": "unknown",
+          "initiation": "unknown",
+          "basis": [
+            {
+              "bound": "floor",
+              "rule": "ai-system",
+              "value": 0
+            },
+            {
+              "bound": "floor",
+              "rule": "tool-access",
+              "value": 1
+            },
+            {
+              "bound": "floor",
+              "rule": "agentic-execution",
+              "value": 3
+            },
+            {
+              "bound": "ceiling",
+              "rule": "no-restriction-evidence",
+              "value": 5
+            },
+            {
+              "bound": "oversight",
+              "rule": "no-oversight-evidence",
+              "value": "unknown"
+            },
+            {
+              "bound": "initiation",
+              "rule": "no-initiation-evidence",
+              "value": "unknown"
+            }
+          ]
+        },
+        "threats": [
+          "maestro-2025:L3"
+        ],
+        "controls": [
+          "aiuc-1-2026q2:E",
+          "iso-iec-42001-2023:A.3.2",
+          "iso-iec-42001-2023:A.6.2.6",
+          "nist-ai-rmf-1.0:GOVERN-2.1",
+          "nist-ai-rmf-1.0:MANAGE-4.1"
+        ]
+      },
+      "id": "ss-4b5c35df41b6de30",
+      "identity_discriminator": "project",
+      "identity_schema": "shadowscan.finding-identity/v2"
+    },
+    {
+      "surface": "code",
+      "connector": "code.filesystem",
+      "kind": "framework-usage",
+      "title": "LLM usage in services/summarizer: OpenAI",
+      "resource": "/work/agent-framework-demo/services/summarizer",
+      "resource_type": "project",
+      "provider": "filesystem",
+      "account": null,
+      "region": null,
+      "owner": null,
+      "frameworks": [],
+      "model_providers": [
+        "provider.openai"
+      ],
+      "models": [
+        "gpt-4o-mini"
+      ],
+      "capabilities": [],
+      "permissions": [],
+      "evidence": [
+        {
+          "signal": "dependency:provider.openai",
+          "description": "dependency matched OpenAI: openai",
+          "location": "services/summarizer/requirements.txt:1",
+          "snippet": "pypi: openai ==1.109.1",
+          "weight": 0.8,
+          "signature": "provider.openai",
+          "attributes": {
+            "category": "provider",
+            "value": "openai",
+            "confidence_group": "provider.openai"
+          }
+        },
+        {
+          "signal": "import:provider.openai",
+          "description": "import matched OpenAI: from openai",
+          "location": "services/summarizer/summarize.py:1",
+          "snippet": "from openai import OpenAI",
+          "weight": 0.8,
+          "signature": "provider.openai",
+          "attributes": {
+            "category": "provider",
+            "value": "from openai",
+            "confidence_group": "provider.openai"
+          }
+        },
+        {
+          "signal": "code:provider.openai",
+          "description": "code pattern matched OpenAI: responses.create(",
+          "location": "services/summarizer/summarize.py:7",
+          "snippet": "reply = client.responses.create(model=\"gpt-4o-mini\", input=\"Summarize: \" + text)",
+          "weight": 0.7,
+          "signature": "provider.openai",
+          "attributes": {
+            "category": "provider",
+            "value": "responses.create(",
+            "confidence_group": "provider.openai"
+          }
+        },
+        {
+          "signal": "import:provider.openai",
+          "description": "import matched OpenAI: openai",
+          "location": "services/summarizer/summarize.py:1",
+          "snippet": "from openai import OpenAI",
+          "weight": 0.8,
+          "signature": "provider.openai",
+          "attributes": {
+            "category": "provider",
+            "value": "openai",
+            "confidence_group": "provider.openai"
+          }
+        },
+        {
+          "signal": "model:provider.openai",
+          "description": "model id matched OpenAI: gpt-4o-mini",
+          "location": "services/summarizer/summarize.py:7",
+          "snippet": "reply = client.responses.create(model=\"gpt-4o-mini\", input=\"Summarize: \" + text)",
+          "weight": 0.5,
+          "signature": "provider.openai",
+          "attributes": {
+            "category": "provider",
+            "value": "gpt-4o-mini",
+            "confidence_group": "provider.openai"
+          }
+        },
+        {
+          "signal": "corroboration:cross-signal",
+          "description": "Multiple independent signal types corroborate this finding",
+          "location": "services/summarizer/summarize.py:7",
+          "snippet": null,
+          "weight": 0.15,
+          "signature": null,
+          "attributes": {
+            "confidence_group": "cross-signal-corroboration",
+            "synthetic": true
+          }
+        }
+      ],
+      "confidence": 0.83,
+      "likelihood": "likely",
+      "risk": {
+        "score": 14,
+        "level": "low",
+        "factors": [
+          {
+            "id": "kind",
+            "description": "framework-usage finding",
+            "weight": 5
+          },
+          {
+            "id": "no-owner",
+            "description": "no identifiable owner",
+            "weight": 10
+          },
+          {
+            "id": "confidence-scaling",
+            "description": "score multiplied by 0.93 because confidence is 0.83; this only ever lowers risk",
+            "weight": -1
+          }
+        ],
+        "danger_score": 5
+      },
+      "shadow": null,
+      "registry_match": null,
+      "tags": [],
+      "first_seen": null,
+      "last_seen": null,
+      "metadata": {
+        "path": "services/summarizer",
+        "scan_root": "/work/agent-framework-demo",
+        "agent_indicators": 0,
+        "files_scanned": 2,
+        "languages": [
+          "python"
+        ],
+        "dependencies_matched": [
+          "pypi:openai"
+        ],
+        "models": [
+          "gpt-4o-mini"
+        ],
+        "cross_signal_corroboration": {
+          "library_and_code": true,
+          "multi_signal": true,
+          "boost": 0.15
+        },
+        "evidence_counts": {
+          "provider.openai|dependency": 1,
+          "provider.openai|import": 2,
+          "provider.openai|code": 1,
+          "provider.openai|model": 1
+        },
+        "technologies": [
+          {
+            "id": "provider.openai",
+            "name": "OpenAI",
+            "category": "provider",
+            "vendor": "OpenAI"
+          }
+        ],
+        "autonomy": {
+          "schema": "shadowscan.autonomy/v1",
+          "floor": 0,
+          "floor_label": "L0 Chatbot",
+          "ceiling": 5,
+          "ceiling_label": "L5 Fully Autonomous",
+          "oversight": "unknown",
+          "initiation": "unknown",
+          "basis": [
+            {
+              "bound": "floor",
+              "rule": "ai-system",
+              "value": 0
+            },
+            {
+              "bound": "ceiling",
+              "rule": "no-restriction-evidence",
+              "value": 5
+            },
+            {
+              "bound": "oversight",
+              "rule": "no-oversight-evidence",
+              "value": "unknown"
+            },
+            {
+              "bound": "initiation",
+              "rule": "no-initiation-evidence",
+              "value": "unknown"
+            }
+          ]
+        },
+        "threats": [
+          "maestro-2025:L3"
+        ],
+        "controls": [
+          "aiuc-1-2026q2:E",
+          "iso-iec-42001-2023:A.3.2",
+          "nist-ai-rmf-1.0:GOVERN-2.1"
+        ]
+      },
+      "id": "ss-2b9f27def47cd7ed",
+      "identity_discriminator": "project",
+      "identity_schema": "shadowscan.finding-identity/v2"
+    }
+  ]
+}
