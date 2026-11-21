@@ -78,6 +78,7 @@ change them. See [collection limits](collection-limits.md).
 | [`attest`](#attest) | offline | Sign a file's exact bytes, usually an inventory or a baseline, for a stated purpose |
 | [`verify-attestation`](#verify-attestation) | offline | Check that trusted keys attested a file's bytes or inventory content for a purpose |
 | [`trace-diff`](#trace-diff) | offline | Compare the runtime use that OpenTelemetry traces report with an AgentBOM |
+| [`export-standard`](#export-standard) | offline | Export an AgentBOM to CycloneDX (1.6/1.7) or SPDX 3.0.1 with typed AI projections and producer declarations |
 | [`discover-mcp`](#discover-mcp) | **live** | List the tools an HTTPS MCP server serves, without calling them |
 | [`advisories`](#advisories) | **live** | Query OSV for advisories affecting exact PyPI and npm package versions |
 | [`verify-live`](#verify-live) | **live** | Compare an AgentBOM with the tools that operator-pinned stdio servers serve |
@@ -1180,3 +1181,30 @@ nexus-symbiote vex [OPTIONS] AIBOM_PATH
 | `--trace-attestation` `PATH` | Ed25519 DSSE attestation envelope authenticating `--trace-evidence`. |
 | `--trusted-key` `PATH` | Trusted Ed25519 public key PEM outside the scanned project (repeatable; used with `--trace-attestation`). |
 | `--allow-unsigned-trace-evidence` | Explicitly accept unsigned `--trace-evidence` without `--trace-attestation`. |
+
+### `export-standard`
+
+Export a native AgentBOM to CycloneDX (`1.6` or `1.7`) or SPDX `3.0.1` with typed AI and Dataset projections and optional `agent.yaml` 1.1 producer declarations.
+
+```text
+nexus-symbiote export-standard [OPTIONS] AIBOM_PATH
+```
+
+| Option | Description |
+|---|---|
+| `-f`, `--format` `cyclonedx\|spdx` | Target standard export format. (required) |
+| `-o`, `--output` `PATH` | Write the exported document to this file instead of standard output. |
+| `--cyclonedx-projection` `2\|3` | CycloneDX projection version (`3` default emits typed AI relationships, `services`, `modelCard`, `pedigree` and `licenses`). |
+| `--spec-version` `1.6\|1.7` | CycloneDX specification version when `--format cyclonedx` is selected (`1.7` default; `1.6` requires `--cyclonedx-projection 3`). |
+| `--spdx-projection` `3\|4` | SPDX 3.0.1 projection version (`4` default emits typed AI/Dataset `RelationshipType` values and conditional profile conformance). |
+| `--spdx-namespace` `URI` | Explicit HTTPS namespace base URI for SPDX 3.0.1 element IDs. |
+| `--author` `TEXT` | Repeatable operator-supplied author name recorded in CycloneDX `metadata.authors` or SPDX `Person` + `CreationInfo.createdBy` (with `--format spdx`, requires `--spdx-projection 4`). |
+| `--agent-yaml` `PATH` | Relative path under `--project` to an `agent.yaml` (`1.0` or `1.1`) producer declaration file; recorded at `declared` assurance (`declaration_conflict` on contradiction). |
+| `--project` `DIR` | Trusted project root used to confine `--agent-yaml` declarations (requires `--agent-yaml`). |
+
+`--agent-yaml` and `--project` must be passed together; `--project` alone never reads `agent.yaml` implicitly. Producer declarations (`schema_version`, `owner`, `version`, `automation_level`, `licenses`, `data_usage`, `compliance`, `allowed_regions`, `release_time`, `download_location`, `datasets[]`, and `models[]`) never overwrite observed collector fields (`version`, `supplier`, `autonomy_level`, and a dataset's `source_uri` and `license`); on observed components they are recorded under `declared_*` properties with per-field `declaration.<field>` claims, and a conflicting value raises `declaration_conflict` and is not stored. A `models[].training.datasets` entry adds a `trained-on` edge with `assurance_level: declared`, exported as a typed edge (CycloneDX `dependsOn` and `modelCard` datasets, SPDX `trainedOn`) whose native relationship keeps that assurance. Licences that do not parse as SPDX license expressions (listed licence ids with an optional `+`, `LicenseRef-`, `AND`, `OR`, parentheses, and `WITH` a listed exception id) export as SPDX `NoAssertion` and CycloneDX `license.name`; a licence taken from a declaration carries the comment `declared by producer`. A refused declared `download_location`, and an observed `source_uri` left out of the standard download fields (an unsupported scheme, credentials or a secret), are reported on standard error. Passing `--author` or `--agent-yaml` enriches the embedded native inventory inside the exported document, so the recovered inventory's content digest reflects those additions rather than an attestation signed over the unmodified input `AIBOM_PATH`.
+
+```bash
+nexus-symbiote scan examples/demo-agent -f json --report-only -o /tmp/demo-aibom.json
+nexus-symbiote export-standard /tmp/demo-aibom.json -f spdx --spdx-projection 4 -o /tmp/demo.spdx.json
+```
