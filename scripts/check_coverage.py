@@ -84,6 +84,8 @@ MODULE_FLOORS: dict[str, tuple[int, int | None]] = {
     # The pickle.load interpreter that content sniffing rates pickles by; measured at 100%
     # of statements and branches when it replaced the opcode stack model.
     "nexus_symbiote/utils/pickle_load.py": (98, 98),
+    "nexus_symbiote/spdx_profiles.py": (92, 86),
+    "nexus_symbiote/export_standard_cli.py": (92, 86),
     "nexus_symbiote/control_plane_audit.py": (92, 86),
     "nexus_symbiote/control_plane_cli.py": (92, 86),
 }
