@@ -118,6 +118,7 @@ Every gate prints each of its failure reasons. How many findings the console lis
 | `runtime digest` | Supported | offline | Prints canonical digest of runtime contract, approval or revocation document |
 | `runtime key-id` | Supported | offline | Prints canonical Ed25519 public key identifier |
 | `runtime register` | Experimental | offline | Registers newly issued runtime snapshot in local gateway state store |
+| `export-standard` | Experimental | offline | CycloneDX 1.6/1.7 or SPDX 3.0.1 export with typed AI and Dataset projections |
 | `discover-mcp` | Experimental | **live** | Opt-in HTTPS MCP tool listing without calling tools |
 | `advisories` | Experimental | **live** | Opt-in OSV lookup for exact PyPI and npm package versions |
 | `verify-live` | Experimental | **live** | Opt-in namespace-isolated stdio MCP verification against operator launch policy |
