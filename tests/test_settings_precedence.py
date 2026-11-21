@@ -34,6 +34,7 @@ from nexus_symbiote.settings_precedence import (
     oversight_gap_assessments,
     resolve_tool_approval,
 )
+from tests.support import scaling_ratio
 
 
 def test_tool_approval_precedence_and_unmodelled_host() -> None:
@@ -417,7 +418,8 @@ def test_linear_scaling_and_bounded_collections() -> None:
 
     t2k, _ = _run_size(2000)
     t16k, _ = _run_size(16000)
-    assert t16k < 5.0
+    # Eight times the rules must cost well under 64 times as much: no absolute bound, which
+    # coverage tracing and a busy runner move.
     assert t16k < max(t2k * 20.0, 1.0)
 
     # Bounding checks on domains, globs, and inline mcpServers.
@@ -818,18 +820,28 @@ def test_long_specifier_memory_footprint_and_index_truncation() -> None:
         "deny": [f"Bash(cmd_deny_{i:05d}_{padding}:*)" for i in range(8000)],
     }
     tracemalloc.start()
-    start = time.perf_counter()
     try:
         states, risks, _, _ = evaluate_tool_oversight(perms)
         _, peak_bytes = tracemalloc.get_traced_memory()
     finally:
         tracemalloc.stop()
-    elapsed = time.perf_counter() - start
 
     assert states["Bash"] == "conditional"
     assert not risks
-    assert elapsed < 3.0
     assert peak_bytes < 45 * 1024 * 1024, f"Peak memory too high: {peak_bytes} bytes"
+
+    # A wall-clock bound failed under coverage tracing (4.3 s against 3 s). Four times the
+    # rules cost about four times as much when evaluation is linear, sixteen if quadratic.
+    def run(scale: int) -> None:
+        count = 2000 * scale
+        evaluate_tool_oversight(
+            {
+                "allow": [f"Bash(cmd_allow_{i:05d}_{padding}:*)" for i in range(count)],
+                "deny": [f"Bash(cmd_deny_{i:05d}_{padding}:*)" for i in range(count)],
+            }
+        )
+
+    assert scaling_ratio(run) < 10
 
     # Rule-index cap sets truncated=True when max_indexed_rules is exceeded.
     _, _, _, idx_trunc = evaluate_tool_oversight(
