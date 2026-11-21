@@ -153,11 +153,27 @@ def text_outside_code(text: str) -> list[str]:
     return reader.parts
 
 
+def commonmark_blocks(text: str) -> list[tuple[str, str]]:
+    """Return ``(kind, content)`` for each CommonMark block in ``text``."""
+    lines = _LINE_END.split(text)
+    if text.endswith("\n"):
+        lines.pop()
+    reader = _Reader(len(text) + _SPARE_MATCHES, include_fence=True)
+    try:
+        for line in lines:
+            reader.read(line)
+        reader.finish()
+    except _AmbiguousError:
+        return [("paragraph", text)]
+    return reader.blocks
+
+
 class _Reader:
     """commonmark.js block parsing, keeping only what decides code from text."""
 
-    def __init__(self, matches: int) -> None:
+    def __init__(self, matches: int, *, include_fence: bool = False) -> None:
         self.matches = matches
+        self.include_fence = include_fence
         self.parts: list[str] = []
         # Each paragraph, heading and HTML block as written, with its kind, in order.
         self.blocks: list[tuple[str, str]] = []
@@ -472,6 +488,8 @@ class _Reader:
             self.parts.append(content)
             tip.lines.append(content)
             self.code_text = tip.kind == "indented" and bool(content.strip(" \t"))
+        elif self.include_fence and tip.kind == "fence":
+            tip.lines.append(content)
 
     def _add_child(self, kind: str) -> _Block:
         while not _can_contain(self.stack[-1].kind, kind):
@@ -506,7 +524,7 @@ class _Reader:
                 self.stack[-1].definitions += 1
             self.parts.append(_outside_spans(content))
             self.blocks.append(("paragraph", content))
-        elif block.kind in ("html", "indented"):
+        elif block.kind in ("html", "indented") or (self.include_fence and block.kind == "fence"):
             self.blocks.append((block.kind, "\n".join(block.lines)))
 
 
