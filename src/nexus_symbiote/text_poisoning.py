@@ -981,6 +981,18 @@ def _source_candidates(
         yield rel_path
 
 
+def _names_a_directory(root: Path, rel_path: str, files: ConfinedCollection) -> bool:
+    """Whether ``rel_path`` under ``root`` is a directory.
+
+    A path longer than PATH_MAX, only 1024 bytes on macOS, cannot be checked by name, so
+    the confined descriptor-relative walk decides instead of ending the scan.
+    """
+    try:
+        return (root / rel_path).is_dir()
+    except OSError:
+        return files.is_directory(rel_path)
+
+
 def apply_text_poisoning_rules(
     aibom: AIBOM,
     root: Path | None = None,
@@ -1031,7 +1043,7 @@ def apply_text_poisoning_rules(
         ) as files:
             for rel_path in _source_candidates(components_by_path):
                 # A collector may record a directory of rules; its files are their own sources.
-                if files.excluded(rel_path) or (root / rel_path).is_dir():
+                if files.excluded(rel_path) or _names_a_directory(root, rel_path, files):
                     continue
                 raw = files.read_bytes(rel_path, missing_ok=True)
                 if raw is None:
