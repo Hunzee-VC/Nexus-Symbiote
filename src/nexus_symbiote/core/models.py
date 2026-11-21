@@ -47,6 +47,10 @@ MAX_REFERENCE_CHARS = 16_384
 UNBOUND_VALUES_DETAIL = "values not bound in this inventory"
 """Phrase in the completeness finding for values that only a source binding key binds."""
 
+NAMED_FORMAT_PROPERTY = "named_format"
+"""Model property: the format a file's name claims, recorded when its header did not
+establish it, so the record has no ``serialization_format``."""
+
 _SPEC_VERSION = re.compile(r"(0|[1-9][0-9]{0,3})\.(0|[1-9][0-9]{0,3})\.(0|[1-9][0-9]{0,5})")
 
 
@@ -357,7 +361,7 @@ class PromptComponent(ComponentBase):
         default=None,
         description=(
             "system-prompt, planner, instruction, rules-file, skill-definition, subagent, "
-            "imported-instruction"
+            "imported-instruction, template"
         ),
     )
     content_hash: str | None = Field(default=None, description="Hash of the exact prompt bytes")
@@ -372,21 +376,33 @@ class PromptComponent(ComponentBase):
 
 
 class GuardrailComponent(ComponentBase):
-    """A safety classifier, content filter, or output validator.
+    """A safety classifier, content filter, output validator, or evaluation configuration.
 
-    Reserved: no built-in collector emits this type; it appears only in supplied inventories.
+    The rag collector records guardrail and evaluation configuration files that it
+    recognises by name, with the digest of their bytes in config_hash; it never parses
+    them, so a record does not show what the file configures or that anything enforces
+    it. Every other field appears only in supplied inventories.
     """
 
     component_type: Literal[ComponentType.GUARDRAIL_POLICY] = ComponentType.GUARDRAIL_POLICY
     guardrail_type: str | None = Field(
         default=None,
-        description="input-filter, output-filter, classifier, rate-limiter",
+        description=(
+            "policy or evaluation when a collector derived it from the file name; supplied "
+            "inventories also use input-filter, output-filter, classifier, rate-limiter"
+        ),
     )
     model_ref: str | None = Field(
         default=None, description="bom_ref of the model backing this guardrail"
     )
     policy_version: str | None = None
-    config_hash: str | None = None
+    config_hash: str | None = Field(
+        default=None,
+        description=(
+            "sha256:<hex> of the configuration file's bytes; for a directory with Colang "
+            "files, the RFC 8785 digest of the map from each file name to its digest"
+        ),
+    )
     risks: list[RiskAssessment] = Field(default_factory=list)
 
 
