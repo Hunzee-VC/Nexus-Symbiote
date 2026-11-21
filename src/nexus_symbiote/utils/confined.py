@@ -549,6 +549,7 @@ class ConfinedCollection:
         self._variants_stopped = False
         self._excluded: set[tuple[str, ...]] = set()
         self._invalid_policy = False
+        self._lifted: frozenset[str] = frozenset()
         root_text = str(self.root)
         prefix = root_text.rstrip(os.sep) + os.sep
         for value in exclude_paths:
@@ -702,7 +703,7 @@ class ConfinedCollection:
         # Dependency caches, virtual environments and Git internals are outside
         # the documented static scope. The BOM records these patterns. Any
         # further omission within that scope is a blocking coverage gap.
-        if any(_default_excluded(part) for part in parts):
+        if any(_default_excluded(part) and fold_name(part) not in self._lifted for part in parts):
             return True
         denied = bool(self._excluded) and any(
             parts[:index] in self._excluded for index in range(len(parts) + 1)
@@ -897,6 +898,14 @@ class ConfinedCollection:
             # Do not echo exception payloads: malformed input may contain secrets.
             self._fail(relative, "read refused (symlink, nonregular file or I/O error)")
         return None
+
+    def read_named(self, path: str | Path) -> bytes | None:
+        """``read_bytes`` lifting the default excludes but ``.git``, link targets included."""
+        self._lifted = DEFAULT_EXCLUDES - {".git"}
+        try:
+            return self.read_bytes(path, missing_ok=True)
+        finally:
+            self._lifted = frozenset()
 
     def read_text(
         self, path: str | Path, *, missing_ok: bool = False, variants_read: Collection[str] = ()
