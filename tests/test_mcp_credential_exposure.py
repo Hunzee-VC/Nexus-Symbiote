@@ -759,15 +759,26 @@ def test_the_detail_lists_twelve_positions_and_counts_the_rest(tmp_path):
         "env": {f"API_TOKEN_{index:04d}": f"{SCHEME_SENTINEL}{index:04d}" for index in range(250)},
     }
     assert len(_positions(server)) == MAX_CREDENTIAL_POSITIONS
-    start = time.monotonic()
     result = _scan(tmp_path, {"api": server})
-    assert time.monotonic() - start < 1
     (finding,) = _findings(_servers(result)["api"])
     listed = MAX_CREDENTIAL_POSITIONS - LISTED_CREDENTIAL_POSITIONS
     assert finding.detail.endswith(
         f"env API_TOKEN_0011 (a generic secret-like value); and at least {listed} more positions."
     )
     assert finding.detail.count("(a generic secret-like value)") == LISTED_CREDENTIAL_POSITIONS
+
+    # A wall-clock bound failed under coverage tracing (1.26 s against 1 s on main 30bb9da6).
+    # Past the position cap, scanning more credentials costs about 4x for 4x as many; a
+    # quadratic recount of every position would cost about 16x.
+    def run(scale: int) -> None:
+        count = 200 * scale
+        scaled = {
+            "command": "npx",
+            "args": ["x@1.0.0", *(f"--token={ENV_SENTINEL}{index:04d}" for index in range(count))],
+        }
+        _scan(tmp_path / f"scaled-{scale}", {"api": scaled})
+
+    assert scaling_ratio(run) < 10
     assert len(finding.detail) < 1000
     assert ENV_SENTINEL not in _dump(result) and SCHEME_SENTINEL not in _dump(result)
 
