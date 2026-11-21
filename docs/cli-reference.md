@@ -69,7 +69,7 @@ change them. See [collection limits](collection-limits.md).
 | [`verify-discovery`](#verify-discovery) | offline | Check that a ShadowScan report's bytes match the digest a BOM records; with `--projection` or `--bundle`, also compare the BOM's imported components with the report |
 | [`export-inventory`](#export-inventory) | offline | Write the reviewed repository agent as an approved inventory that ShadowScan's `--inventory` accepts |
 | [`import-sbom`](#import-sbom) | offline | Import a foreign CycloneDX or SPDX SBOM as DECLARED evidence without picking silent winners |
-| [`evidence-profile`](#evidence-profile) | offline | Report concrete evidence attributes per component without a scalar TrustScore |
+| [`evidence-profile`](#evidence-profile) | offline | The v2 profile reports inventory claims and corroborated evidence per component. `policy_loaded` records policy use and `policy_verified` requires successful corroboration with no integrity issues. `digest_recorded` reports inventory fields and `digest_bound` requires local artifact corroboration. `signed_under_policy` requires verified signatures on all weight files. `digest_pinned_under_policy` requires matching operator pins on all weight files. A package with mixed coverage can have `digest_bound: true` and both narrower fields false. `inventory_claims` carries collector and runtime assertions, while `runtime_matched` requires runtime evidence supplied by the library caller. Finding counts include intrinsic model risks.
 | [`init`](#init) | offline | Create a `.nexus-symbiote.yaml` policy file |
 | [`runtime keygen`](#runtime-keygen) | offline | Create an Ed25519 key pair for runtime contracts |
 | [`runtime sign`](#runtime-sign) | offline | Sign a runtime contract |
@@ -1201,7 +1201,7 @@ kept.
 
 ### `trifecta`
 
-Analyze an inventory offline for lethal trifectas, chained toxic flows, and tool shadowing.
+Analyze an inventory offline for lethal trifectas, chained toxic flows, and tool shadowing. Approval declarations in the inventory do not suppress CLI findings. The Python API can explicitly assume those declarations when modeling a proposed design.
 
 ```text
 nexus-symbiote trifecta [OPTIONS] AIBOM_PATH
