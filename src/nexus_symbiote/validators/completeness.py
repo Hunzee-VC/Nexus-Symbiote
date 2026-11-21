@@ -326,6 +326,7 @@ class CompletenessValidator:
         """
         from nexus_symbiote.graph import assemble_repository_agent
         from nexus_symbiote.scanners import ALL_SCANNERS, ModelScanner
+        from nexus_symbiote.text_poisoning import apply_text_poisoning_rules
 
         report = self._validate_claims(bom)
         report.basis = "project-reconciled"
@@ -381,6 +382,14 @@ class CompletenessValidator:
             )
         except (OSError, ValueError, RecursionError):
             incomplete("agent.yaml", "Local agent manifest could not be reconciled.")
+        # scan appends these findings after the manifest, so they are re-derived here too;
+        # otherwise an inventory with them deleted would match a poisoned checkout.
+        text_failures: list[str] = []
+        apply_text_poisoning_rules(
+            expected, root, exclude_paths=exclude_paths, failures=text_failures, surfaces=surfaces
+        )
+        for reason in text_failures:
+            incomplete("text_poisoning", f"Local collection incomplete: {reason}")
         coverage = self._local_coverage(report_digest, surfaces, excluded, status, exclude_paths)
         report.assurance_level = coverage.assurance_level
         report.surfaces_covered = coverage.surfaces_scanned
@@ -1050,13 +1059,31 @@ def discovery_producer_check(
             f"{local.source_report_path}; its producer is unverified."
         )
         return "failed", problems
+    if policy.allow_oms_dsse:
+        problems.append(
+            "ShadowScan report requires a sigstore-message-signature entry, not OpenSSF Model Signing DSSE."
+        )
+        return "failed", problems
     if policy.expected_sha256 is not None and not hmac.compare_digest(
         policy.expected_sha256, recorded
     ):
         problems.append("ShadowScan report differs from the operator's expected_sha256 pin.")
-    verified = verify_sigstore_bundle(
-        policy.artifact_path, policy.bundle_path, policy.expected_identity, policy.expected_issuer
-    )
+    if policy.rekor_root_hash is not None or policy.minimum_rekor_tree_size is not None:
+        verified = verify_sigstore_bundle(
+            policy.artifact_path,
+            policy.bundle_path,
+            policy.expected_identity,
+            policy.expected_issuer,
+            rekor_root_hash=policy.rekor_root_hash,
+            minimum_rekor_tree_size=policy.minimum_rekor_tree_size,
+        )
+    else:
+        verified = verify_sigstore_bundle(
+            policy.artifact_path,
+            policy.bundle_path,
+            policy.expected_identity,
+            policy.expected_issuer,
+        )
     if verified.error == SIGSTORE_MISSING:
         problems.append(SIGSTORE_MISSING)
     elif not (

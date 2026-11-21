@@ -795,3 +795,43 @@ def register_supply_chain_commands(main: click.Group) -> None:
             return
         if not report.complete or (fail_on_advisory and report.advisories):
             raise click.exceptions.Exit(1)
+
+    @main.command()
+    @click.argument("aibom_path", type=click.Path(exists=True, dir_okay=False, path_type=Path))
+    @click.option(
+        "-o",
+        "--output",
+        type=click.Path(path_type=Path),
+        help="Write the trifecta and toxic-flow report JSON to this file instead of stdout.",
+    )
+    @click.option(
+        "--fail-on-critical/--no-fail-on-critical",
+        default=True,
+        show_default=True,
+        help="Exit with status 1 when a critical lethal-trifecta finding is present.",
+    )
+    @click.option(
+        "--fail-on-finding/--no-fail-on-finding",
+        default=False,
+        show_default=True,
+        help="Exit with status 1 when any trifecta, toxic-flow, or tool-shadowing finding is present.",
+    )
+    def trifecta(
+        aibom_path: Path,
+        output: Path | None,
+        fail_on_critical: bool,
+        fail_on_finding: bool,
+    ) -> None:
+        """Analyze an inventory offline for lethal trifectas, toxic flows, and tool shadowing."""
+        from nexus_symbiote.trifecta import analyze_trifecta
+
+        _refuse_source_overwrite(output, aibom_path)
+        bom = _load_inventory(aibom_path)
+        report = analyze_trifecta(bom)
+        text = json.dumps(report.to_dict(), indent=2)
+        if output:
+            write_cli_output(output, text)
+        else:
+            click.echo(json_text(text))
+        if (fail_on_finding and report.findings) or (fail_on_critical and report.has_critical):
+            raise click.exceptions.Exit(1)

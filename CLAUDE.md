@@ -25,10 +25,14 @@ src/nexus_symbiote/
   crosswalk.py, crosswalk_cli.py       — Framework crosswalk that SARIF tags come from; `crosswalk`
   minimum_elements.py, minimum_elements_cli.py — G7 AI SBOM minimum-element coverage; `minimum-elements`
   inventory_export.py, inventory_export_cli.py — ShadowScan simple-list export; `export-inventory`
+  spdx_profiles.py, export_standard_cli.py — SPDX 3.0.1 AI/Dataset profiles, ISO 22989 mapping, `agent.yaml` declarations; `export-standard`
+  control_plane_audit.py, control_plane_cli.py — Hook target/preamble binding, MCP bridges, steering surface, CI/hosted tools, identity blast radius (`audit-control-plane`)
+  sbom_import.py, evidence_profile.py, sbom_cli.py — Foreign SBOM import, nested manifests, per-component evidence profile; `import-sbom`, `evidence-profile`
   advisories.py                        — Explicit, bounded OSV queries for exact package identities
   modes.py                             — Offline by default; live mode is opt-in
   reporting.py                         — Neutralized text and JSON gate reporting
   scanner_catalog.py                   — Built-in collector universe for coverage checks
+  text_poisoning.py                    — Deterministic O(N) text-poisoning and injection rules
   cli.py, live_cli.py, runtime_cli.py, supply_chain_cli.py — Click CLI entrypoints
 ```
 

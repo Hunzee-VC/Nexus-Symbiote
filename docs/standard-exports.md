@@ -14,7 +14,7 @@ One native AgentBOM projects to CycloneDX 1.7, SPDX 3.0.1, SARIF 2.1.0 and a Cyc
 
 ## Projection versions
 
-CycloneDX and SPDX exports embed the native document and declare which projection produced their standard fields in the `nexus-symbiote:projection` property: `cyclonedx-1.7/2` or `spdx-3.0.1/3`. Exports written by 0.1.0 carry no marker and use projection 1. SPDX projection 2 remains recoverable with its original relationship comments; projection 3 neutralizes those comments for display, with a character set the projection fixes, while preserving the original text in the embedded native document. Recovery (`CycloneDXGenerator.recover`, `SPDXGenerator.recover`) checks every standard field against the declared projection of the embedded document and rejects an unknown marker, a document that claims a projection it does not match, and any edit to a standard field. The one omission it accepts is a missing CycloneDX `compositions` array, which readers such as cyclonedx-python-lib drop, when the projection's only composition says `unknown`; a composition that is present must match exactly. [Fingerprint migration](fingerprint-migration.md#standard-projection-versions) lists what changed between the projections.
+CycloneDX and SPDX exports embed the native document and declare which projection produced their standard fields in the `nexus-symbiote:projection` property: `cyclonedx-1.7/2`, `cyclonedx-1.7/3`, `cyclonedx-1.6/3`, `spdx-3.0.1/3` or `spdx-3.0.1/4` (the last three from `export-standard`). Exports written by 0.1.0 carry no marker and use projection 1. SPDX projection 2 remains recoverable with its original relationship comments; projection 3 neutralizes those comments for display, with a character set the projection fixes, while preserving the original text in the embedded native document. Recovery (`CycloneDXGenerator.recover`, `SPDXGenerator.recover`) checks every standard field against the declared projection of the embedded document and rejects an unknown marker, a document that claims a projection it does not match, and any edit to a standard field. The one omission it accepts is a missing CycloneDX `compositions` array, which readers such as cyclonedx-python-lib drop, when the projection's only composition says `unknown`; a composition that is present must match exactly. Projection 3 likewise accepts the loss of every `modelCard`, which that library also drops, but not the loss or edit of only some. [Fingerprint migration](fingerprint-migration.md#standard-projection-versions) lists what changed between the projections.
 
 ## CycloneDX 1.7
 
@@ -106,6 +106,7 @@ Messages and recommendations are one line of plain text: control, bidirectional 
 | `capability_scope` | Destructive tool capability | none | LLM06:2025 | LLM03:2026 | ASI02 | AML.T0053 | MEASURE-2.7 |
 | `code_execution` | Remote code execution enabled | CWE-494, CWE-829 | LLM03:2025 | LLM04:2026 | ASI04, ASI05 | AML.T0011.000 | MANAGE-3.2 |
 | `completeness` | Incomplete declaration | none | none | none | none | none | GOVERN-1.6 |
+| `credential_exposure` | Literal credential in an MCP launch | CWE-798 | LLM02:2025 | LLM02:2026 | ASI03 | none | MEASURE-2.7 |
 | `credential_helper` | Credential helper command | none | none | none | ASI03, ASI05 | AML.T0142 | MEASURE-2.7 |
 | `custom_code` | Custom model code | CWE-829 | LLM03:2025 | LLM04:2026 | ASI04, ASI05 | AML.T0011.000 | MANAGE-3.2 |
 | `data_integrity` | Retrieval source integrity | CWE-319 (critical and high findings) | LLM04:2025, LLM08:2025 | LLM05:2026, LLM09:2026 | ASI06 | AML.T0070 | MEASURE-2.7 |
@@ -115,6 +116,7 @@ Messages and recommendations are one line of plain text: control, bidirectional 
 | `hidden_markup` | Comments in instructions | none | LLM01:2025 | LLM01:2026 | ASI01 | AML.T0068 | MEASURE-2.7 |
 | `hook_commands` | Hook commands | none | none | none | ASI05 | AML.T0142 | MEASURE-2.7 |
 | `identifier_characters` | Control, format or mixed-script characters in an identifier | CWE-451, CWE-1427 | LLM01:2025 | LLM01:2026 | ASI01 | AML.T0010.005, AML.T0068, AML.T0074 | MEASURE-2.7 |
+| `instruction_injection` | Injected instructions or deception in prompt files | CWE-1427 | LLM01:2025 | LLM01:2026 | ASI01 | AML.T0068 | MEASURE-2.7 |
 | `instruction_layering` | Layered instruction files | none | LLM01:2025 | LLM01:2026 | ASI01 | none | MEASURE-2.7 |
 | `invalid_safetensors` | Unverified SafeTensors structure | none | LLM03:2025 | LLM04:2026 | ASI04 | AML.T0011.000 | MANAGE-3.2 |
 | `invisible_characters` | Invisible characters in instructions | CWE-451, CWE-1427 | LLM01:2025 | LLM01:2026 | ASI01 | AML.T0068 | MEASURE-2.7 |
@@ -128,6 +130,7 @@ Messages and recommendations are one line of plain text: control, bidirectional 
 | `missing_lockfile_integrity` | Lockfile record without integrity | CWE-494 | LLM03:2025 | LLM04:2026 | ASI04 | AML.T0010.001 | MANAGE-3.1 |
 | `mutable_image_tag` | Mutable image tag | CWE-829 | LLM03:2025 | LLM04:2026 | ASI04 | AML.T0010.004 | MANAGE-3.1 |
 | `nonregistry_source` | Package from outside a registry | CWE-829 (high findings) | LLM03:2025 (high findings) | LLM04:2026 (high findings) | ASI04 (high findings) | AML.T0010.001 (high findings) | MANAGE-3.1 (high findings) |
+| `oversight_gap` | Destructive tool auto-approved | CWE-250 | LLM06:2025 | LLM03:2026 | ASI02 | none | none |
 | `package_alias` | Package alias | none | LLM03:2025 | LLM04:2026 | ASI04 | AML.T0074 | MANAGE-3.1 |
 | `package_source` | Non-default MCP package source | none | LLM03:2025 | LLM04:2026 | ASI04 | AML.T0010.005 | MANAGE-3.1 |
 | `permission_scope` | Unscoped agent permissions | CWE-250 | LLM06:2025 | LLM03:2026 | ASI02, ASI03 | AML.T0053, AML.T0105 (high findings) | MEASURE-2.7 |
@@ -142,7 +145,9 @@ Messages and recommendations are one line of plain text: control, bidirectional 
 | `shadowscan-heuristic` | Imported discovery risk | none | none | none | none | none | none |
 | `shadowscan-inventory-unmatched` | Imported unmatched discovery | none | none | none | none | none | GOVERN-1.6 |
 | `signing_status` | Unsigned model artifact | CWE-345 | LLM03:2025 | LLM04:2026 | ASI04 | AML.T0010.003 | MANAGE-3.2 |
+| `subagent_inline_mcp_server` | Subagent inline MCP server | none | LLM03:2025 | none | ASI04 | none | MANAGE-3.1 |
 | `tag_characters` | Unicode tag characters in instructions | CWE-451, CWE-1427 | LLM01:2025 | LLM01:2026 | ASI01 | AML.T0068 | MEASURE-2.7 |
+| `tool_description_poisoning` | Poisoned instructions in tool description or schema | CWE-1427 | LLM01:2025 | LLM01:2026 | ASI01, ASI02 | AML.T0010.005, AML.T0068 | MEASURE-2.7 |
 | `transitive_resolution` | Dependencies resolved at launch | CWE-829 | LLM03:2025 | LLM04:2026 | ASI04 | AML.T0109 | MANAGE-3.1 |
 | `transport_ambiguity` | Ambiguous MCP transport | none | none | none | none | none | MEASURE-2.7 |
 | `transport_security` | Transport security | CWE-319 (critical and high findings) | none | none | ASI07 | none | MEASURE-2.7 |
@@ -150,7 +155,7 @@ Messages and recommendations are one line of plain text: control, bidirectional 
 
 Every rule is tagged `security`, then with each entry in its row, in lower case as GitHub normalizes tags: `external/cwe/cwe-NNN`, `external/owasp-llm-top-10-2025/llmNN`, `external/owasp-agentic-top-10/asiNN`, `external/owasp-llm-top-10-2026/llmNN`, `external/mitre-atlas/` with the technique, such as `aml.t0010.005`, and `external/nist-ai-rmf/` with the subcategory, such as `measure-2.7`. Every tag that a rule carried before the 2026, ATLAS and NIST tags were added is still there, in the same order, so a filter on it still matches. The categories that had no catalog entry had generic rules tagged only `security`; most of their rules now carry CWE, OWASP 2025 or Agentic tags as well, so a filter on such a tag also matches their findings. A few earlier tags do not hold for every finding of their rule and were kept so that the rules keep their tags; the framework crosswalk's [limits](framework-crosswalk.md#limits) list them. Every category in the [finding catalog](finding-catalog.md#sarif-rules) has a rule, and so has `runtime_undeclared`, which only `trace-diff --sarif` writes, in SARIF of its own whose results are anchored to the inventory's path relative to the working directory, or to `.nexus-symbiote.yaml` when the inventory lies outside it ([trace evidence](trace-evidence.md#sarif)); a category outside the catalog, such as one that an edited inventory records, gets a generic rule titled after the category and tagged only `security`. The [framework crosswalk](framework-crosswalk.md) gives the rationale for each reference, the editions and their sources, and the EU AI Act and ISO/IEC 42001 references, which are not tags. A reference says what a finding records evidence of; a finding is a declaration in the repository, or for `runtime_undeclared` a use that the agent's own telemetry reports, not a confirmed vulnerability.
 
-The exporter checks its output with a structural SARIF validator (required properties, levels, rule cross-references, relative locations and fingerprints). The OASIS SARIF JSON schema is not vendored, so output is not validated against it.
+The exporter validates its output offline against the vendored official OASIS SARIF 2.1.0 JSON schema (`sarif/sarif-schema-2.1.0.json`, checked against its recorded SHA-256 digest in `SOURCES.json`) and a GitHub code scanning structural profile validator (required properties, levels, rule cross-references, relative locations and fingerprints).
 
 ## VEX
 

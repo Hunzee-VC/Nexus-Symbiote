@@ -95,6 +95,7 @@ Every gate prints each of its failure reasons. How many findings the console lis
 | `validate` | Supported | offline | Completeness, integrity, graph and optional `--project` reconciliation gate |
 | `risk` | Supported | offline | Deterministic risk scoring, policy evaluation and suppression gate |
 | `diff` | Supported | offline | Semantic drift comparison and security-alert gate |
+| `diff-instructions` | Experimental | offline | Instruction-file scope, tool-grant and hidden-content changes between two trees |
 | `summary` | Supported | offline | Component, dependency and severity summary |
 | `digest` | Supported | offline | File SHA-256, RFC 8785 canonical digest and run-independent content digest |
 | `baseline` | Supported | offline | Writes unsigned snapshot only when the built-in scan gate passes |
@@ -117,6 +118,11 @@ Every gate prints each of its failure reasons. How many findings the console lis
 | `runtime digest` | Supported | offline | Prints canonical digest of runtime contract, approval or revocation document |
 | `runtime key-id` | Supported | offline | Prints canonical Ed25519 public key identifier |
 | `runtime register` | Experimental | offline | Registers newly issued runtime snapshot in local gateway state store |
+| `export-standard` | Experimental | offline | CycloneDX 1.6/1.7 or SPDX 3.0.1 export with typed AI and Dataset projections |
+| `audit-control-plane` | Experimental | offline | Hook targets, skill preambles, MCP bridges, steering surfaces, CI agents and identities |
+| `trifecta` | Experimental | offline | Lethal trifectas, chained toxic flows and tool shadowing in an inventory |
+| `import-sbom` | Experimental | offline | Foreign CycloneDX or SPDX SBOM imported as declared evidence |
+| `evidence-profile` | Experimental | offline | Evidence attributes per component, without a scalar trust score |
 | `discover-mcp` | Experimental | **live** | Opt-in HTTPS MCP tool listing without calling tools |
 | `advisories` | Experimental | **live** | Opt-in OSV lookup for exact PyPI and npm package versions |
 | `verify-live` | Experimental | **live** | Opt-in namespace-isolated stdio MCP verification against operator launch policy |
