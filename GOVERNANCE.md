@@ -95,6 +95,7 @@ Every gate prints each of its failure reasons. How many findings the console lis
 | `validate` | Supported | offline | Completeness, integrity, graph and optional `--project` reconciliation gate |
 | `risk` | Supported | offline | Deterministic risk scoring, policy evaluation and suppression gate |
 | `diff` | Supported | offline | Semantic drift comparison and security-alert gate |
+| `diff-instructions` | Experimental | offline | Instruction-file scope, tool-grant and hidden-content changes between two trees |
 | `summary` | Supported | offline | Component, dependency and severity summary |
 | `digest` | Supported | offline | File SHA-256, RFC 8785 canonical digest and run-independent content digest |
 | `baseline` | Supported | offline | Writes unsigned snapshot only when the built-in scan gate passes |
